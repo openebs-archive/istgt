@@ -1,0 +1,28 @@
+
+1) run configure script
+
+# ./configure
+
+2) build & install binary and sample configuration files
+
+# make
+# make install
+# make install-doc
+
+3) create your configuration files and edit it
+for more detail, see /usr/local/share/doc/istgt/QUICKSTART
+
+# cd /usr/local/etc/istgt
+# cp auth.conf.sample auth.conf
+# cp istgt.conf.sample istgt.conf
+# cp istgtcontrol.conf.sample istgtcontrol.conf
+# EDIT files
+
+4) start daemon
+
+# /usr/local/etc/rc.d/istgt forcestart
+
+5) edit /etc/rc.conf to run it at startup
+
+istgt_enable="YES"
+

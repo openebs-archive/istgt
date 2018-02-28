@@ -1,0 +1,59 @@
+.TH istgt 1 "Mar 12, 2009" "istgt"
+.SH NAME
+istgt \- iSCSI target
+.SH SYNOPSIS
+.B istgt
+[options]
+.SH DESCRIPTION
+.B istgt
+is an iSCSI target for FreeBSD 7.1 or later.
+It is designed for multipath failover cluster nodes.
+Also useful for virtual machine such as Hyper-V, ESXi.
+.SH OPTIONS
+.TP
+.BI \-c " config"
+Use specified file as configuration file.
+Multiple instance of istgt is allowed for different IP/ports.
+.TP
+.BI \-p " pidfile"
+Use specified file for writing PID of daemon.
+Also it can be specified in configuration file.
+This option overwrites by setting of configuration file.
+.TP
+.BI \-l " facility"
+Use specific syslog facility.
+.TP
+.BI \-m " mode"
+Use specified operational mode. 0 = traditional (similar to 20100707),
+1 = normal (default), 2 = experimental (new feature mode).
+.TP
+.BI \-t " flag"
+Print trace information to standard error.
+trace flag (all, net, iscsi, scsi, lu, none)
+.TP
+.BI \-q
+Use quiet mode. The warning message is omitted.
+.TP
+.BI \-D
+The istgt will not detach from tty and run as foreground.
+It requires to print tarce information.
+.TP
+.BI \-H
+Show usage
+.TP
+.BI \-V
+Show version
+.SH FILES
+.PD 0
+.TP
+.I %%CONFIGDIR%%/istgt.conf
+Configuration file
+.TP
+.I %%CONFIGDIR%%/auth.conf
+Authentication information file
+.TP
+.I /var/run/istgt.pid
+PID of daemon
+.PD
+.SH AUTHORS
+Daisuke Aoyama <aoyama@peach.ne.jp>

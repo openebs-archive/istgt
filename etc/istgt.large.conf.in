@@ -1,0 +1,310 @@
+# istgt configuration file
+#
+# Please do not write parameters excluding ASCII.
+# The parameter must be quoted if space or separator include.
+#
+# configuration syntax:
+# spaces at head of line are deleted, other spaces are as separator
+# starting with '#' is comment line, not evaluate
+# ending with '\' is concatenating next line
+# bracket key is section key grouping following keys
+# group number of section key is used as tag number
+# (group number might not be continuous value)
+# 1st string is key may appear multiple times
+# 2nd and more are value associated the key
+# Comment key is placed for human readable like user interface
+#
+[Global]
+  Comment "Global section"
+  # node name (not include optional part)
+  NodeBase "iqn.2007-09.jp.ne.peach.istgt"
+
+  # files
+  PidFile /var/run/istgt.pid
+  AuthFile %%CONFIGDIR%%/auth.conf
+
+  # directories
+  # for removable media (virtual DVD/virtual Tape)
+  #MediaDirectory /mnt
+  MediaDirectory %%MEDIADIR%%
+  #MediaDirectory /tank/iscsi
+
+  # syslog facility
+  LogFacility "local7"
+
+  # socket I/O timeout sec. (polling is infinity)
+  Timeout 30
+  # NOPIN sending interval sec.
+  NopInInterval 20
+
+  # authentication information for discovery session
+  DiscoveryAuthMethod Auto
+  #DiscoveryAuthMethod CHAP
+  #DiscoveryAuthGroup AuthGroup9999
+
+  # reserved maximum connections and sessions
+  # NOTE: iSCSI boot is 2 or more sessions required
+  MaxSessions 16
+  MaxConnections 4
+
+  # maximum number of sending R2T in each connection
+  # actual number is limited to QueueDepth and MaxCmdSN and ExpCmdSN
+  # 0=disabled, 1-256=improves large writing
+  MaxR2T 32
+
+  # iSCSI initial parameters negotiate with initiators
+  # NOTE: incorrect values might crash
+  MaxOutstandingR2T 16
+  DefaultTime2Wait 2
+  DefaultTime2Retain 60
+  FirstBurstLength 262144
+  MaxBurstLength 1048576
+  MaxRecvDataSegmentLength 262144
+
+  # NOTE: not supported
+  InitialR2T Yes
+  ImmediateData Yes
+  DataPDUInOrder Yes
+  DataSequenceInOrder Yes
+  ErrorRecoveryLevel 0
+
+[UnitControl]
+  Comment "Internal Logical Unit Controller"
+  #AuthMethod Auto
+  AuthMethod CHAP Mutual
+  AuthGroup AuthGroup10000
+  # this portal is only used as controller (by istgtcontrol)
+  # if it's not necessary, no portal is valid
+  #Portal UC1 [::1]:3261
+  Portal UC1 127.0.0.1:3261
+  #Portal UC1 192.168.2.36:3261
+  # accept IP netmask
+  #Netmask [::1]
+  Netmask 127.0.0.1
+  #Netmask 192.168.2.0/24
+  #Netmask 192.168.2.36/32
+
+# You should set IPs in /etc/rc.conf for physical I/F
+[PortalGroup1]
+  Comment "DUAL CONTROLLER TEST"
+  # Portal Label(not used) IP(IPv6 or IPv4):Port
+  Portal DA1 192.168.3.36:3260
+  Portal DA2 192.168.4.36:3260
+  Portal DB1 192.168.3.37:3260
+  Portal DB2 192.168.4.37:3260
+
+[PortalGroup2]
+  Comment "IPv6 TEST"
+  Portal DA1 [2001:03e0:06cf:0003:021b:21ff:fe04:f405]:3260
+  Portal DA2 [2001:03e0:06cf:0004:021f:d0ff:fe16:38bd]:3260
+  #Portal DA3 [2001:380:e00:5:203:47ff:fe72:34f2]:3260
+
+[PortalGroup3]
+  Comment "SINGLE PORT TEST"
+  Portal DA1 192.168.2.36:3260
+
+[PortalGroup10]
+  Comment "SINGLE PORT TEST"
+  Portal DA1 192.168.2.37:3260
+
+# wildcard address you may need if use DHCP
+# DO NOT USE WITH OTHER PORTALS
+#[PortalGroup4]
+#  Comment "ANY IP"
+#  #Portal DA1 [::]:3260
+#  Portal DA1 0.0.0.0:3260
+
+[InitiatorGroup1]
+  # initiator group1
+  Comment "Initiator Group1"
+  InitiatorName "iqn.1991-05.com.microsoft:ceres"
+  InitiatorName "iqn.1991-05.com.microsoft:saturn"
+  Netmask 192.168.3.0/24
+  Netmask 192.168.4.0/24
+
+[InitiatorGroup2]
+  # initiator group2
+  Comment "Initiator Group2"
+  InitiatorName "iqn.1991-05.com.microsoft:athena"
+  InitiatorName "iqn.1991-05.com.microsoft:venus"
+  InitiatorName "iqn.1991-05.com.microsoft:saturn"
+  Netmask [2001:3e0:6cf:2::]/64
+  Netmask [2001:380:e00:5::]/64
+
+[InitiatorGroup3]
+  InitiatorName "iqn.1991-05.com.microsoft:saturn"
+  Netmask 192.168.2.0/24
+
+[InitiatorGroup4]
+  Comment "ALL initiators from 192.168.2.0/24"
+  # name with ! deny login/discovery
+  #InitiatorName "!iqn.1991-05.com.microsoft:moon"
+  # spetified name allow login/discovery
+  #InitiatorName "iqn.1991-05.com.microsoft:saturn"
+  # special word "ALL" match all of initiators
+  InitiatorName ALL
+  Netmask 192.168.2.0/24
+
+[InitiatorGroup5]
+  Comment "Initiator Group5"
+  InitiatorName "iqn.2007-09.jp.ne.peach:pluto"
+  Netmask 192.168.2.0/24
+  Netmask 192.168.3.0/24
+  Netmask 192.168.4.0/24
+  Netmask [2001:3e0:6cf:2::]/64
+  Netmask [2001:380:e00:5::]/64
+
+[InitiatorGroup6]
+  InitiatorName "iqn.2008-04.com.sun.virtualbox.initiator"
+  Netmask 192.168.2.0/24
+
+[InitiatorGroup256]
+  Comment "ALL initiators from ALL IP"
+  InitiatorName ALL
+  Netmask ALL
+
+# TargetName, Mapping, UnitType, LUN0 are minimum required
+[LogicalUnit1]
+  Comment "Hard Disk Sample"
+  # full specified iqn (same as below)
+  #TargetName iqn.2007-09.jp.ne.peach.istgt:disk1
+  # short specified non iqn (will add NodeBase)
+  TargetName disk1
+  TargetAlias "Data Disk1"
+  # use both portal group tag1 and tag3 for initiator tag1
+  Mapping PortalGroup3 InitiatorGroup1
+  Mapping PortalGroup1 InitiatorGroup1
+  #Mapping PortalGroup2 InitiatorGroup2
+  #AuthMethod CHAP Mutual
+  AuthMethod CHAP
+  #AuthMethod Auto
+  AuthGroup AuthGroup1
+  # force use digest Header/Data/Auto
+  UseDigest Header Data
+  #UseDigest Header
+  #UseDigest Data
+  #UseDigest Auto
+  ReadOnly No
+  UnitType Disk
+  UnitOnline Yes
+  # SCSI INQUIRY - Vendor(8) Product(16) Revision(4) Serial(16)
+  #UnitInquiry "FreeBSD" "iSCSI Disk" "0123" "10000001"
+  # one of 512,1024,2048,4096 (default 512 is strongly recommended)
+  #BlockLength 512
+  # Queuing 0=disabled, 1-255=enabled with specified depth.
+  #QueueDepth 32
+
+  # override global setting if need
+  #MaxOutstandingR2T 16
+  #DefaultTime2Wait 2
+  #DefaultTime2Retain 60
+  #FirstBurstLength 262144
+  #MaxBurstLength 1048576
+  #MaxRecvDataSegmentLength 262144
+  #InitialR2T Yes
+  #ImmediateData Yes
+  #DataPDUInOrder Yes
+  #DataSequenceInOrder Yes
+  #ErrorRecoveryLevel 0
+
+  # LogicalVolume for this unit on LUN0
+  # for file extent
+  LUN0 Storage /tank/iscsi/istgt-disk1 10GB
+  # for raw device extent
+  #LUN0 Storage /dev/ad4 Auto
+  # for ZFS volume extent
+  #LUN0 Storage /dev/zvol/tank/istgt-vol1 Auto
+  # override the serial of LUN0 specified with UnitInquiry
+  #LUN0 Option Serial "10000001"
+
+  # for 3.5inch, 7200rpm HDD
+  # RPM 0=not reported, 1=non-rotating(SSD), n>1024 rpm
+  LUN0 Option RPM 7200
+  # FormFactor 0=not reported, 1=5.25, 2=3.5, 3=2.5, 4=1.8, 5=less 1.8 inch
+  LUN0 Option FormFactor 2
+
+  # for 2.5inch, SSD
+  #LUN0 Option RPM 1
+  #LUN0 Option FormFactor 3
+
+  # for future use (enabled by default)
+  #LUN0 Option ReadCache Disable
+  #LUN0 Option WriteCache Disable
+
+  #LUN1 Storage /tank/iscsi/istgt-disk1.1 10GB
+  #LUN1 Option Serial "10000001L1"
+  LUN2 Storage /tank/iscsi/istgt-disk1.2 10GB
+  #LUN2 Option Serial "10000001L2"
+
+[LogicalUnit2]
+  Comment "Hard Disk Sample"
+  #TargetName disk2
+  TargetName iqn.1994-04.org.netbsd.iscsi-target:target11
+  TargetAlias "iSCSI Boot Disk"
+  # use portal group tag1/2/3 for initiator tag5
+  Mapping PortalGroup1 InitiatorGroup5
+  Mapping PortalGroup2 InitiatorGroup5
+  Mapping PortalGroup3 InitiatorGroup5
+  AuthMethod Auto
+  AuthGroup None
+  #AuthMethod CHAP Mutual
+  #UseDigest Header Data
+  UseDigest Auto
+  ReadOnly No
+  UnitType Disk
+  UnitOnline Yes
+  # you can specify one of '+' or '-' value
+  LUN0 Storage /tank/iscsi/istgt-disk2 20GB-1MB
+  # 2PB-1MB is maximum for current windows GUI manager
+  #LUN1 Storage /tank/iscsi/istgt-disk2.1 2PB-1MB
+  # probably 8EB is seek limit on FreeBSD
+  #LUN2 Storage /tank/iscsi/istgt-disk2.2 8EB-1
+
+[LogicalUnit3]
+  Comment "DVD ROM sample"
+  TargetName dvd1
+  #TargetName iqn.1994-04.org.netbsd.iscsi-target:target44
+  TargetAlias "DVD ROM Drive1"
+  Mapping PortalGroup3 InitiatorGroup4
+  AuthMethod Auto
+  UseDigest Auto
+  ReadOnly Yes
+  UnitType DVD
+  UnitOnline Yes
+  #UnitInquiry "NetBSD" "iSCSI DVDROM" "0"
+  #UnitInquiry "FreeBSD" "iSCSI DVDROM" "0001" "10000003"
+  # auto size is depend on actual file size
+  LUN0 Removable ro /tank/iscsi/dvds/dvd1.iso auto
+
+[LogicalUnit4]
+  Comment "DLT sample"
+  TargetName tape1
+  TargetAlias "Tape Drive1"
+  Mapping PortalGroup3 InitiatorGroup4
+  AuthMethod Auto
+  UseDigest Auto
+  ReadOnly No
+  UnitType Tape
+  UnitOnline Yes
+  #UnitInquiry "QUANTUM" "DLT8000" "C001" "CX10000001"
+  LUN0 Removable "rw" /tank/iscsi/tapes/tape1.vt 1GB
+  # extend file size if EOM reached
+  #LUN1 Removable "rw,extend" /tank/iscsi/tapes/tape1.vt 1GB
+  # file size grow and shrink automatically by EOF (ignore specified size)
+  #LUN2 Removable "rw,dynamic" /tank/iscsi/tapes/tape1.vt auto
+
+[LogicalUnit10]
+  Comment "Hard Disk Sample"
+  TargetName disk3
+  Mapping PortalGroup3 InitiatorGroup6
+  UnitType Disk
+  # currently zvol is slow due to ZIL commit
+  LUN0 Storage /dev/zvol/tank/istgt-vol1 20GB
+
+[LogicalUnit11]
+  Comment "Hard Disk Sample"
+  TargetName disk4
+  Mapping PortalGroup10 InitiatorGroup5
+  UnitType Disk
+  LUN0 Storage /tank/iscsi/istgt-disk4 16GB
+

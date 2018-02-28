@@ -1,0 +1,61 @@
+istgt.confの設定とistgtデーモンの起動
+
+Portsからでもtarballからでもインストールを実行すると、
+デフォルトで/usr/local/etc/istgtの中にサンプル定義ファイルが
+作成されますのでこれをコピーして起動用の設定を作成します。
+
+# cd /usr/local/etc/istgt
+# cp auth.conf.sample auth.conf
+# cp istgt.conf.sample istgt.conf
+# cp istgtcontrol.conf.sample istgtcontrol.conf
+
+最低修正が必要な場所は以下の3箇所です。
+[PortalGroup1] のサーバIPアドレス
+[InitiatorGroup1] のイニシエータ名とネットマスク
+[LogicalUnit1] のLUN0に割り当てる領域とサイズ
+
+[PortalGroup1]
+  Portal DA1 192.168.2.36:3260
+↑192.168.2.36を利用するサーバのIPアドレスに変更します。
+3260は標準のiSCSIポート番号なので通常は変更する必要はありません。
+
+[InitiatorGroup1]
+  InitiatorName "iqn.1991-05.com.microsoft:saturn"
+  Netmask 192.168.2.0/24
+↑接続を許可するイニシエータ名とIPアドレスまたはCIDR表記に変更します。
+任意の名前やIPを許可するには特殊ワード ALL を指定します。
+
+[LogicalUnit1]
+  LUN0 Storage /tank/iscsi/istgt-disk1 10GB
+↑サンプルではファイル形式(/tank/iscsi/istgt-disk1)で
+10GBを割り当てるようになっています。
+環境に合わせてパスを変更し、ディスクの容量を指定します。
+単位はMBやTBで指定することも可能です。
+デバイスファイル(/dev/ad1, /dev/zvol/tank/volなど)を指定する場合は
+サイズにAutoを指定できます。
+
+設定できたら起動スクリプトを使ってデーモンを起動します。
+
+# /usr/local/etc/rc.d/istgt forcestart
+
+初期化ルーチンのエラーは標準エラー出力に出されますが、
+それ以降のエラーはsyslogに書き込むので/var/log/messagesも確認します。
+
+正しく動くようになったら /etc/rc.conf に
+istgt_enable="YES"
+を加えてサーバ起動時にデーモンも自動起動するように設定します。
+
+
+LUNに対するアクセス制限は以下のように適用されます。
+
+IG(イニシエータグループ)で指定したイニシエータが
+ネットマスクで許可されたIPアドレスから、
+PG(ポータルグループ)で指定したネットワークポータル(IP/ポート番号)を通して、
+LU(iSCSI LUN)にアクセスした場合に許可されます。
+
+イニシエータ名とIPアドレスの両方もしくはいずれかの設定により
+許可するべき範囲を設定できるようになっています。
+現時点では最低1個のアクセス許可を設定しないと起動しません。
+
+※LUというのは元々LUN0しか想定していない時代の名残で、
+本来ならLUではなくLUGになるべきかもしれません。

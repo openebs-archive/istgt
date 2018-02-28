@@ -1,0 +1,51 @@
+Quick Start
+-----------
+
+Copy sample configuration files after installation.
+
+# cd /usr/local/etc/istgt
+# cp auth.conf.sample auth.conf
+# cp istgt.conf.sample istgt.conf
+# cp istgtcontrol.conf.sample istgtcontrol.conf
+
+Edit istgt.conf.
+3 sections below at least need modification against your own copy of
+istgt.conf.sample.
+
+[PortalGroup1] IP address
+[InitiatorGroup1] Initiator name and netmask
+[LogicalUnit1] LUN0 allocated file name and size
+
+[PortalGroup1]
+  Portal DA1 192.168.2.36:3260
+
+Replace 192.168.2.36 with your server IP.
+Because 3260 is standard iSCSI port, 3260 does not need modification.
+
+[InitiatorGroup1]
+  InitiatorName "iqn.1991-05.com.microsoft:saturn"
+  Netmask 192.168.2.0/24
+
+Replace "iqn.1991-05.com.microsoft:saturn" with your allowed initiator
+name and 192.168.2.0/24 with your allowed IP or CIDR.
+If you need any initiator names or IPs, use special word ALL instead.
+
+[LogicalUnit1]
+  LUN0 Storage /tank/iscsi/istgt-disk1 10GB
+
+Replace /tank/iscsi/istgt-disk1 with your correct path and 10GB with
+the size you want.
+You can specify the size also with MB or TB.
+When the device file (/dev/ad1, /dev/zvol/tank/vol, etc.) is specified,
+Auto can be specified for the size.
+
+After finishing to edit istgt.conf, start daemon by the script.
+
+# /usr/local/etc/rc.d/istgt forcestart
+
+Check messages on terminal and syslog (usually /var/log/messages).
+An error message may only appear at syslog.
+
+Add istgt_enable="YES" to /etc/rc.conf.
+
+You have done.

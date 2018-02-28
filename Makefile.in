@@ -1,0 +1,95 @@
+# top Makefile
+
+top_srcdir = @top_srcdir@
+srcdir   = @srcdir@
+
+prefix   = @prefix@
+exec_prefix = @exec_prefix@
+bindir   = @bindir@
+sbindir  = @sbindir@
+sysconfdir = @sysconfdir@
+datarootdir = @datarootdir@
+datadir  = @datadir@
+libexecdir = @libexecdir@
+mandir   = @mandir@
+
+PACKAGE_NAME = @PACKAGE_NAME@
+PACKAGE_STRING = @PACKAGE_STRING@
+PACKAGE_TARNAME = @PACKAGE_TARNAME@
+PACKAGE_VERSION = @PACKAGE_VERSION@
+
+document = COPYRIGHT README INSTALL ChangeLog.jp
+
+VER_H = src/istgt_ver.h
+DISTBASE = istgt
+DISTVER  = `sed -e '/ISTGT_VERSION/!d' -e 's/[^0-9.]*\([0-9.a-z]*\).*/\1/' $(VER_H)`
+DISTEXTVER = `sed -e '/ISTGT_EXTRA_VERSION/!d' -e 's/[^0-9.]*\([0-9.a-z]*\).*/\1/' $(VER_H)`
+#DISTDIR  = $(PACKAGE_NAME)-$(PACKAGE_VERSION)
+#DISTDIR  = $(DISTBASE)-$(DISTVER)-$(DISTEXTVER)
+DISTDIR  = $(DISTBASE)-$(DISTEXTVER)
+DISTNAME = $(DISTDIR).tar.gz
+DISTFILES = Makefile.in configure.in config.guess config.sub install-sh configure \
+	$(header) $(source) $(ctl_header) $(ctl_source) \
+	$(document) $(sample)
+
+SUBDIRS = src etc doc
+
+#########################################################################
+
+.PHONY: all install install-doc
+all:
+	for subdir in $(SUBDIRS); do \
+          (cd $$subdir; $(MAKE) $@) || exit $$?; \
+	done
+
+install:
+	for subdir in $(SUBDIRS); do \
+          (cd $$subdir; $(MAKE) $@) || exit $$?; \
+	done
+
+install-doc:
+	for subdir in doc; do \
+          (cd $$subdir; $(MAKE) $@) || exit $$?; \
+	done
+
+
+.PHONY: dist clean distclean local-clean local-distclean depend
+dist: distdir
+	rm -rf $(DISTDIR) $(DISTNAME)
+	mkdir $(DISTDIR)
+	for file in $(DISTFILES); do \
+	  cp -p $(srcdir)/$$file $(DISTDIR); \
+	done
+	for subdir in $(SUBDIRS); do \
+          (cd $$subdir; $(MAKE) subdir=$$subdir $@) || exit $$?; \
+	done
+	tar cf - $(DISTDIR) | gzip -9c > $(DISTNAME)
+	rm -rf $(DISTDIR) distdir
+
+distdir:
+	echo $(DISTDIR) >$@
+
+clean: local-clean
+	for subdir in $(SUBDIRS); do \
+          (cd $$subdir; $(MAKE) $@) || exit $$?; \
+	done
+
+distclean: clean local-distclean
+	for subdir in $(SUBDIRS); do \
+          (cd $$subdir; $(MAKE) $@) || exit $$?; \
+	done
+
+local-clean:
+	-rm -f a.out *.o *.core
+	-rm -f *~
+
+local-distclean: local-clean
+	-rm -f Makefile config.status config.cache config.log config.h
+	-rm -f $(DISTNAME) distdir
+
+depend:
+	for subdir in $(SUBDIRS); do \
+          (cd $$subdir; $(MAKE) $@) || exit $$?; \
+	done
+
+#########################################################################

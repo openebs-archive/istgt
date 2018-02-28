@@ -1,0 +1,78 @@
+# for doc
+
+top_srcdir = @top_srcdir@
+srcdir   = @srcdir@
+
+prefix   = @prefix@
+exec_prefix = @exec_prefix@
+bindir   = @bindir@
+sbindir  = @sbindir@
+sysconfdir = @sysconfdir@
+datarootdir = @datarootdir@
+datadir  = @datadir@
+libexecdir = @libexecdir@
+mandir   = @mandir@
+
+configdir = @configdir@
+mediadir = @mediadir@
+
+SED      = @SED@
+INSTALL  = @INSTALL@
+MKDIR_P  = @MKDIR_P@
+
+source   = 
+header   = 
+document = QUICKSTART QUICKSTART.jp istgt.1.in
+sample   = 
+
+DISTDIR = $(top_srcdir)/`cat $(top_srcdir)/distdir`
+DISTFILES = Makefile.in \
+	$(header) $(source) \
+	$(document) $(sample)
+
+#########################################################################
+
+.PHONY: all install install-doc install-dirs install-doc-dirs
+all: istgt.1
+
+istgt.1:
+	$(SED) -e 's:%%PREFIX%%:$(prefix):g' \
+		-e 's:%%CONFIGDIR%%:$(configdir):g' \
+		-e 's:%%MEDIADIR%%:$(mediadir):g' < istgt.1.in > $@
+
+dist: $(DISTFILES)
+	$(MKDIR_P) $(DISTDIR)/$(subdir)
+	cd $(srcdir); thisdir=`pwd`; \
+	for file in $(DISTFILES); do \
+	    cp -p $$thisdir/$$file $(DISTDIR)/$(subdir); \
+	done
+
+install: install-dirs
+	$(INSTALL) -m 0644 istgt.1 $(DESTDIR)$(mandir)/man1/
+	-rm -f $(DESTDIR)$(mandir)/man1/istgt.1.gz
+	gzip -9 $(DESTDIR)$(mandir)/man1/istgt.1
+
+install-doc: install-doc-dirs
+	$(INSTALL) -m 0644 $(top_srcdir)/README $(DESTDIR)$(datadir)/doc/istgt/
+	$(INSTALL) -m 0644 $(top_srcdir)/ChangeLog.jp $(DESTDIR)$(datadir)/doc/istgt/
+	$(INSTALL) -m 0644 QUICKSTART $(DESTDIR)$(datadir)/doc/istgt/
+	$(INSTALL) -m 0644 QUICKSTART.jp $(DESTDIR)$(datadir)/doc/istgt/
+
+install-dirs:
+	$(MKDIR_P) $(DESTDIR)$(mandir)/man1
+
+install-doc-dirs:
+	$(MKDIR_P) $(DESTDIR)$(datadir)/doc/istgt
+
+.PHONY: clean distclean depend
+clean:
+	-rm -f istgt.1
+	-rm -f a.out *.o *.core
+	-rm -f *~
+
+distclean: clean
+	-rm -f Makefile config.status config.cache config.log config.h
+
+depend:
+
+#########################################################################

@@ -1,0 +1,24 @@
+#!/bin/sh
+
+# PROVIDE: istgt
+# REQUIRE: NETWORKING syslogd mountlate
+# BEFORE: LOGIN
+# KEYWORD: shutdown
+
+. /etc/rc.subr
+
+name="istgt"
+rcvar=istgt_enable
+extra_commands="reload"
+
+load_rc_config $name
+
+: ${istgt_enable:="NO"}
+: ${istgt_config:="%%CONFIGDIR%%/${name}.conf"}
+
+required_files="${istgt_config}"
+pidfile=${istgt_pidfile:-"/var/run/${name}.pid"}
+command="%%BINDIR%%/${name}"
+command_args="-c ${istgt_config}"
+
+run_rc_command "$1"
