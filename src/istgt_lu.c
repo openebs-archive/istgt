@@ -1407,7 +1407,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	if (strncasecmp(val, "iqn.", 4) != 0
 		&& strncasecmp(val, "eui.", 4) != 0
 		&& strncasecmp(val, "naa.", 4) != 0) {
-		snprintf(buf, sizeof buf, "%s:%s", istgt->nodebase, val);
+		snprintf(buf, sizeof buf,"%s:%s", istgt->nodebase, val);
 	} else {
 		snprintf(buf, sizeof buf, "%s", val);
 	}
@@ -4422,6 +4422,9 @@ luworker(void *arg)
 			clock_gettime(clockid, &third);
 			id = 16;
 			tdiff(second2, third, r);
+#ifdef REPLICATION
+			lu_task->lu_cmd.luworkerindx = tind;
+#endif
 			lu_task->lu_cmd.flags |= ISTGT_WORKER_PICKED;
 			rc = istgt_lu_disk_queue_start(lu, lun, tind);
 			if (rc < 0) {

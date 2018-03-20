@@ -55,7 +55,11 @@
 #endif
 
 #ifdef __linux__
-#include <kqueue/sys/event.h>
+//#include <kqueue/sys/event.h>
+#include <netdb.h>
+#include <unistd.h>
+#include <sys/epoll.h>
+#include <fcntl.h>
 #endif
 
 #include <fcntl.h>
@@ -5208,9 +5212,11 @@ static void
 wait_all_task(CONN_Ptr conn)
 {
 	ISTGT_LU_TASK_Ptr lu_task;
-	int kq;
-	struct kevent kev;
-	struct timespec kev_timeout;
+
+	int epfd;
+	struct epoll_event event, events;
+	struct timespec ep_timeout;
+	
 	int msec = 30;
 	int rc;
 
@@ -5219,16 +5225,17 @@ wait_all_task(CONN_Ptr conn)
 		return;
 	}
 
-	kq = kqueue();
-	if (kq == -1) {
-		ISTGT_ERRLOG("kqueue() failed\n");
+	epfd = epoll_create1(0);
+	if (epfd == -1) {
+		ISTGT_ERRLOG("epoll_create1() failed\n");
 		return;
 	}
-	ISTGT_EV_SET(&kev, conn->task_pipe[0], EVFILT_READ, EV_ADD, 0, 0, NULL);
-	rc = kevent(kq, &kev, 1, NULL, 0, NULL);
+	event.data.fd = conn->task_pipe[0];
+	event.events = EPOLLIN;
+	rc = epoll_ctl(epfd, EPOLL_CTL_ADD, conn->task_pipe[0], &event);
 	if (rc == -1) {
-		ISTGT_ERRLOG("kevent() failed\n");
-		close(kq);
+		ISTGT_ERRLOG("epoll_ctl() failed\n");
+		close(epfd);
 		return;
 	}
 
@@ -5237,14 +5244,16 @@ wait_all_task(CONN_Ptr conn)
 	    "waiting task start (%d) (left %d tasks)\n",
 	    conn->id, conn->running_tasks);
 	while (1) {
-		kev_timeout.tv_sec = msec;
-		kev_timeout.tv_nsec = 0;
-		rc = kevent(kq, NULL, 0, &kev, 1, &kev_timeout);
+		ep_timeout.tv_sec = msec;
+		ep_timeout.tv_nsec = 0;
+		
+		rc = epoll_wait(epfd, &events, 1, ep_timeout.tv_sec*1000);
+		//rc = kevent(kq, NULL, 0, &kev, 1, &kev_timeout);
 		if (rc == -1 && errno == EINTR) {
 			continue;
 		}
 		if (rc == -1) {
-			ISTGT_ERRLOG("kevent() failed\n");
+			ISTGT_ERRLOG("epoll_wait() failed\n");
 			break;
 		}
 		if (rc == 0) {
@@ -5253,10 +5262,12 @@ wait_all_task(CONN_Ptr conn)
 			break;
 		}
 
-		if (kev.ident == (uintptr_t)conn->task_pipe[0]) {
+		if (events.data.fd == conn->task_pipe[0]) {
+			/*//TODO
 			if (kev.flags & (EV_EOF|EV_ERROR)) {
 				break;
 			}
+			*/
 			char tmp[1];
 
 			rc = read(conn->task_pipe[0], tmp, 1);
@@ -5317,7 +5328,7 @@ wait_all_task(CONN_Ptr conn)
 	}
 
 	istgt_clear_all_transfer_task(conn);
-	close(kq);
+	close(epfd);
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG,
 	    "waiting task end (%d) (left %d tasks)\n",
 	    conn->id, conn->running_tasks);
@@ -5337,7 +5348,7 @@ worker_cleanup(void *arg)
 	ISTGT_LU_Ptr lu;
 	int rc;
 
-	ISTGT_WARNLOG("conn:%d/%d/%d  %s/%s cleanup", conn->id, conn->kq, ntohs(conn->iport), conn->thr, conn->sthr);
+	ISTGT_WARNLOG("conn:%d/%d/%d  %s/%s cleanup", conn->id, conn->epfd, ntohs(conn->iport), conn->thr, conn->sthr);
 
 	/* cleanup */
 	pthread_mutex_unlock(&conn->task_queue_mutex);
@@ -5391,8 +5402,8 @@ worker_cleanup(void *arg)
 	MTX_UNLOCK(&conn->result_queue_mutex);
 	pthread_join(conn->sender_thread, NULL);
 	close(conn->sock);
-	close(conn->kq);
-	conn->kq = -1;
+	close(conn->epfd);
+	conn->epfd = -1;
 #if 0
 	sleep(1);
 #endif
@@ -5791,7 +5802,7 @@ sender(void *arg)
 	}
 	//MTX_UNLOCK(&conn->sender_mutex);
 	pthread_cleanup_pop(0);
-	ISTGT_NOTICELOG("sender loop ended (%d:%d:%d)\n", conn->id, conn->kq, ntohs(conn->iport));
+	ISTGT_NOTICELOG("sender loop ended (%d:%d:%d)\n", conn->id, conn->epfd, ntohs(conn->iport));
 	return NULL;
 }
 
@@ -5804,9 +5815,14 @@ worker(void *arg)
 	ISTGT_LU_Ptr lu;
 	ISCSI_PDU_Ptr pdu;
 	sigset_t signew, sigold;
+	int epfd;
+	struct epoll_event events;
+	struct timespec ep_timeout;
+	/*
 	int kq;
 	struct kevent kev;
 	struct timespec kev_timeout;
+	*/
 	int rc;
 
 	pthread_t slf = pthread_self();
@@ -5814,7 +5830,62 @@ worker(void *arg)
 #ifdef HAVE_PTHREAD_SET_NAME_NP
 	pthread_set_name_np(slf, tinfo);
 #endif
+	epfd = epoll_create1(0);
+	if (epfd == -1) {
+		ISTGT_ERRLOG("epoll_create1() failed\n");
+		return NULL;
+	}
+	ISTGT_NOTICELOG("con:%d/%d [%x:%d->%s:%s,%d]",
+		conn->id, epfd, conn->iaddr, ntohs(conn->iport),
+	    conn->portal.host, conn->portal.port, conn->portal.tag);
+	conn->epfd = epfd;
 
+/*//TODO
+#if defined (ISTGT_USE_IOVEC) && defined (NOTE_LOWAT)
+	ISTGT_EV_SET(&kev, conn->sock, EVFILT_READ, EV_ADD, NOTE_LOWAT, ISCSI_BHS_LEN, NULL);
+#else
+	ISTGT_EV_SET(&kev, conn->sock, EVFILT_READ, EV_ADD, 0, 0, NULL);
+#endif
+*/
+	events.data.fd = conn->sock;
+        events.events = EPOLLIN;
+        rc = epoll_ctl(epfd, EPOLL_CTL_ADD, conn->sock, &events);
+        if (rc == -1) {
+		ISTGT_ERRLOG("epoll_ctl() failed\n");
+		close(epfd);
+		return NULL;
+        }
+	events.data.fd = conn->task_pipe[0];
+        events.events = EPOLLIN;
+        rc = epoll_ctl(epfd, EPOLL_CTL_ADD, conn->task_pipe[0], &events);
+        if (rc == -1) {
+		ISTGT_ERRLOG("epoll_ctl() failed\n");
+		close(epfd);
+		return NULL;
+        }
+
+	/*TODO
+	if (!conn->istgt->daemon) {
+		event.data.fd = SIGINT;
+		event.events = EPOLLIN;
+		rc = epoll_ctl(epfd, EPOLL_CTL_ADD, SIGINT, &event);
+		if (rc == -1) {
+			ISTGT_ERRLOG("epoll_ctl() failed\n");
+			close(epfd);
+			return NULL;
+		}
+		event.data.fd = SIGTERM;
+		event.events = EPOLLIN;
+		rc = epoll_ctl(epfd, EPOLL_CTL_ADD, SIGTERM, &event);
+		if (rc == -1) {
+			ISTGT_ERRLOG("epoll_ctl() failed\n");
+			close(epfd);
+			return NULL;
+		}
+	}
+	*/
+
+	/*
 	kq = kqueue();
 	if (kq == -1) {
 		ISTGT_ERRLOG("kqueue() failed\n");
@@ -5859,7 +5930,7 @@ worker(void *arg)
 			return NULL;
 		}
 	}
-
+	*/
 	conn->pdu.ahs = NULL;
 	conn->pdu.data = NULL;
 	conn->state = CONN_STATE_RUNNING;
@@ -5884,7 +5955,7 @@ worker(void *arg)
 	sigaddset(&signew, ISTGT_SIGWAKEUP);
 	pthread_sigmask(SIG_UNBLOCK, &signew, &sigold);
 
-	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "reader start (%d:%d) %s/%s\n", conn->id, conn->kq, conn->thr, conn->sthr);
+	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "reader start (%d:%d) %s/%s\n", conn->id, conn->epfd, conn->thr, conn->sthr);
 	while (1) {
 		/* check exit request */
 		if (conn->sess != NULL) {
@@ -5911,23 +5982,20 @@ worker(void *arg)
 			break;
 		}
 
-		//ISTGT_TRACELOG(ISTGT_TRACE_NET,
-		//    "kevent sock %d (timeout %dms)\n",
-		//    conn->sock, conn->nopininterval);
 		if (conn->nopininterval != 0) {
-			kev_timeout.tv_sec = conn->nopininterval / 1000;
-			kev_timeout.tv_nsec = (conn->nopininterval % 1000) * 1000000;
+			ep_timeout.tv_sec = conn->nopininterval / 1000;
+			ep_timeout.tv_nsec = (conn->nopininterval % 1000) * 1000000;
 		} else {
-			kev_timeout.tv_sec = DEFAULT_NOPININTERVAL;
-			kev_timeout.tv_nsec = 0;
+			ep_timeout.tv_sec = DEFAULT_NOPININTERVAL;
+			ep_timeout.tv_nsec = 0;
 		}
-		rc = kevent(kq, NULL, 0, &kev, 1, &kev_timeout);
+		rc = epoll_wait(epfd, &events, 1, ep_timeout.tv_sec*1000);
 		if (rc == -1 && errno == EINTR) {
-			//ISTGT_ERRLOG("EINTR kevent\n");
+			ISTGT_ERRLOG("EINTR event\n");
 			continue;
 		}
 		if (rc == -1) {
-			ISTGT_ERRLOG("kevent() failed\n");
+			ISTGT_ERRLOG("epoll_wait() failed\n");
 			break;
 		}
 		if (rc == 0) {
@@ -5941,24 +6009,21 @@ worker(void *arg)
 			}
 			continue;
 		}
-		if (kev.filter == EVFILT_SIGNAL) {
-			ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "kevent SIGNAL\n");
-			if (kev.ident == SIGINT || kev.ident == SIGTERM) {
-				ISTGT_ERRLOG("Kevent Signal %s errno %d", (kev.ident == SIGINT) ? "SIGINT" : "SIGTERM", errno);
-				break;
-			}
-			continue;
-		}
-
+		
 		/* on socket */
-		if (kev.ident == (uintptr_t)conn->sock) {
-			if (kev.flags & (EV_EOF|EV_ERROR)) {
-				ISTGT_ERRLOG(
-				    "kevent %s errno %d\n", (kev.flags & EV_EOF) ? "EV_EOF" : "EV_ERROR", errno);
+		if (events.data.fd == conn->sock) {
+			if ((events.events & EPOLLERR) ||
+					(events.events & EPOLLHUP) ||
+					(!(events.events & EPOLLIN))) {
+				ISTGT_ERRLOG("close conn %d\n", errno);
 				break;
 			}
+
 			rc = istgt_iscsi_read_pdu(conn, &conn->pdu);
 			if (rc < 0) {
+				if(errno == EAGAIN) {
+					break;
+				}
 				if (conn->state != CONN_STATE_EXITING) {
 					ISTGT_ERRLOG("conn->state = %d\n", conn->state);
 				}
@@ -6014,22 +6079,18 @@ worker(void *arg)
 				goto execute_pdu;
 			}
 
-#if 0
-			/* retry read/PDUs */
-			continue;
-#endif
 		}
 
 		/* execute on task queue */
-		if (kev.ident == (uintptr_t)conn->task_pipe[0]) {
-			if (kev.flags & (EV_EOF|EV_ERROR)) {
-				ISTGT_ERRLOG(
-				    "kevent EOF/ERROR kev.flags %s errno %d\n", (kev.flags & EV_EOF) ? "EV_EOF" : "EV_ERROR", errno);
+		if (events.data.fd == conn->task_pipe[0]) {
+			if ((events.events & EPOLLERR) ||
+					(events.events & EPOLLHUP) ||
+					(!(events.events & EPOLLIN))) {
+				ISTGT_LOG("close pipe %d\n", errno);
 				break;
 			}
 			char tmp[1];
 
-			//ISTGT_TRACELOG(ISTGT_TRACE_SCSI, "Queue Task START\n");
 
 			rc = read(conn->task_pipe[0], tmp, 1);
 			if (rc < 0 || rc == 0 || rc != 1) {
@@ -6072,17 +6133,9 @@ worker(void *arg)
 							    conn->initiator_port);
 							break;
 						}
-#if 0
-						rc = istgt_lu_destroy_task(lu_task);
-						if (rc < 0) {
-							ISTGT_ERRLOG("lu_destroy_task() failed\n");
-							break;
-						}
-#endif
 						lu_task = NULL;
 						conn->exec_lu_task = NULL;
 					} else {
-						//ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "Task Write Trans START\n");
 						rc = istgt_iscsi_transfer_out(conn, &(lu_task->lu_cmd),
 								lu_task->lu_cmd.transfer_len);
 						if (rc < 0) {
@@ -6092,7 +6145,6 @@ worker(void *arg)
 							    conn->initiator_port);
 							break;
 						}
-						//ISTGT_TRACELOG(ISTGT_TRACE_DEBUG,   "Task Write Trans END\n");
 
 						MTX_LOCK(&lu_task->trans_mutex);
 						lu_task->req_transfer_out = 0;
@@ -6119,13 +6171,6 @@ worker(void *arg)
 						    conn->initiator_port);
 						break;
 					}
-#if 0
-					rc = istgt_lu_destroy_task(lu_task);
-					if (rc < 0) {
-						ISTGT_ERRLOG("lu_destroy_task() failed\n");
-						break;
-					}
-#endif
 					lu_task = NULL;
 					conn->exec_lu_task = NULL;
 				}
@@ -6137,7 +6182,7 @@ worker(void *arg)
 				    "pending in task\n");
 				istgt_iscsi_copy_pdu(&conn->pdu, pdu);
 				xfree(pdu);
-				kev.ident = -1;
+				events.data.fd = -1;
 				goto execute_pdu;
 			}
 		}
@@ -6194,12 +6239,9 @@ worker(void *arg)
 	}
 
 	close(conn->sock);
-	close(kq);
-	conn->kq = -1;
-#if 0
-	sleep(1);
-#endif
-	ISTGT_NOTICELOG("worker %d/%d/%d end (%s/%s)", conn->id, conn->kq, ntohs(conn->iport), conn->thr, conn->sthr);
+	close(epfd);
+	conn->epfd = -1;
+	ISTGT_NOTICELOG("worker %d/%d/%d end (%s/%s)", conn->id, conn->epfd, ntohs(conn->iport), conn->thr, conn->sthr);
 
 	/* cleanup conn & sess */
 	while(conn->inflight != 0)
@@ -6211,7 +6253,6 @@ worker(void *arg)
 	MTX_UNLOCK(&g_conns_mutex);
 	return NULL;
 }
-
 int
 istgt_create_conn(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock, struct sockaddr *sa, socklen_t salen __attribute__((__unused__)))
 {
@@ -6252,7 +6293,7 @@ istgt_create_conn(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock, struct sockaddr 
 	conn->portal.sock = -1;
 	conn->sock = sock;
 	conn->wsock = -1;
-	conn->kq = -1;
+	conn->epfd = -1;
 
 	conn->sess = NULL;
 	conn->params = NULL;

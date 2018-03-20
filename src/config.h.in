@@ -6,6 +6,9 @@
 /* Define if enable debug */
 #undef DEBUG
 
+/* Define if enable replication */
+#undef REPLICATION
+
 /* syslog facility */
 #undef DEFAULT_LOG_FACILITY
 
