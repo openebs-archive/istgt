@@ -282,6 +282,11 @@ istgt_lu_set_state(ISTGT_LU_Ptr lu, ISTGT_STATE state)
 	lu->state = state;
 	MTX_UNLOCK(&lu->state_mutex);
 }
+
+#ifdef REPLICATION
+int initialize_volume(spec_t *);
+#endif
+
 #endif /* USE_ATOMIC */
 
 #endif /* ISTGT_PROTO_H */

@@ -36,10 +36,11 @@
 #include "istgt.h"
 #include "istgt_queue.h"
 
+#include "replication.h"
 #ifdef __linux__
 #include <x86_64-linux-gnu/sys/queue.h>
 #endif
-
+#include <stdbool.h>
 #ifdef __FreeBSD__
 #include <sys/queue.h>
 /* IOCTL to Write/Read persistent Reservation and Registration data to/from zvol ZAP attribute */
@@ -351,6 +352,7 @@ ISTGT_RESULT_Q_DEQUEUED       = 0x00000800
 };
 
 typedef struct istgt_lu_cmd_t {
+
 	struct iscsi_pdu_t *pdu;
 	ISTGT_LU_Ptr lu;
 
@@ -417,6 +419,9 @@ typedef struct istgt_lu_cmd_t {
 	uint8_t    connGone;
 	uint8_t    aborted;
 	uint8_t	   release_aborted;
+#ifdef REPLICATION
+	uint32_t   luworkerindx;
+#endif
 } ISTGT_LU_CMD;
 typedef ISTGT_LU_CMD *ISTGT_LU_CMD_Ptr;
 
@@ -800,6 +805,27 @@ typedef struct istgt_lu_disk_t {
 	ISTGT_QUEUE maint_blocked_queue;
 	ISTGT_QUEUE cmd_queue;
 	ISTGT_QUEUE blocked_queue;
+
+#ifdef REPLICATION
+	TAILQ_ENTRY(istgt_lu_disk_t)  spec_next;
+	TAILQ_HEAD(, rcommon_cmd_s) rcommon_sendq; //Contains IOs to be sent to replicas
+	TAILQ_HEAD(, rcommon_cmd_s) rcommon_wait_readq; //Contains IOs waiting for acks from replicas
+	TAILQ_HEAD(, rcommon_cmd_s) rcommon_waitq; //Contains IOs waiting for acks from atleast n(consistency level) replicas
+	TAILQ_HEAD(, rcommon_cmd_s) rcommon_pendingq; //Contains IOs waiting for acks from remaining replicas
+	TAILQ_HEAD(, replica_s) rq; //Queue of replicas connected to this spec(volume)
+	int replica_count;
+	int consistency_count;
+	bool ready;
+	/*Common for both the above queues,
+	Since same cmd is part of both the queues*/
+	pthread_cond_t rq_cond;
+	pthread_mutex_t rq_mtx; 
+	pthread_mutex_t rcommonq_mtx; 
+	pthread_cond_t rcommonq_cond; 
+	pthread_mutex_t luworker_rmutex[ISTGT_MAX_NUM_LUWORKERS];
+	pthread_cond_t luworker_rcond[ISTGT_MAX_NUM_LUWORKERS];
+#endif
+
 	/*Queue containing all the tasks. Instead of going to separate 
 	queues (Cmd Queue, blocked queue, maint_cmd_que, maint_blocked_queue, 
 	inflight)to check for blockage, we will check it in just this queue.*/
@@ -915,6 +941,8 @@ int istgt_lu_disk_post_open(ISTGT_LU_DISK *spec);
 extern struct istgt_cmd_entry istgt_cmd_table[] ;
 extern istgt_serialize_action istgt_serialize_table[ISTGT_SERIDX_COUNT + 1][ISTGT_SERIDX_COUNT + 1];
 
+int64_t
+replicate(ISTGT_LU_DISK *, ISTGT_LU_CMD_Ptr, uint64_t, uint64_t);
 int
 istgt_lu_disk_update_raw(ISTGT_LU_Ptr lu, int i, int dofake);
  
