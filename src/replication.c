@@ -593,6 +593,8 @@ handle_write_resp(spec_t *spec, replica_t *replica, zvol_io_hdr_t *io_rsp)
 		return -1;
 	}
 	rep_cmd->ack_recvd = true;
+
+	/* why do we need below check? */
 	if(rep_cmd->wrio_seq == replica->least_recvd + 1) {
 		while((rep_cmd = TAILQ_FIRST(&replica->waitq))) {
 			rcommq_ptr = rep_cmd->rcommq_ptr;
@@ -615,6 +617,7 @@ handle_write_resp(spec_t *spec, replica_t *replica, zvol_io_hdr_t *io_rsp)
 						for (i=1; i < rcommq_ptr->iovcnt + 1; i++) {
 							xfree(rcommq_ptr->iov[i].iov_base);
 						}
+						/* add the logic to free if already completed */
 						rcommq_ptr->completed = 1;
 					}
 					MTX_UNLOCK(&spec->rcommonq_mtx);
@@ -623,7 +626,9 @@ handle_write_resp(spec_t *spec, replica_t *replica, zvol_io_hdr_t *io_rsp)
 					pthread_cond_signal(&spec->luworker_rcond[luworker_id]);
 					MTX_UNLOCK(&spec->luworker_rmutex[luworker_id]);
 
-				} else if (rcommq_ptr->acks_recvd == spec->replica_count) {
+				} /* This else is not correct and not required */
+#if 0
+				else if (rcommq_ptr->acks_recvd == spec->replica_count) {
 					MTX_LOCK(&spec->rcommonq_mtx);
 					TAILQ_REMOVE(&spec->rcommon_pendingq, rcommq_ptr, pending_cmd_next);
 					for (i=1; i < rcommq_ptr->iovcnt + 1; i++) {
@@ -635,6 +640,7 @@ handle_write_resp(spec_t *spec, replica_t *replica, zvol_io_hdr_t *io_rsp)
 					}
 					MTX_UNLOCK(&spec->rcommonq_mtx);
 				}
+#endif
 				MTX_LOCK(&replica->r_mtx);
 				TAILQ_REMOVE(&replica->waitq, rep_cmd, rwait_cmd_next);
 				free(rep_cmd);
