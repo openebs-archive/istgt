@@ -5544,7 +5544,8 @@ istgt_lu_disk_scsi_reserve(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr 
 
 #ifdef REPLICATION
 int64_t
-replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t nbytes) {
+replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t nbytes)
+{
 	int rc, status, i;
 	bool cmd_write = false;
 	rcommon_cmd_t *rcomm_cmd;
@@ -5554,6 +5555,7 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	MTX_LOCK(&spec->rcommonq_mtx);
 	if(spec->ready == false) {
 		REPLICA_LOG("SPEC is not ready\n");
+		free(rcomm_cmd);
 		MTX_UNLOCK(&spec->rcommonq_mtx);
 		return -1;
 	}
@@ -5561,7 +5563,9 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	pthread_cond_signal(&spec->rcommonq_cond);
 	MTX_LOCK(&spec->luworker_rmutex[cmd->luworkerindx]);
 	MTX_UNLOCK(&spec->rcommonq_mtx);
-	pthread_cond_wait(&spec->luworker_rcond[cmd->luworkerindx], &spec->luworker_rmutex[cmd->luworkerindx]);
+	if (rcomm_cmd->status == 0) //assuming status won't be 0 after IO completion
+		pthread_cond_wait(&spec->luworker_rcond[cmd->luworkerindx], &spec->luworker_rmutex[cmd->luworkerindx]);
+	MTX_UNLOCK(&spec->luworker_rmutex[cmd->luworkerindx]);
 	MTX_LOCK(&spec->rcommonq_mtx);
 	status = rcomm_cmd->status;
 	if(status == -1 )  {
@@ -5574,18 +5578,17 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 		cmd->data = NULL;
 		rc = -1;
 		MTX_UNLOCK(&spec->rcommonq_mtx);
-		MTX_UNLOCK(&spec->luworker_rmutex[cmd->luworkerindx]);
 		return -1;
 	}
 	rc = cmd->data_len = rcomm_cmd->data_len;
 	cmd->data = rcomm_cmd->data;
 	if(rcomm_cmd->completed == 1) {
+		MTX_UNLOCK(&spec->rcommonq_mtx);
 		free(rcomm_cmd);
 	} else {
+		MTX_UNLOCK(&spec->rcommonq_mtx);
 		rcomm_cmd->completed = 1;
 	}
-	MTX_UNLOCK(&spec->rcommonq_mtx);
-	MTX_UNLOCK(&spec->luworker_rmutex[cmd->luworkerindx]);
 	return rc;
 }
 #endif

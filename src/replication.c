@@ -85,6 +85,8 @@ cstor_conn_ops_t cstor_ops = {
 	if ((current_lbE < pending_lba)  || \
 			(pending_lbE < current_lba)) { \
 		cmd_blocked = false; \
+	} else \
+		cmd_blocked = true; \
 	}\
 }
 
@@ -141,8 +143,8 @@ replicator(void *arg) {
 	uint64_t io_seq = 0;
 	rcommon_cmd_t *pending_cmd;
 
+	MTX_LOCK(&spec->rcommonq_mtx);
 	while(1) {
-		MTX_LOCK(&spec->rcommonq_mtx);
 dequeue_common_sendq:
 		cmd = TAILQ_FIRST(&spec->rcommon_sendq);
 		if(!cmd) {
@@ -157,7 +159,6 @@ dequeue_common_sendq:
 		//Check for blockage in rcommon_pendingq and set corresponding blocked replica bits
 		bitset = 0;
 		TAILQ_FOREACH(pending_cmd, &spec->rcommon_pendingq, pending_cmd_next) {
-			cmd_blocked = false;
 			check_for_blockage();
 			if(cmd_blocked == true) {
 				bitset |= pending_cmd->bitset;
@@ -186,15 +187,15 @@ dequeue_common_sendq:
 				if(rcmd->opcode == ZVOL_OPCODE_READ) {
 					read_cmd_sent = true;
 				}
+				pthread_cond_signal(&replica->r_cond);
 			}
-			pthread_cond_signal(&replica->r_cond);
 			MTX_UNLOCK(&replica->r_mtx);
 			if((rcmd->opcode == ZVOL_OPCODE_READ) && read_cmd_sent) {
 				break;
 			}
 		}
-		MTX_UNLOCK(&spec->rcommonq_mtx);
 	}
+	MTX_UNLOCK(&spec->rcommonq_mtx);
 }
 
 int
@@ -231,6 +232,7 @@ write_to_socket:
 				wait_for_fd(epfd);
 				goto write_to_socket;
 			} else {
+				REPLICA_LOG("write error %d on replica %s\n", rc, rcmd->r->ip);
 				free(rio);
 				rio = NULL;
 				return -1;
@@ -272,7 +274,7 @@ replica_sender(void *arg) {
 	if (rc == -1) {
 		REPLICA_LOG("ERROR\n");
 		exit(1);
-	}	
+	}
 	while(1) {
 		MTX_LOCK(&replica->r_mtx);
 dequeue_rsendq:
@@ -437,6 +439,7 @@ read_data(int fd, uint8_t *data, uint64_t len) {
 			replica->recv_len = 0;\
 			replica->total_len = 0;\
 			replica->read_rem_data = false;\
+			MTX_UNLOCK(&replica->r_mtx);\
 			goto execute_io;\
 		}\
 	} else if(replica->read_rem_hdr) {\
@@ -465,10 +468,12 @@ read_data(int fd, uint8_t *data, uint64_t len) {
 			MTX_UNLOCK(&replica->r_mtx);\
 			break;\
 		}\
+		/* how about handling for other errno.. same for above and below 'if' cases also */\
 		replica->read_rem_hdr = false;\
 	}\
 	if(replica->io_rsp->opcode == ZVOL_OPCODE_HANDSHAKE) {\
 		MTX_UNLOCK(&replica->r_mtx);\
+		/* where are we handling handshake response */\
 		continue;\
 	}\
 	if(replica->io_rsp->opcode == ZVOL_OPCODE_READ) {\
@@ -476,7 +481,7 @@ read_data(int fd, uint8_t *data, uint64_t len) {
 		data = malloc(replica->io_rsp->len);\
 		replica->io_rsp_data = data;\
 		count = read_data(events[i].data.fd, data, replica->io_rsp->len);\
-		if (count == -1 && errno == EAGAIN) {\
+		if (count < 0 && errno == EAGAIN) {\
 			replica->read_rem_data = true;\
 			replica->recv_len = 0;\
 			replica->total_len = replica->io_rsp->len;\
@@ -495,25 +500,29 @@ read_data(int fd, uint8_t *data, uint64_t len) {
 	}\
 }
 
-void unblock_blocked_cmds(replica_t *replica) {
+void unblock_blocked_cmds(replica_t *replica)
+{
 	rcmd_t *cmd, *pending_cmd;
 	bool cmd_blocked, blocked = true;
 	TAILQ_FOREACH(pending_cmd, &replica->blockedq, rblocked_cmd_next) {
+		blocked = false;
 		TAILQ_FOREACH(cmd, &replica->waitq, rwait_cmd_next) {
-			cmd_blocked = false;
 			check_for_blockage();
 			if(cmd_blocked == true) {
+/*
 				if(!cmd->ack_recvd) {
 					blocked = true;
 					break;
 				}
-			} else {
+*/
 				blocked = true;
+				break;
 			}
 		}
 		if(blocked) {
 			break;
 		} else {
+			/* we need to have similar check_for_blockage code for read_waitq */
 			TAILQ_REMOVE(&replica->blockedq, pending_cmd, rblocked_cmd_next);
 			TAILQ_INSERT_TAIL(&replica->sendq, pending_cmd, rsend_cmd_next);
 			pthread_cond_signal(&replica->r_cond);
@@ -521,7 +530,8 @@ void unblock_blocked_cmds(replica_t *replica) {
 	}
 }
 int
-handle_read_resp(spec_t *spec, replica_t *replica, zvol_io_hdr_t *io_rsp, void *data) { 
+handle_read_resp(spec_t *spec, replica_t *replica, zvol_io_hdr_t *io_rsp, void *data)
+{ 
 	int luworker_id;
 	bool io_found = false;
 	rcmd_t *rep_cmd = NULL;
@@ -548,24 +558,26 @@ handle_read_resp(spec_t *spec, replica_t *replica, zvol_io_hdr_t *io_rsp, void *
 			MTX_LOCK(&spec->rcommonq_mtx);
 			TAILQ_REMOVE(&spec->rcommon_waitq, rcommq_ptr, wait_cmd_next);
 			if(rcommq_ptr->completed == 1) {
+				MTX_UNLOCK(&spec->rcommonq_mtx);
 				free(rcommq_ptr);
 			} else {
 				rcommq_ptr->completed = 1;
+				MTX_UNLOCK(&spec->rcommonq_mtx);
 			}
-			MTX_UNLOCK(&spec->rcommonq_mtx);
-			MTX_LOCK(&replica->r_mtx);
-			break;
+			return 0;
 		}
 	}
 	MTX_UNLOCK(&replica->r_mtx);
 	if(!io_found) {
+		/* a print or a stats */
 		return -1;
 	}
 	return 0;
 }
 
 int
-handle_write_resp(spec_t *spec, replica_t *replica, zvol_io_hdr_t *io_rsp) {
+handle_write_resp(spec_t *spec, replica_t *replica, zvol_io_hdr_t *io_rsp)
+{
 	int luworker_id, i;
 	rcmd_t *rep_cmd = NULL;
 	rcommon_cmd_t *rcommq_ptr;
@@ -599,6 +611,7 @@ handle_write_resp(spec_t *spec, replica_t *replica, zvol_io_hdr_t *io_rsp) {
 					if (rcommq_ptr->acks_recvd != spec->replica_count) {
 						TAILQ_INSERT_TAIL(&spec->rcommon_pendingq, rcommq_ptr, pending_cmd_next);
 					} else {
+						/* we can leave this free to lbwrite */
 						for (i=1; i < rcommq_ptr->iovcnt + 1; i++) {
 							xfree(rcommq_ptr->iov[i].iov_base);
 						}
@@ -673,15 +686,17 @@ replica_receiver(void *arg) {
 				REPLICA_LOG("epoll error\n");
 				continue;
 			} else {
-				while(1) {
-					MTX_LOCK(&spec->rq_mtx);
-					TAILQ_FOREACH(replica, &spec->rq, r_next) {
-						if(events[i].data.fd == replica->iofd) {
-							break;
-						}
+				MTX_LOCK(&spec->rq_mtx);
+				TAILQ_FOREACH(replica, &spec->rq, r_next) {
+					if(events[i].data.fd == replica->iofd) {
+						break;
 					}
-					MTX_UNLOCK(&spec->rq_mtx);
+				}
+				MTX_UNLOCK(&spec->rq_mtx);
+				while(1) {
+					MTX_LOCK(&replica->r_mtx);
 					read_io_resp();
+					MTX_UNLOCK(&replica->r_mtx);
 execute_io:
 					io_rsp = replica->io_rsp;
 					//TODO A local replica queue needs to be maintained to avoid locing spec again and again

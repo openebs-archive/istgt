@@ -45,9 +45,9 @@ typedef struct mgmt_ack_data_s {
 
 
 typedef struct rcommon_cmd_s {
-	TAILQ_ENTRY(rcommon_cmd_s)  send_cmd_next;
-	TAILQ_ENTRY(rcommon_cmd_s)  wait_cmd_next;
-	TAILQ_ENTRY(rcommon_cmd_s)  pending_cmd_next;
+	TAILQ_ENTRY(rcommon_cmd_s)  send_cmd_next; /* for rcommon_sendq */
+	TAILQ_ENTRY(rcommon_cmd_s)  wait_cmd_next; /* for rcommon_waitq */
+	TAILQ_ENTRY(rcommon_cmd_s)  pending_cmd_next; /* for rcommon_pendingq */
 	int luworker_id;
 	int acks_recvd;
 	int completed;
@@ -63,14 +63,14 @@ typedef struct rcommon_cmd_s {
 	uint64_t total;
 	int64_t iovcnt;
 	uint64_t bitset;
-	struct iovec iov[20];
+	struct iovec iov[21];
 } rcommon_cmd_t;
 
 typedef struct rcmd_s {
-	TAILQ_ENTRY(rcmd_s)  rsend_cmd_next;
-	TAILQ_ENTRY(rcmd_s)  rwait_cmd_next;
-	TAILQ_ENTRY(rcmd_s)  rblocked_cmd_next;
-	TAILQ_ENTRY(rcmd_s)  rread_cmd_next;
+	TAILQ_ENTRY(rcmd_s)  rsend_cmd_next; /* for replica sendq */
+	TAILQ_ENTRY(rcmd_s)  rwait_cmd_next; /* for replica waitq */
+	TAILQ_ENTRY(rcmd_s)  rblocked_cmd_next; /* for replica blockedq */
+	TAILQ_ENTRY(rcmd_s)  rread_cmd_next; /* for replica read_waitq */
 	zvol_op_code_t opcode;
 	uint64_t io_seq;
 	uint64_t rrio_seq;
@@ -81,7 +81,7 @@ typedef struct rcmd_s {
 	int64_t iovcnt;
 	uint64_t offset;
 	uint64_t data_len;
-	struct iovec iov[20];
+	struct iovec iov[21];
 } rcmd_t;
 
 typedef enum zvol_op_status_e {
