@@ -20,6 +20,8 @@ do
 		path)			path=${VALUE} ;;
 		size)			size=${VALUE} ;;
 		externalIP)		externalIP=${VALUE} ;;
+		replication_factor)	replication_factor=${VALUE} ;;
+		consistency_factor)	consistency_factor=${VALUE} ;;
 		*)
 	esac
 done
@@ -57,6 +59,8 @@ then
 fi
 
 sed -i "s|TargetName.*|TargetName $volname|g" $CONF_FILE
+sed -i "s|ReplicationFactor.*|ReplicationFactor $replication_factor|g" $CONF_FILE
+sed -i "s|ConsistencyFactor.*|ConsistencyFactor $consistency_factor|g" $CONF_FILE
 sed -i "s|TargetAlias.*|TargetAlias nicknamefor-$volname|g" $CONF_FILE
 sed -i "s|Portal UC1.*|Portal UC1 $portal:3261|g" $CONF_FILE
 sed -i "s|Portal DA1.*|Portal DA1 $portal:3260|g" $CONF_FILE

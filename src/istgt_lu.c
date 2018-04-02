@@ -1612,7 +1612,35 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "ReadOnly %s\n",
 	    lu->readonly ? "Yes" : "No");
+#ifdef REPLICATION
+	val = istgt_get_val(sp, "ReplicationFactor");
+	if (val == NULL) {
+		ISTGT_ERRLOG("ReplicationFactor not found in conf file\n");
+		goto error_return;
+	} else {
+		lu->replication_factor = (int) strtol(val, NULL, 10);
+	}
 
+	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "ReplicationFactor %d\n",
+	    lu->replication_factor);
+
+	val = istgt_get_val(sp, "ConsistencyFactor");
+	if (val == NULL) {
+		ISTGT_ERRLOG("ConsistencyFactor not found in conf file\n");
+		goto error_return;
+	} else {
+		lu->consistency_factor = (int) strtol(val, NULL, 10);
+	}
+
+	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "ConsistencyFactor %d\n",
+	    lu->consistency_factor);
+
+	if(lu->replication_factor <= 0 || lu->consistency_factor <= 0 ||
+		lu->replication_factor < lu->consistency_factor) {
+		ISTGT_ERRLOG("Invalid ReplicationFactor/ConsistencyFactor or their ratio\n");
+		goto error_return;
+	}
+#endif
 	val = istgt_get_val(sp, "UnitType");
 	if (val == NULL) {
 		ISTGT_ERRLOG("LU%d: unknown unit type\n", lu->num);

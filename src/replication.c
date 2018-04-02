@@ -777,12 +777,9 @@ create_replica_entry(spec_t *spec, int iofd, char *replicaip, int replica_port) 
 	rio->opcode = ZVOL_OPCODE_HANDSHAKE;
 	rio->io_seq = 0;
 	rio->offset = 0;
-	char *data = malloc(strlen(spec->lu->volname)+1);
 	rio->len    = strlen(spec->lu->volname);
-	strncpy(data, spec->lu->volname, strlen(spec->lu->volname));
-
 	write(replica->iofd, rio, sizeof(zvol_io_hdr_t));
-	write(replica->iofd, data, strlen(spec->lu->volname));
+	write(replica->iofd, spec->lu->volname, strlen(spec->lu->volname));
 	free(rio);
 	rio = NULL;
 	spec->ready = true;
@@ -865,6 +862,7 @@ accept_mgmt_conns(int epfd, int sfd) {
 		MTX_LOCK(&specq_mtx);
 		TAILQ_FOREACH(spec, &spec_q, spec_next) {
 			data_len += snprintf(buf, BUFSIZE, "%s", spec->lu->volname) + 1;
+			break;//For now only one spec is supported per controller
 		}
 		MTX_UNLOCK(&specq_mtx);
 		mgmt_opcode = ZVOL_OPCODE_HANDSHAKE;
@@ -1046,6 +1044,8 @@ initialize_volume(spec_t *spec) {
 	TAILQ_INIT(&spec->rq);
 	spec->replica_count = 0;
 	spec->consistency_count = 0;
+	spec->replication_factor = spec->lu->replication_factor;
+	spec->consistency_factor = spec->lu->consistency_factor;
 	spec->ready = false;
 	rc = pthread_mutex_init(&spec->rcommonq_mtx, NULL); //check
 	if (rc != 0) {
