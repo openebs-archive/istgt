@@ -771,18 +771,15 @@ create_replica_entry(spec_t *spec, int iofd, char *replicaip, int replica_port) 
 	if (rc != 0) {
 		ISTGT_ERRLOG("pthread_create(replicator_thread) failed\n");
 		return NULL;
-	}	
+	}
 	zvol_io_hdr_t *rio;
 	rio = (zvol_io_hdr_t *)malloc(sizeof(zvol_io_hdr_t));
 	rio->opcode = ZVOL_OPCODE_HANDSHAKE;
 	rio->io_seq = 0;
 	rio->offset = 0;
-	char *data = malloc(strlen("vol1")+1);
-	rio->len    = strlen("vol1");
-	strncpy(data, "vol1", strlen("vol1"));
-	
+	rio->len    = strlen(spec->lu->volname);
 	write(replica->iofd, rio, sizeof(zvol_io_hdr_t));
-	write(replica->iofd, data, strlen("vol1"));
+	write(replica->iofd, spec->lu->volname, strlen(spec->lu->volname));
 	free(rio);
 	rio = NULL;
 	spec->ready = true;
@@ -796,7 +793,7 @@ zvol_handshake(char *volname, char *replicaip, int replica_port) {
 	REPLICA_LOG("VOLNAME = %s\n", volname);
 	MTX_LOCK(&specq_mtx);
 	TAILQ_FOREACH(spec, &spec_q, spec_next) {
-		if(strcmp(volname, volname) == 0)  {
+		if(strcmp(volname, spec->lu->volname) == 0)  {
 			if((iofd = cstor_ops.conn_connect(replicaip, replica_port)) < 0) {
 				REPLICA_ERRLOG("conn_connect() failed errno:%d\n", errno);
 				exit(EXIT_FAILURE);
@@ -864,7 +861,8 @@ accept_mgmt_conns(int epfd, int sfd) {
 		}
 		MTX_LOCK(&specq_mtx);
 		TAILQ_FOREACH(spec, &spec_q, spec_next) {
-			data_len += snprintf(buf, BUFSIZE, "%s", "vol1") + 1;
+			data_len += snprintf(buf, BUFSIZE, "%s", spec->lu->volname) + 1;
+			break;//For now only one spec is supported per controller
 		}
 		MTX_UNLOCK(&specq_mtx);
 		mgmt_opcode = ZVOL_OPCODE_HANDSHAKE;
@@ -1046,6 +1044,8 @@ initialize_volume(spec_t *spec) {
 	TAILQ_INIT(&spec->rq);
 	spec->replica_count = 0;
 	spec->consistency_count = 0;
+	spec->replication_factor = spec->lu->replication_factor;
+	spec->consistency_factor = spec->lu->consistency_factor;
 	spec->ready = false;
 	rc = pthread_mutex_init(&spec->rcommonq_mtx, NULL); //check
 	if (rc != 0) {

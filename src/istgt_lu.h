@@ -266,6 +266,7 @@ typedef struct istgt_lu_disk_nexus {
 typedef struct istgt_lu_t {
 	int num;
 	char *name;
+	char *volname;
 	char *alias;
 
 	char *inq_vendor;
@@ -322,7 +323,10 @@ typedef struct istgt_lu_t {
 	int maxmap;
 	ISTGT_LU_MAP map[MAX_LU_MAP];
 	int conns;
-
+#ifdef REPLICATION
+	int replication_factor;
+	int consistency_factor;
+#endif
 } ISTGT_LU;
 typedef ISTGT_LU *ISTGT_LU_Ptr;
 
@@ -815,6 +819,8 @@ typedef struct istgt_lu_disk_t {
 	TAILQ_HEAD(, replica_s) rq; //Queue of replicas connected to this spec(volume)
 	int replica_count;
 	int consistency_count;
+	int replication_factor;
+	int consistency_factor;
 	bool ready;
 	/*Common for both the above queues,
 	Since same cmd is part of both the queues*/
