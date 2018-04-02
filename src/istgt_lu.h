@@ -266,6 +266,7 @@ typedef struct istgt_lu_disk_nexus {
 typedef struct istgt_lu_t {
 	int num;
 	char *name;
+	char *volname;
 	char *alias;
 
 	char *inq_vendor;

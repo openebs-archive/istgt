@@ -1404,6 +1404,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 		ISTGT_ERRLOG("LU%d: TargetName not found\n", lu->num);
 		goto error_return;
 	}
+	lu->volname = xstrdup(val);
 	if (strncasecmp(val, "iqn.", 4) != 0
 		&& strncasecmp(val, "eui.", 4) != 0
 		&& strncasecmp(val, "naa.", 4) != 0) {
@@ -2170,6 +2171,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 
  error_return:
 	xfree(lu->name);
+	xfree(lu->volname);
 	xfree(lu->alias);
 	xfree(lu->inq_vendor);
 	xfree(lu->inq_product);
@@ -2801,6 +2803,7 @@ istgt_lu_del_unit(ISTGT_Ptr istgt, ISTGT_LU_Ptr lu)
 	//MTX_UNLOCK(&istgt->mutex);
 
 	xfree(lu->name);
+	xfree(lu->volname);
 	xfree(lu->alias);
 	xfree(lu->inq_vendor);
 	xfree(lu->inq_product);
