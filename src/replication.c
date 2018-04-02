@@ -85,7 +85,7 @@ cstor_conn_ops_t cstor_ops = {
 	if ((current_lbE < pending_lba)  || \
 			(pending_lbE < current_lba)) { \
 		cmd_blocked = false; \
-	} else \
+	} else {\
 		cmd_blocked = true; \
 	}\
 }
@@ -232,7 +232,7 @@ write_to_socket:
 				wait_for_fd(epfd);
 				goto write_to_socket;
 			} else {
-				REPLICA_LOG("write error %d on replica %s\n", rc, rcmd->r->ip);
+				//REPLICA_LOG("write error %d on replica %s\n", rc, rcmd->r->ip);
 				free(rio);
 				rio = NULL;
 				return -1;
