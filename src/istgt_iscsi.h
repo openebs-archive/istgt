@@ -228,9 +228,10 @@ typedef struct istgt_conn_t {
 	PORTAL portal;
 	int sock;
 	int wsock;
-#ifdef ISTGT_USE_KQUEUE
-	int kq;
-#endif /* ISTGT_USE_KQUEUE */
+	int epfd;
+//#ifdef ISTGT_USE_KQUEUE
+//	int kq;
+//#endif /* ISTGT_USE_KQUEUE */
 	char thr[20];
 	char sthr[20];
 	pthread_t thread;
