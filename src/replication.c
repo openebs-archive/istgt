@@ -192,6 +192,9 @@ dequeue_common_sendq:
 			MTX_UNLOCK(&replica->r_mtx);
 			if((rcmd->opcode == ZVOL_OPCODE_READ) && read_cmd_sent) {
 				break;
+			} else if(rcmd->opcode == ZVOL_OPCODE_WRITE) {
+				//TODO This needs to be added in the starting
+				cmd->copies_sent++;
 			}
 		}
 	}
@@ -361,7 +364,7 @@ remove_replica_from_list(spec_t *spec, int iofd) {
 					MTX_LOCK(&spec->luworker_rmutex[luworker_id]);
 					pthread_cond_signal(&spec->luworker_rcond[luworker_id]); 
 					MTX_UNLOCK(&spec->luworker_rmutex[luworker_id]);
-				}else if(rcommq_ptr->acks_recvd == spec->replica_count - 1) {
+				}else if(rcommq_ptr->acks_recvd == rcommq_ptr->copies_sent - 1) {
 					rcommq_ptr->status = -1;
 					MTX_LOCK(&spec->luworker_rmutex[luworker_id]);
 					pthread_cond_signal(&spec->luworker_rcond[luworker_id]); 
@@ -380,7 +383,7 @@ remove_replica_from_list(spec_t *spec, int iofd) {
 					MTX_LOCK(&spec->luworker_rmutex[luworker_id]);
 					pthread_cond_signal(&spec->luworker_rcond[luworker_id]); 
 					MTX_UNLOCK(&spec->luworker_rmutex[luworker_id]);
-				}else if(rcommq_ptr->acks_recvd == spec->replica_count - 1) {
+				}else if(rcommq_ptr->acks_recvd == rcommq_ptr->copies_sent - 1) {
 					rcommq_ptr->status = -1;
 					MTX_LOCK(&spec->luworker_rmutex[luworker_id]);
 					pthread_cond_signal(&spec->luworker_rcond[luworker_id]); 
@@ -394,7 +397,9 @@ remove_replica_from_list(spec_t *spec, int iofd) {
 			pthread_cond_signal(&replica->r_cond);
 			MTX_UNLOCK(&replica->r_mtx);
 			spec->replica_count--;
-			if(spec->replica_count == 0){
+			if((spec->healthy_rcount < spec->consistency_factor) &&
+				(MAX(spec->replication_factor - spec->consistency_factor + 1, spec->consistency_factor) <
+					 spec->healthy_rcount  + spec->degraded_rcount)) {
 				spec->ready = false;
 			}
 			TAILQ_REMOVE(&spec->rq, replica, r_next);
@@ -605,12 +610,12 @@ handle_write_resp(spec_t *spec, replica_t *replica, zvol_io_hdr_t *io_rsp)
 				luworker_id = rcommq_ptr->luworker_id;
 
 				rcommq_ptr->bitset &= ~(1 << replica->id);
-				if (rcommq_ptr->acks_recvd == spec->consistency_count) {
+				if (rcommq_ptr->acks_recvd == spec->consistency_factor) {
 					rcommq_ptr->status = 1;
 					//Transfer cmd from waitq to pendingq and wakeup luworker
 					MTX_LOCK(&spec->rcommonq_mtx);
 					TAILQ_REMOVE(&spec->rcommon_waitq, rcommq_ptr, wait_cmd_next);
-					if (rcommq_ptr->acks_recvd != spec->replica_count) {
+					if (rcommq_ptr->acks_recvd != rcommq_ptr->copies_sent) {
 						TAILQ_INSERT_TAIL(&spec->rcommon_pendingq, rcommq_ptr, pending_cmd_next);
 					} else {
 						/* we can leave this free to lbwrite */
@@ -628,7 +633,7 @@ handle_write_resp(spec_t *spec, replica_t *replica, zvol_io_hdr_t *io_rsp)
 
 				} /* This else is not correct and not required */
 #if 0
-				else if (rcommq_ptr->acks_recvd == spec->replica_count) {
+				else if (rcommq_ptr->acks_recvd == rcommq_ptr->copies_sent) {
 					MTX_LOCK(&spec->rcommonq_mtx);
 					TAILQ_REMOVE(&spec->rcommon_pendingq, rcommq_ptr, pending_cmd_next);
 					for (i=1; i < rcommq_ptr->iovcnt + 1; i++) {
@@ -761,7 +766,7 @@ create_replica_entry(spec_t *spec, int iofd, char *replicaip, int replica_port) 
 	MTX_LOCK(&spec->rq_mtx);
 	replica->id = spec->replica_count;
 	spec->replica_count++;
-	spec->consistency_count = spec->replica_count/2 +1;
+	spec->degraded_rcount++;
 	TAILQ_INSERT_TAIL(&spec->rq, replica, r_next);
 	if(spec->replica_count == 1)
 		pthread_cond_signal(&spec->rq_cond);
@@ -782,7 +787,12 @@ create_replica_entry(spec_t *spec, int iofd, char *replicaip, int replica_port) 
 	write(replica->iofd, spec->lu->volname, strlen(spec->lu->volname));
 	free(rio);
 	rio = NULL;
-	spec->ready = true;
+	if((spec->healthy_rcount >= spec->consistency_factor) ||
+			(MAX(spec->replication_factor - spec->consistency_factor + 1, spec->consistency_factor) >=
+			 spec->healthy_rcount  + spec->degraded_rcount)) {
+		spec->ready = true;
+		pthread_cond_broadcast(&spec->rq_cond);
+	}
 	return replica;
 }
 
@@ -1043,9 +1053,10 @@ initialize_volume(spec_t *spec) {
 	TAILQ_INIT(&spec->rcommon_pendingq);
 	TAILQ_INIT(&spec->rq);
 	spec->replica_count = 0;
-	spec->consistency_count = 0;
 	spec->replication_factor = spec->lu->replication_factor;
 	spec->consistency_factor = spec->lu->consistency_factor;
+	spec->healthy_rcount = 0;
+	spec->degraded_rcount = 0;
 	spec->ready = false;
 	rc = pthread_mutex_init(&spec->rcommonq_mtx, NULL); //check
 	if (rc != 0) {

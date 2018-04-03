@@ -21,6 +21,8 @@
 #define MAXIPLEN 56
 #define MAXNAMELEN 256
 
+#define MAX(a,b) (((a)>(b))?(a):(b))
+
 typedef enum zvol_op_code_e {
 	ZVOL_OPCODE_HANDSHAKE = 1,
 	ZVOL_OPCODE_READ,
@@ -51,7 +53,7 @@ typedef struct rcommon_cmd_s {
 	int luworker_id;
 	int acks_recvd;
 	int completed;
-
+	int copies_sent;
 	zvol_op_code_t opcode;
 	uint64_t io_seq;
 	uint64_t lun_id;

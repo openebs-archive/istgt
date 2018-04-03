@@ -9087,7 +9087,7 @@ istgt_lu_disk_execute(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 	}
 
 	MTX_LOCK(&spec->state_mutex);
-	if (spec->state == ISTGT_LUN_BUSY && (!istgt_lu_disk_busy_excused(cdb[0]))) {
+	if ((spec->state == ISTGT_LUN_BUSY && (!istgt_lu_disk_busy_excused(cdb[0]))) || !spec->ready) {
 		lu_cmd->data_len  = 0;
 		lu_cmd->status = ISTGT_SCSI_STATUS_BUSY;
 		MTX_UNLOCK(&spec->state_mutex);
