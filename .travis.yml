@@ -10,9 +10,6 @@ before_install:
     - sudo unlink /usr/bin/gcc && sudo ln -s /usr/bin/gcc-6 /usr/bin/gcc
     - sudo unlink /usr/bin/g++ && sudo ln -s /usr/bin/g++-6 /usr/bin/g++
 install:
-    - git clone https://github.com/openebs/istgt
-    - cd istgt
-    - git checkout replication
     - ./configure --with-replication
     - sudo make
 script:
