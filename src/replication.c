@@ -152,8 +152,8 @@ replicator(void *arg) {
 	uint64_t io_seq = 0;
 	rcommon_cmd_t *pending_cmd;
 
-	MTX_LOCK(&spec->rcommonq_mtx);
 	while(1) {
+		MTX_LOCK(&spec->rcommonq_mtx);
 dequeue_common_sendq:
 		cmd = TAILQ_FIRST(&spec->rcommon_sendq);
 		if(!cmd) {
@@ -173,12 +173,15 @@ dequeue_common_sendq:
 				bitset |= pending_cmd->bitset;
 			}
 		}
+		MTX_UNLOCK(&spec->rcommonq_mtx);
 
 		//Enqueue to individual replica cmd queues and send on the respective fds
 		read_cmd_sent = false;
+		MTX_LOCK(&spec->rq_mtx);
 		TAILQ_FOREACH(replica, &spec->rq, r_next) {
 			if(replica == NULL) {
 				REPLICA_LOG("Replica not present");
+				MTX_UNLOCK(&spec->rq_mtx);
 				exit(EXIT_FAILURE);
 			}
 			//Create an entry for replica queue
@@ -203,8 +206,8 @@ dequeue_common_sendq:
 				break;
 			}
 		}
+		MTX_UNLOCK(&spec->rq_mtx);
 	}
-	MTX_UNLOCK(&spec->rcommonq_mtx);
 }
 
 int
