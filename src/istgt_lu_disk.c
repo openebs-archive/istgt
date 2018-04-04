@@ -64,6 +64,7 @@
 #include "istgt_scsi.h"
 #include "istgt_queue.h"
 #include "replication.h"
+#include "ring_mempool.h"
 
 #ifdef __FreeBSD__
 #include <sys/disk.h>
@@ -81,6 +82,11 @@
 #endif
 
 extern clockid_t clockid;
+
+#define	RCOMMON_CMD_MEMPOOL_ENTRIES	100000
+rte_smempool_t rcommon_cmd_mempool;
+size_t rcommon_cmd_mempool_count = RCOMMON_CMD_MEMPOOL_ENTRIES;
+
 #define build_rcomm_cmd \
 	{\
 		rcomm_cmd = malloc(sizeof(rcommon_cmd_t));\

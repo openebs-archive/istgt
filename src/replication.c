@@ -14,10 +14,19 @@
 #include "replication_misc.h"
 #include "istgt_crc32c.h"
 #include "istgt_misc.h"
+#include "ring_mempool.h"
+
 cstor_conn_ops_t cstor_ops = {
 	.conn_listen = replication_listen,
 	.conn_connect = replication_connect,
 };
+
+#define	RCMD_MEMPOOL_ENTRIES	100000
+rte_smempool_t rcmd_mempool;
+size_t rcmd_mempool_count = RCMD_MEMPOOL_ENTRIES;
+
+extern rte_smempool_t rcommon_cmd_mempool;
+extern size_t rcommon_cmd_mempool_count;
 
 #define build_replica_io_hdr() \
 {\
@@ -45,7 +54,7 @@ cstor_conn_ops_t cstor_ops = {
 
 #define build_rcmd() \
 {\
-	rcmd = malloc(sizeof(rcmd_t));\
+	rcmd = get_from_mempool(&rcmd_mempool);\
 	rcmd->opcode = cmd->opcode;\
 	rcmd->offset = cmd->offset;\
 	rcmd->data_len = cmd->data_len;\
@@ -1033,6 +1042,7 @@ initialize_replication() {
 	}
 	return 0;
 }
+
 int
 initialize_volume(spec_t *spec) {
 	int rc;
@@ -1086,3 +1096,70 @@ initialize_volume(spec_t *spec) {
 	return 0;
 }
 //When all the replicas are up, make replicas as RW and change state of istgt to REAL;
+
+
+int
+initialize_replication_mempool(bool should_fail) {
+	int rc = 0;
+
+	rc = init_mempool(&rcmd_mempool, rcmd_mempool_count, sizeof (rcmd_t), 0,
+	    "rcmd_mempool", NULL, NULL, NULL);
+	if (rc == -1) {
+		ISTGT_ERRLOG("Failed to create mempool for command\n");
+		goto error;
+	} else if (rc) {
+		ISTGT_NOTICELOG("rcmd mempool initialized with %u entries\n",
+		    rcmd_mempool.length);
+		if (should_fail) {
+			goto error;
+		}
+		rc = 0;
+	}
+
+	rc = init_mempool(&rcommon_cmd_mempool, rcommon_cmd_mempool_count,
+	    sizeof (rcommon_cmd_t), 0, "rcommon_mempool", NULL, NULL, NULL);
+	if (rc == -1) {
+		ISTGT_ERRLOG("Failed to create mempool for command\n");
+		goto error;
+	} else if (rc) {
+		ISTGT_NOTICELOG("rcmd mempool initialized with %u entries\n",
+		    rcommon_cmd_mempool.length);
+		if (should_fail) {
+			goto error;
+		}
+		rc = 0;
+	}
+
+	goto exit;
+
+error:
+	if (rcmd_mempool.ring)
+		destroy_mempool(&rcmd_mempool);
+	if (rcommon_cmd_mempool.ring)
+		destroy_mempool(&rcommon_cmd_mempool);
+
+exit:
+	return rc;
+}
+
+int
+destroy_relication_mempool(void) {
+	int rc = 0;
+
+	rc = destroy_mempool(&rcmd_mempool);
+	if (rc) {
+		ISTGT_ERRLOG("Failed to destroy mempool for rcmd.. err(%d)\n",
+		    rc);
+		goto exit;
+	}
+
+	rc = destroy_mempool(&rcommon_cmd_mempool);
+	if (rc) {
+		ISTGT_ERRLOG("Failed to destroy mempool for rcommon_cmd.."
+		    " err(%d)\n", rc);
+		goto exit;
+	}
+
+exit:
+	return rc;
+}

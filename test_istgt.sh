@@ -1,4 +1,12 @@
 
+DIR=$PWD
+SETUP_ISTGT=$DIR/src/setup_istgt.sh
+SPARSE_FILE=$DIR/test_vol
+REPLICATION_TEST=$DIR/src/replication_test
+ISCSIADM=iscsiadm
+ISTGT_PID=-1
+REPLICATION_PID=-1
+
 # Wait for iSCSI device node (scsi device) to be created
 get_scsi_disk() {
 	device_name=$(sudo iscsiadm -m session -P 3 |grep -i "Attached scsi disk" | awk '{print $4}')
@@ -16,39 +24,67 @@ get_scsi_disk() {
 	done
 }
 
-cd src
-sudo sh ./setup_istgt.sh &
+start_istgt() {
+	sudo sh $SETUP_ISTGT &
+	ISTGT_PID=$!
+	sleep 5
 
-sleep 5
+	sudo truncate -s 20G $SPARSE_FILE
 
-cd ..
-sudo truncate -s 20G test_vol
+	sudo $REPLICATION_TEST 127.0.0.1 6060 127.0.0.1 6161 &
+	REPLICATION_PID=$!
 
-sudo ./src/replication_test 127.0.0.1 6060 127.0.0.1 6161 &
+	sleep 15
+}
 
-sleep 15
+stop_istgt() {
+	if [ $ISTGT_PID -ne -1 ]; then
+		sudo kill -SIGKILL $ISTGT_PID
+	fi
 
-sudo iscsiadm -m discovery -t st -p 127.0.0.1:3260
+	if [ $REPLICATION_PID -ne -1 ]; then
+		sudo kill -SIGKILL $REPLICATION_PID
+	fi
 
-sudo iscsiadm -m node -l
+	sudo rm -rf $SPARSE_FILE
+}
 
-sudo iscsiadm -m session -P 3
+run_io_test()
+{
+	start_istgt
 
-get_scsi_disk
+	sudo $ISCSIADM -m discovery -t st -p 127.0.0.1:3260
 
-echo $device_name
+	sudo $ISCSIADM -m node -l
 
-if [ "$device_name" != "" ]; then
-	sudo mkdir -p /mnt/store
-	sudo mount /dev/$device_name /mnt/store
+	sudo $ISCSIADM -m session -P 3
 
-	sudo dd if=/dev/urandom of=/mnt/store/file1 bs=4k count=10000
-	sudo dd if=/mnt/store/file1 of=/dev/zero bs=4k count=10000
+	get_scsi_disk
 
-	sudo umount /mnt/store
-fi
+	echo $device_name
 
-sudo iscsiadm -m node -u
+	if [ "$device_name" != "" ]; then
+		sudo mkdir -p /mnt/store
+		sudo mount /dev/$device_name /mnt/store
 
-sudo iscsiadm -m node -o delete
+		sudo dd if=/dev/urandom of=/mnt/store/file1 bs=4k count=10000
+		sudo dd if=/mnt/store/file1 of=/dev/zero bs=4k count=10000
 
+		sudo umount /mnt/store
+	fi
+
+	sudo iscsiadm -m node -u
+
+	sudo iscsiadm -m node -o delete
+
+	stop_istgt
+}
+
+run_mempool_test()
+{
+	$DIR/src/mempool_test
+	[[ $? -ne 0 ]] && echo "mempool test failed" && exit 1
+}
+
+run_io_test
+run_mempool_test
