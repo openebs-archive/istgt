@@ -137,20 +137,21 @@ send_io_resp(int fd, zvol_io_hdr_t *io_hdr, void *buf)
 int
 main(int argc, char **argv)
 {
-	if(argc < 4) {
+	if(argc < 5) {
 		exit(EXIT_FAILURE);
 	}
 	char *ctrl_ip = argv[1];
 	int ctrl_port = atoi(argv[2]);
 	char *replicaip = argv[3];
-	int replica_port = atoi(argv[4]); 
+	int replica_port = atoi(argv[4]);
+	char *test_vol = argv[5];
 	int iofd, mgmtfd, sfd, rc, epfd, event_count, i;
 	int64_t count;
 	struct epoll_event event, *events;
 	uint8_t *data, *data_ptr_cpy;
 	uint64_t data_len, nbytes = 0;
 	char *volname;
-	int vol_fd = open("test_vol", O_RDWR, 0666);
+	int vol_fd = open(test_vol, O_RDWR, 0666);
 	zvol_op_code_t opcode;
 	zvol_io_hdr_t *io_hdr = malloc(sizeof(zvol_io_hdr_t));
 	zvol_io_hdr_t *mgmtio = malloc(sizeof(zvol_io_hdr_t));

@@ -632,7 +632,6 @@ handle_write_resp(spec_t *spec, replica_t *replica, zvol_io_hdr_t *io_rsp)
 					MTX_UNLOCK(&spec->luworker_rmutex[luworker_id]);
 
 				} /* This else is not correct and not required */
-#if 0
 				else if (rcommq_ptr->acks_recvd == rcommq_ptr->copies_sent) {
 					MTX_LOCK(&spec->rcommonq_mtx);
 					TAILQ_REMOVE(&spec->rcommon_pendingq, rcommq_ptr, pending_cmd_next);
@@ -645,7 +644,6 @@ handle_write_resp(spec_t *spec, replica_t *replica, zvol_io_hdr_t *io_rsp)
 					}
 					MTX_UNLOCK(&spec->rcommonq_mtx);
 				}
-#endif
 				MTX_LOCK(&replica->r_mtx);
 				TAILQ_REMOVE(&replica->waitq, rep_cmd, rwait_cmd_next);
 				free(rep_cmd);
