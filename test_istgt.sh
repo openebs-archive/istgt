@@ -94,7 +94,7 @@ sleep 5
 run_data_integrity_test
 
 sudo kill -9 $controller_pid $replica1_pid $replica2_pid $replica3_pid
-ps -aux | grep replication | awk '{print "kill -9 "$2}' | sudo sh
-ps -aux | grep istgt | awk '{print "kill -9 "$2}' | sudo sh
+ps -aux | grep replication_test | grep -v grep | awk '{print "kill -9 "$2}' | sudo sh
+ps -aux | grep istgt | grep -v grep | awk '{print "kill -9 "$2}' | sudo sh
 
 exit 0

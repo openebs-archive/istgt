@@ -85,13 +85,15 @@ extern clockid_t clockid;
 	{\
 		rcomm_cmd = malloc(sizeof(rcommon_cmd_t));\
 		rcomm_cmd->total = 0;\
+		rcomm_cmd->copies_sent = 0;\
 		rcomm_cmd->total_len = 0;\
 		rcomm_cmd->offset = offset;\
-		rcomm_cmd->data_len    = nbytes;\
+		rcomm_cmd->data_len = nbytes;\
 		rcomm_cmd->state = CMD_CREATED;\
 		rcomm_cmd->luworker_id = cmd->luworkerindx;\
 		rcomm_cmd->acks_recvd = 0;\
 		rcomm_cmd->status = 0;\
+		rcomm_cmd->completed = false; \
 		switch(cmd->cdb0) {\
 			case SBC_WRITE_6:  \
 			case SBC_WRITE_10: \
@@ -5570,10 +5572,10 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	status = rcomm_cmd->status;
 	if(status == -1 )  {
 		ISTGT_LOG("STATUS = -1\n");
-		if(rcomm_cmd->state == CMD_EXECUTION_COMPLETED) {
+		if(rcomm_cmd->completed) {
 			free(rcomm_cmd);
 		} else {
-			rcomm_cmd->state = CMD_EXECUTION_COMPLETED;
+			rcomm_cmd->completed = 1;
 		}
 		cmd->data = NULL;
 		rc = -1;
@@ -5582,12 +5584,12 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	}
 	rc = cmd->data_len = rcomm_cmd->data_len;
 	cmd->data = rcomm_cmd->data;
-	if(rcomm_cmd->state == CMD_EXECUTION_COMPLETED) {
+	if(rcomm_cmd->completed) {
 		MTX_UNLOCK(&spec->rcommonq_mtx);
 		free(rcomm_cmd);
 	} else {
 		MTX_UNLOCK(&spec->rcommonq_mtx);
-		rcomm_cmd->state = CMD_EXECUTION_COMPLETED;
+		rcomm_cmd->completed = 1;
 	}
 	return rc;
 }

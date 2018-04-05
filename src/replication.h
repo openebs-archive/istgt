@@ -66,6 +66,7 @@ typedef struct rcommon_cmd_s {
 	uint64_t data_len;
 	uint64_t total_len;
 	int status;
+	bool completed;
 	cmd_state_t state;
 	void *data;
 	uint64_t total;
