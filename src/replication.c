@@ -360,30 +360,32 @@ void update_volstate(spec_t *spec) {
 		spec->ready = false;
 	}
 }
-
+//TODO Use locks for accessing rcommq_ptr, common waitq and common pendingq
 void clear_replica_cmd(spec_t *spec, replica_t *replica, rcmd_t *rep_cmd) {
-	int i, ios_aborted = 0;
+	int i;
 	rcommon_cmd_t *rcommq_ptr = rep_cmd->rcommq_ptr;
 	int luworker_id = rcommq_ptr->luworker_id;
 	rcommq_ptr->bitset &= ~(1 << replica->id);
 	//TODO Add check for acks_received in read also, same as write
 	if(rep_cmd->opcode == ZVOL_OPCODE_READ) {
+		rcommq_ptr->state = CMD_EXECUTION_DONE;
 		rcommq_ptr->status = -1;
 		rcommq_ptr->completed = true;
 		signal_luworker();
 	} else if(rep_cmd->opcode == ZVOL_OPCODE_WRITE) {
+		rcommq_ptr->ios_aborted++;
 		if(rcommq_ptr->acks_recvd + rcommq_ptr->ios_aborted
-				== rcommq_ptr->copies_sent - 1) {
+				== rcommq_ptr->copies_sent) {
 			for (i=1; i < rcommq_ptr->iovcnt + 1; i++) {
 				xfree(rcommq_ptr->iov[i].iov_base);
 			}
-			ios_aborted += ++rcommq_ptr->ios_aborted;
+			rcommq_ptr->ios_aborted++;
 			if(rcommq_ptr->state == CMD_ENQUEUED_TO_PENDINGQ) {
 				TAILQ_REMOVE(&spec->rcommon_pendingq, rcommq_ptr, pending_cmd_next);
-				rcommq_ptr->state = CMD_EXECUTION_COMPLETED;
 			} else if(rcommq_ptr->state == CMD_ENQUEUED_TO_WAITQ) {
 				TAILQ_REMOVE(&spec->rcommon_waitq, rcommq_ptr, wait_cmd_next);
 			}
+			rcommq_ptr->state = CMD_EXECUTION_DONE;
 			if(rcommq_ptr->completed) {
 				free(rcommq_ptr);
 			} else {
@@ -393,18 +395,15 @@ void clear_replica_cmd(spec_t *spec, replica_t *replica, rcmd_t *rep_cmd) {
 					signal_luworker();
 				}
 			}
-		} else {
-			rcommq_ptr->ios_aborted++;
-			ios_aborted += ++rcommq_ptr->ios_aborted;
 		}
 	}
-	REPLICA_LOG("%d IOs aborted at replica %d\n", ios_aborted, replica->id);
 }
 
 
 int
 remove_replica_from_list(spec_t *spec, int iofd) {
 	replica_t *replica;
+	int ios_aborted = 0;
 	rcmd_t *rep_cmd = NULL;
 	MTX_LOCK(&spec->rq_mtx);
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
@@ -415,11 +414,13 @@ remove_replica_from_list(spec_t *spec, int iofd) {
 			while((rep_cmd = TAILQ_FIRST(&replica->waitq))) {
 				clear_replica_cmd(spec, replica, rep_cmd);
 				TAILQ_REMOVE(&replica->waitq, rep_cmd, rwait_cmd_next);
+				ios_aborted++;
 			}
 			//Empty blockedq of replica
 			while((rep_cmd = TAILQ_FIRST(&replica->blockedq))) {
 				clear_replica_cmd(spec, replica, rep_cmd);
 				TAILQ_REMOVE(&replica->blockedq, rep_cmd, rblocked_cmd_next);
+				ios_aborted++;
 			}
 			replica->removed = true;
 			pthread_cond_signal(&replica->r_cond);
@@ -433,6 +434,7 @@ remove_replica_from_list(spec_t *spec, int iofd) {
 		}
 	}
 	MTX_UNLOCK(&spec->rq_mtx);
+	REPLICA_LOG("%d IOs aborted for replica %d", ios_aborted, replica->id);
 	return 0;
 }
 
@@ -591,6 +593,7 @@ handle_read_resp(spec_t *spec, replica_t *replica, zvol_io_hdr_t *io_rsp, void *
 
 			MTX_LOCK(&spec->rcommonq_mtx);
 			TAILQ_REMOVE(&spec->rcommon_waitq, rcommq_ptr, wait_cmd_next);
+			rcommq_ptr->state = CMD_EXECUTION_DONE;
 			if(rcommq_ptr->completed) {
 				MTX_UNLOCK(&spec->rcommonq_mtx);
 				free(rcommq_ptr);
@@ -636,7 +639,7 @@ handle_read_resp(spec_t *spec, replica_t *replica, zvol_io_hdr_t *io_rsp, void *
 	} else if(rcommq_ptr->state == CMD_ENQUEUED_TO_WAITQ) { \
 		TAILQ_REMOVE(&spec->rcommon_waitq, rcommq_ptr, wait_cmd_next); \
 	} \
-	rcommq_ptr->state = CMD_EXECUTION_COMPLETED; \
+	rcommq_ptr->state = CMD_EXECUTION_DONE; \
 	if(rcommq_ptr->completed) { \
 		free(rcommq_ptr); \
 		rcommq_ptr = NULL; \
@@ -1031,7 +1034,7 @@ remove_volume(spec_t *spec) {
 	cmd = TAILQ_FIRST(&spec->rcommon_sendq);
 	while (cmd) {
 		cmd->status = -1;
-		cmd->complete = 1; \
+		cmd->completed = 1; \
 		next_cmd = TAILQ_NEXT(cmd, send_cmd_next);
 		TAILQ_REMOVE(&rcommon_sendq, cmd, send_cmd_next);
 		cmd = next_cmd;
@@ -1039,7 +1042,7 @@ remove_volume(spec_t *spec) {
 	cmd = TAILQ_FIRST(&spec->rcommon_waitq);
 	while (cmd) {
 		cmd->status = -1;
-		cmd->complete = 1; \
+		cmd->completed = 1; \
 		next_cmd = TAILQ_NEXT(cmd, wait_cmd_next);
 		TAILQ_REMOVE(&rcommon_waitq, cmd, wait_cmd_next);
 		cmd = next_cmd;
@@ -1047,7 +1050,7 @@ remove_volume(spec_t *spec) {
 	cmd = TAILQ_FIRST(&spec->rcommon_pendingq);
 	while (cmd) {
 		cmd->status = -1;
-		cmd->complete = 1; \
+		cmd->completed = 1; \
 		next_cmd = TAILQ_NEXT(cmd, pending_cmd_next);
 		TAILQ_REMOVE(&rcommon_pendingq, cmd, pending_cmd_next);
 		cmd = next_cmd;

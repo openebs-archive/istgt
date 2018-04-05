@@ -5575,7 +5575,7 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 		if(rcomm_cmd->completed) {
 			free(rcomm_cmd);
 		} else {
-			rcomm_cmd->completed = 1;
+			rcomm_cmd->completed = true;
 		}
 		cmd->data = NULL;
 		rc = -1;
@@ -5589,7 +5589,7 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 		free(rcomm_cmd);
 	} else {
 		MTX_UNLOCK(&spec->rcommonq_mtx);
-		rcomm_cmd->completed = 1;
+		rcomm_cmd->completed = true;
 	}
 	return rc;
 }

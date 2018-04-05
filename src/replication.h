@@ -48,7 +48,7 @@ typedef enum cmd_state_s {
 	CMD_CREATED = 1,
 	CMD_ENQUEUED_TO_WAITQ,
 	CMD_ENQUEUED_TO_PENDINGQ,
-	CMD_EXECUTION_COMPLETED,
+	CMD_EXECUTION_DONE,
 } cmd_state_t;
 
 typedef struct rcommon_cmd_s {
