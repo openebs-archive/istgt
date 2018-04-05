@@ -1055,7 +1055,7 @@ read_mgmt_ack_hdr:
 
 		case READ_MGMT_ACK_DATA:
 			if(replica->mgmt_ack->len != sizeof (mgmt_ack_data_t)) {
-				REPLICA_ERRLOG("mgmt_ack_len %d not matching with size of mgmt_ack_data..\n",
+				REPLICA_ERRLOG("mgmt_ack_len %lu not matching with size of mgmt_ack_data..\n",
 				    replica->mgmt_ack->len);
 				replica->mgmt_ack->len = sizeof (mgmt_ack_data_t);
 			}

@@ -15,6 +15,7 @@ pthread_mutex_t specq_mtx;
 
 typedef ISTGT_QUEUE *cmd_ptr;
 typedef struct istgt_lu_disk_t spec_t;
+typedef struct rcmd_s rcmd_t;
 
 typedef enum replica_state_s {
 	ADDED_TO_SPEC,
