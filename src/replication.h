@@ -12,6 +12,8 @@
 #include <sys/uio.h>
 #include <syslog.h>
 #include <stdbool.h>
+#include "istgt_integration.h"
+#include "istgt_lu.h"
 
 #ifndef REPLICA_INITIALIZE
 #define REPLICA_INITIALIZE 1
@@ -98,15 +100,18 @@ typedef struct zvol_io_hdr_s {
 	zvol_op_status_t status;
 } zvol_io_hdr_t;
 
-void *start_replication(void *);
+typedef struct replica_s replica_t;
+typedef struct istgt_lu_disk_t spec_t;
+
+void *init_replication(void *);
 int sendio(int, int, rcommon_cmd_t *, rcmd_t *);
 int send_mgmtio(int, zvol_op_code_t, void *, uint64_t);
 int make_socket_non_blocking(int);
 int send_mgmtack(int, zvol_op_code_t, void *, char *, int);
 int wait_for_fd(int);
-int64_t read_data(int, uint8_t *, uint64_t);
-int zvol_handshake(char *, char *, int);
-int accept_mgmt_conns(int, int);
+int64_t read_data(int, uint8_t *, uint64_t, int *, int *);
+int zvol_handshake(spec_t *, replica_t *);
+void accept_mgmt_conns(int, int);
 int send_io_resp(int fd, zvol_io_hdr_t *, void *);
 
 #define REPLICA_LOG(fmt, ...)  syslog(LOG_NOTICE, 	 "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)

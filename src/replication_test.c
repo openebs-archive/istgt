@@ -29,8 +29,10 @@ __thread char  tinfo[20] =  {0};
 	mgmt_ack_data->port = replica_port;\
 }
 
+int64_t test_read_data(int fd, uint8_t *data, uint64_t len);
+
 int64_t
-read_data(int fd, uint8_t *data, uint64_t len) {
+test_read_data(int fd, uint8_t *data, uint64_t len) {
 	int rc;
 	uint64_t nbytes = 0;
 	while((rc = read(fd, data + nbytes, len - nbytes))) {
@@ -201,7 +203,7 @@ main(int argc, char **argv)
 				fprintf (stderr, "epoll error\n");
 				continue;
 			} else if (events[i].data.fd == mgmtfd) {
-				count = read_data(events[i].data.fd, (uint8_t *)mgmtio, sizeof(zvol_io_hdr_t));
+				count = test_read_data(events[i].data.fd, (uint8_t *)mgmtio, sizeof(zvol_io_hdr_t));
 				if (count<0)
 				{
 					if (errno != EAGAIN)
@@ -214,7 +216,7 @@ main(int argc, char **argv)
 				if(mgmtio->len) {
 					data = data_ptr_cpy = malloc(mgmtio->len);
 					data_len = mgmtio->len;
-					count = read_data(events[i].data.fd, (uint8_t *)data, mgmtio->len);
+					count = test_read_data(events[i].data.fd, (uint8_t *)data, mgmtio->len);
 				}
 				opcode = mgmtio->opcode;
 				volname = (char *)data;
@@ -257,7 +259,7 @@ main(int argc, char **argv)
 			} else if(events[i].data.fd == iofd) {
 				while(1) {
 					if(read_rem_data) {
-						count = read_data(events[i].data.fd, (uint8_t *)data + recv_len, total_len - recv_len);
+						count = test_read_data(events[i].data.fd, (uint8_t *)data + recv_len, total_len - recv_len);
 						if(count < 0 && errno == EAGAIN) {
 							break;
 						}else if(((uint64_t)count < total_len - recv_len) && errno == EAGAIN) {
@@ -271,7 +273,7 @@ main(int argc, char **argv)
 						}
 
 					} else if(read_rem_hdr) {
-						count = read_data(events[i].data.fd, (uint8_t *)io_hdr + recv_len, total_len - recv_len);
+						count = test_read_data(events[i].data.fd, (uint8_t *)io_hdr + recv_len, total_len - recv_len);
 						if(count < 0 && errno == EAGAIN) {
 							break;
 						} else if(((uint64_t)count < total_len - recv_len) && errno == EAGAIN) {
@@ -283,7 +285,7 @@ main(int argc, char **argv)
 							total_len = 0;
 						}
 					} else {
-						count = read_data(events[i].data.fd, (uint8_t *)io_hdr, io_hdr_len);
+						count = test_read_data(events[i].data.fd, (uint8_t *)io_hdr, io_hdr_len);
 						if((count < 0) && (errno == EAGAIN)) {
 							break;
 						} else if(((uint64_t)count < io_hdr_len) && (errno == EAGAIN)) {
@@ -299,7 +301,7 @@ main(int argc, char **argv)
 						if(io_hdr->len) {
 							data = malloc(io_hdr->len);
 							nbytes = 0;
-							count = read_data(events[i].data.fd, (uint8_t *)data, io_hdr->len);
+							count = test_read_data(events[i].data.fd, (uint8_t *)data, io_hdr->len);
 							if (count == -1 && errno == EAGAIN) {
 								read_rem_data = true;
 								recv_len = 0;
