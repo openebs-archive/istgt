@@ -25,9 +25,11 @@ get_scsi_disk() {
 }
 
 start_istgt() {
+	cd $DIR/src
 	sudo sh $SETUP_ISTGT &
 	ISTGT_PID=$!
 	sleep 5
+	cd ..
 
 	sudo truncate -s 20G $SPARSE_FILE
 
