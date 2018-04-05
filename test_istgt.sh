@@ -86,6 +86,7 @@ run_mempool_test()
 {
 	$DIR/src/mempool_test
 	[[ $? -ne 0 ]] && echo "mempool test failed" && exit 1
+	return 0
 }
 
 run_io_test
