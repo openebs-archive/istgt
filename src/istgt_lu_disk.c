@@ -88,7 +88,7 @@ extern clockid_t clockid;
 		rcomm_cmd->total_len = 0;\
 		rcomm_cmd->offset = offset;\
 		rcomm_cmd->data_len    = nbytes;\
-		rcomm_cmd->completed = 0;\
+		rcomm_cmd->state = CMD_CREATED;\
 		rcomm_cmd->luworker_id = cmd->luworkerindx;\
 		rcomm_cmd->acks_recvd = 0;\
 		rcomm_cmd->status = 0;\
@@ -5570,10 +5570,10 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	status = rcomm_cmd->status;
 	if(status == -1 )  {
 		ISTGT_LOG("STATUS = -1\n");
-		if(rcomm_cmd->completed == 1) {
+		if(rcomm_cmd->state == CMD_EXECUTION_COMPLETED) {
 			free(rcomm_cmd);
 		} else {
-			rcomm_cmd->completed = 1;
+			rcomm_cmd->state = CMD_EXECUTION_COMPLETED;
 		}
 		cmd->data = NULL;
 		rc = -1;
@@ -5582,12 +5582,12 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	}
 	rc = cmd->data_len = rcomm_cmd->data_len;
 	cmd->data = rcomm_cmd->data;
-	if(rcomm_cmd->completed == 1) {
+	if(rcomm_cmd->state == CMD_EXECUTION_COMPLETED) {
 		MTX_UNLOCK(&spec->rcommonq_mtx);
 		free(rcomm_cmd);
 	} else {
 		MTX_UNLOCK(&spec->rcommonq_mtx);
-		rcomm_cmd->completed = 1;
+		rcomm_cmd->state = CMD_EXECUTION_COMPLETED;
 	}
 	return rc;
 }

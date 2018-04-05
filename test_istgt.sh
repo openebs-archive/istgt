@@ -70,14 +70,23 @@ prepare_test_env() {
 
 prepare_test_env
 
-./configure --with-replication; cd src; sudo sh ./setup_istgt.sh &
+cd src
+sudo sh ./setup_istgt.sh &
+controller_pid=$!
 cd ..
-sleep 120
+sleep 15
 echo "START--------------------------------------"
 sudo ./src/replication_test "$CONTROLLER_IP" "$CONTROLLER_PORT" "$REPLICA1_IP" "$REPLICA1_PORT" "/tmp/test_vol1" &
+replica1_pid=$!
 sudo ./src/replication_test "$CONTROLLER_IP" "$CONTROLLER_PORT" "$REPLICA2_IP" "$REPLICA2_PORT" "/tmp/test_vol2" &
+replica2_pid=$!
 sudo ./src/replication_test "$CONTROLLER_IP" "$CONTROLLER_PORT" "$REPLICA3_IP" "$REPLICA3_PORT" "/tmp/test_vol3" &
+replica3_pid=$!
 
 sleep 15
 
 run_data_integrity_test
+
+sudo kill -9 $controller_pid $replica1_pid $replica2_pid $replica3_pid
+ps -aux | grep replication | awk '{print "kill -9 "$2}' | sudo sh
+ps -aux | grep istgt | awk '{print "kill -9 "$2}' | sudo sh
