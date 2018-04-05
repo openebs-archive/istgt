@@ -94,4 +94,7 @@ replica_t *update_replica_entry(spec_t *, replica_t *, int, char *, int);
 
 replica_t * get_replica(int mgmt_fd, spec_t **);
 void handle_read_data_event(int fd);
+
+void update_volstate(spec_t *);
+void clear_replica_cmd(spec_t *, replica_t *, rcmd_t *);
 #endif

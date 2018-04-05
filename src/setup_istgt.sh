@@ -2,7 +2,6 @@ ulimit -c unlimited
 sudo rm -rf core
 sudo mkdir -p /usr/local/etc/istgt
 sudo mkdir -p /tmp/cstor
-make
 sudo cp istgt.conf istgtcontrol.conf /tmp/cstor/
 sudo cp istgt.conf istgtcontrol.conf /usr/local/etc/istgt/
 sudo cp istgt istgtcontrol /usr/local/bin/
