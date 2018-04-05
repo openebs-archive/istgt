@@ -561,7 +561,7 @@ handle_read_resp(spec_t *spec, replica_t *replica, zvol_io_hdr_t *io_rsp, void *
 			rcommq_ptr->data = data;
 			rcommq_ptr->data_len = io_rsp->len;
 			luworker_id = rcommq_ptr->luworker_id;
-			free(rep_cmd);
+			put_to_mempool(&rcmd_mempool, rep_cmd);
 
 			MTX_LOCK(&spec->luworker_rmutex[luworker_id]);
 			pthread_cond_signal(&spec->luworker_rcond[luworker_id]);
@@ -571,7 +571,7 @@ handle_read_resp(spec_t *spec, replica_t *replica, zvol_io_hdr_t *io_rsp, void *
 			TAILQ_REMOVE(&spec->rcommon_waitq, rcommq_ptr, wait_cmd_next);
 			if(rcommq_ptr->completed == 1) {
 				MTX_UNLOCK(&spec->rcommonq_mtx);
-				free(rcommq_ptr);
+				put_to_mempool(&rcommon_cmd_mempool, rcommq_ptr);
 			} else {
 				rcommq_ptr->completed = 1;
 				MTX_UNLOCK(&spec->rcommonq_mtx);
@@ -655,7 +655,7 @@ handle_write_resp(spec_t *spec, replica_t *replica, zvol_io_hdr_t *io_rsp)
 #endif
 				MTX_LOCK(&replica->r_mtx);
 				TAILQ_REMOVE(&replica->waitq, rep_cmd, rwait_cmd_next);
-				free(rep_cmd);
+				put_to_mempool(&rcmd_mempool, rep_cmd);
 				rep_cmd = NULL;
 			} else {
 				break;
