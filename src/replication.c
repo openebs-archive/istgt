@@ -623,6 +623,7 @@ handle_read_resp(spec_t *spec, replica_t *replica, zvol_io_hdr_t *io_rsp, void *
 		for (i=1; i < rcommq_ptr->iovcnt + 1; i++) { \
 			xfree(rcommq_ptr->iov[i].iov_base); \
 		} \
+		rcommq_ptr->state = CMD_EXECUTION_DONE; \
 		rcommq_ptr->completed = true; \
 	} \
 	MTX_UNLOCK(&spec->rcommonq_mtx); \
