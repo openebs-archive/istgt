@@ -62,11 +62,7 @@ typedef struct replica_s {
 	zvol_io_hdr_t *io_resp_hdr;
 	void *io_resp_data;
 	int io_state;
-	int io_read; //amount of IO data read in current state
-//	uint64_t recv_len;
-//	uint64_t total_len;
-//	bool read_rem_data;
-//	bool read_rem_hdr;
+	int io_read; //amount of IO data read in current IO state
 	bool removed;
 	int mgmt_io_state;
 	int mgmt_io_read; //amount of data read in current state
