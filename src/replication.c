@@ -399,7 +399,7 @@ void clear_replica_cmd(spec_t *spec, replica_t *replica, rcmd_t *rep_cmd) {
 			}
 			rcommq_ptr->state = CMD_EXECUTION_DONE;
 			if(rcommq_ptr->completed) {
-				free(rcommq_ptr);
+				put_to_mempool(&rcommon_cmd_mempool, rcommq_ptr);
 			} else {
 				rcommq_ptr->completed = true;
 				if (rcommq_ptr->acks_recvd < spec->consistency_factor) {
@@ -654,7 +654,7 @@ handle_read_resp(spec_t *spec, replica_t *replica, zvol_io_hdr_t *io_rsp, void *
 	} \
 	rcommq_ptr->state = CMD_EXECUTION_DONE; \
 	if(rcommq_ptr->completed) { \
-		free(rcommq_ptr); \
+		put_to_mempool(&rcommon_cmd_mempool, rcommq_ptr); \
 		rcommq_ptr = NULL; \
 	} else { \
 		rcommq_ptr->completed = true; \
