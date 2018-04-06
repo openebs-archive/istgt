@@ -2853,6 +2853,13 @@ main(int argc, char **argv)
 		poolfini();
 		exit(EXIT_FAILURE);
 	}
+
+	/* Initialize mempool needed for replication*/
+	if (initialize_replication_mempool(false)) {
+		ISTGT_ERRLOG("Failed to initialize mempool\n");
+		goto initialize_error;
+	}
+
 	/* Initialize replication library */
 	rc = initialize_replication();
 	if(rc != 0) {
@@ -3088,6 +3095,10 @@ main(int argc, char **argv)
 	istgt_lu_shutdown(istgt);
 	istgt_shutdown(istgt);
 	istgt_close_log();
+
+	/* Destroy mempool created for replication */
+	(void)destroy_relication_mempool();
+
 	config = istgt->config;
 	istgt->config = NULL;
 	istgt_free_config(config);

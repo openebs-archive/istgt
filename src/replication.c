@@ -14,10 +14,19 @@
 #include "replication_misc.h"
 #include "istgt_crc32c.h"
 #include "istgt_misc.h"
+#include "ring_mempool.h"
+
 cstor_conn_ops_t cstor_ops = {
 	.conn_listen = replication_listen,
 	.conn_connect = replication_connect,
 };
+
+#define	RCMD_MEMPOOL_ENTRIES	100000
+rte_smempool_t rcmd_mempool;
+size_t rcmd_mempool_count = RCMD_MEMPOOL_ENTRIES;
+
+extern rte_smempool_t rcommon_cmd_mempool;
+extern size_t rcommon_cmd_mempool_count;
 
 #define build_replica_io_hdr() \
 {\
@@ -45,7 +54,7 @@ cstor_conn_ops_t cstor_ops = {
 
 #define build_rcmd() \
 {\
-	rcmd = malloc(sizeof(rcmd_t));\
+	rcmd = get_from_mempool(&rcmd_mempool);\
 	rcmd->opcode = cmd->opcode;\
 	rcmd->offset = cmd->offset;\
 	rcmd->data_len = cmd->data_len;\
@@ -133,8 +142,8 @@ replicator(void *arg) {
 	uint64_t io_seq = 0;
 	rcommon_cmd_t *pending_cmd;
 
-	MTX_LOCK(&spec->rcommonq_mtx);
 	while(1) {
+		MTX_LOCK(&spec->rcommonq_mtx);
 dequeue_common_sendq:
 		cmd = TAILQ_FIRST(&spec->rcommon_sendq);
 		if(!cmd) {
@@ -155,12 +164,15 @@ dequeue_common_sendq:
 				bitset |= pending_cmd->bitset;
 			}
 		}
+		MTX_UNLOCK(&spec->rcommonq_mtx);
 
 		//Enqueue to individual replica cmd queues and send on the respective fds
 		read_cmd_sent = false;
+		MTX_LOCK(&spec->rq_mtx);
 		TAILQ_FOREACH(replica, &spec->rq, r_next) {
 			if(replica == NULL) {
 				REPLICA_LOG("Replica not present");
+				MTX_UNLOCK(&spec->rq_mtx);
 				exit(EXIT_FAILURE);
 			}
 			//Create an entry for replica queue
@@ -186,8 +198,8 @@ dequeue_common_sendq:
 				break;
 			}
 		}
+		MTX_UNLOCK(&spec->rq_mtx);
 	}
-	MTX_UNLOCK(&spec->rcommonq_mtx);
 }
 
 int
@@ -371,7 +383,7 @@ void clear_replica_cmd(spec_t *spec, replica_t *replica, rcmd_t *rep_cmd) {
 			}
 			rcommq_ptr->state = CMD_EXECUTION_DONE;
 			if(rcommq_ptr->completed) {
-				free(rcommq_ptr);
+				put_to_mempool(&rcommon_cmd_mempool, rcommq_ptr);
 			} else {
 				rcommq_ptr->completed = true;
 				if (rcommq_ptr->acks_recvd < spec->consistency_factor) {
@@ -601,7 +613,7 @@ handle_read_resp(spec_t *spec, replica_t *replica)
 			rcommq_ptr->data = data;
 			rcommq_ptr->data_len = io_rsp->len;
 			luworker_id = rcommq_ptr->luworker_id;
-			free(rep_cmd);
+			put_to_mempool(&rcmd_mempool, rep_cmd);
 
 			signal_luworker();
 
@@ -610,7 +622,7 @@ handle_read_resp(spec_t *spec, replica_t *replica)
 			rcommq_ptr->state = CMD_EXECUTION_DONE;
 			if(rcommq_ptr->completed) {
 				MTX_UNLOCK(&spec->rcommonq_mtx);
-				free(rcommq_ptr);
+				put_to_mempool(&rcommon_cmd_mempool, rcommq_ptr);
 			} else {
 				rcommq_ptr->completed = true;
 				MTX_UNLOCK(&spec->rcommonq_mtx);
@@ -656,7 +668,7 @@ handle_read_resp(spec_t *spec, replica_t *replica)
 	} \
 	rcommq_ptr->state = CMD_EXECUTION_DONE; \
 	if(rcommq_ptr->completed) { \
-		free(rcommq_ptr); \
+		put_to_mempool(&rcommon_cmd_mempool, rcommq_ptr); \
 		rcommq_ptr = NULL; \
 	} else { \
 		rcommq_ptr->completed = true; \
@@ -708,7 +720,7 @@ handle_write_resp(spec_t *spec, replica_t *replica)
 				}
 				MTX_LOCK(&replica->r_mtx);
 				TAILQ_REMOVE(&replica->waitq, rep_cmd, rwait_cmd_next);
-				free(rep_cmd);
+				put_to_mempool(&rcmd_mempool, rep_cmd);
 				rep_cmd = NULL;
 			} else {
 				break;
@@ -1320,6 +1332,7 @@ initialize_replication() {
 	}
 	return 0;
 }
+
 int
 initialize_volume(spec_t *spec) {
 	int rc;
@@ -1375,3 +1388,70 @@ initialize_volume(spec_t *spec) {
 	return 0;
 }
 //When all the replicas are up, make replicas as RW and change state of istgt to REAL;
+
+
+int
+initialize_replication_mempool(bool should_fail) {
+	int rc = 0;
+
+	rc = init_mempool(&rcmd_mempool, rcmd_mempool_count, sizeof (rcmd_t), 0,
+	    "rcmd_mempool", NULL, NULL, NULL);
+	if (rc == -1) {
+		ISTGT_ERRLOG("Failed to create mempool for command\n");
+		goto error;
+	} else if (rc) {
+		ISTGT_NOTICELOG("rcmd mempool initialized with %u entries\n",
+		    rcmd_mempool.length);
+		if (should_fail) {
+			goto error;
+		}
+		rc = 0;
+	}
+
+	rc = init_mempool(&rcommon_cmd_mempool, rcommon_cmd_mempool_count,
+	    sizeof (rcommon_cmd_t), 0, "rcommon_mempool", NULL, NULL, NULL);
+	if (rc == -1) {
+		ISTGT_ERRLOG("Failed to create mempool for command\n");
+		goto error;
+	} else if (rc) {
+		ISTGT_NOTICELOG("rcmd mempool initialized with %u entries\n",
+		    rcommon_cmd_mempool.length);
+		if (should_fail) {
+			goto error;
+		}
+		rc = 0;
+	}
+
+	goto exit;
+
+error:
+	if (rcmd_mempool.ring)
+		destroy_mempool(&rcmd_mempool);
+	if (rcommon_cmd_mempool.ring)
+		destroy_mempool(&rcommon_cmd_mempool);
+
+exit:
+	return rc;
+}
+
+int
+destroy_relication_mempool(void) {
+	int rc = 0;
+
+	rc = destroy_mempool(&rcmd_mempool);
+	if (rc) {
+		ISTGT_ERRLOG("Failed to destroy mempool for rcmd.. err(%d)\n",
+		    rc);
+		goto exit;
+	}
+
+	rc = destroy_mempool(&rcommon_cmd_mempool);
+	if (rc) {
+		ISTGT_ERRLOG("Failed to destroy mempool for rcommon_cmd.."
+		    " err(%d)\n", rc);
+		goto exit;
+	}
+
+exit:
+	return rc;
+}

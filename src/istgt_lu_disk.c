@@ -64,6 +64,7 @@
 #include "istgt_scsi.h"
 #include "istgt_queue.h"
 #include "replication.h"
+#include "ring_mempool.h"
 
 #ifdef __FreeBSD__
 #include <sys/disk.h>
@@ -81,9 +82,14 @@
 #endif
 
 extern clockid_t clockid;
+
+#define	RCOMMON_CMD_MEMPOOL_ENTRIES	100000
+rte_smempool_t rcommon_cmd_mempool;
+size_t rcommon_cmd_mempool_count = RCOMMON_CMD_MEMPOOL_ENTRIES;
+
 #define build_rcomm_cmd \
 	{\
-		rcomm_cmd = malloc(sizeof(rcommon_cmd_t));\
+		rcomm_cmd = get_from_mempool(&rcommon_cmd_mempool);	\
 		rcomm_cmd->total = 0;\
 		rcomm_cmd->copies_sent = 0;\
 		rcomm_cmd->total_len = 0;\
@@ -5557,7 +5563,7 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	MTX_LOCK(&spec->rcommonq_mtx);
 	if(spec->ready == false) {
 		REPLICA_LOG("SPEC is not ready\n");
-		free(rcomm_cmd);
+		put_to_mempool(&rcommon_cmd_mempool, rcomm_cmd);
 		MTX_UNLOCK(&spec->rcommonq_mtx);
 		return -1;
 	}
@@ -5573,7 +5579,7 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	if(status == -1 )  {
 		ISTGT_LOG("STATUS = -1\n");
 		if(rcomm_cmd->completed) {
-			free(rcomm_cmd);
+			put_to_mempool(&rcommon_cmd_mempool, rcomm_cmd);
 		} else {
 			rcomm_cmd->completed = true;
 		}
@@ -5586,7 +5592,7 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	cmd->data = rcomm_cmd->data;
 	if(rcomm_cmd->completed) {
 		MTX_UNLOCK(&spec->rcommonq_mtx);
-		free(rcomm_cmd);
+		put_to_mempool(&rcommon_cmd_mempool, rcomm_cmd);
 	} else {
 		MTX_UNLOCK(&spec->rcommonq_mtx);
 		rcomm_cmd->completed = true;
