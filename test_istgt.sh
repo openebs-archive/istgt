@@ -1,30 +1,32 @@
 #!/bin/bash
 
+DIR=$PWD
+SETUP_ISTGT=$DIR/src/setup_istgt.sh
+REPLICATION_TEST=$DIR/src/replication_test
+MEMPOOL_TEST=$DIR/src/mempool_test
+ISCSIADM=iscsiadm
+ISTGT_PID=-1
+device_name=""
+
 CONTROLLER_IP="127.0.0.1"
 CONTROLLER_PORT="6060"
-REPLICA1_IP="127.0.0.1"
-REPLICA2_IP="127.0.0.1"
-REPLICA3_IP="127.0.0.1"
-REPLICA1_PORT="6161"
-REPLICA2_PORT="6162"
-REPLICA3_PORT="6163"
 
 login_to_volume() {
-	sudo iscsiadm -m discovery -t st -p $1
-	sudo iscsiadm -m node -l
+	sudo $ISCSIADM -m discovery -t st -p $1
+	sudo $ISCSIADM -m node -l
 }
 
 logout_of_volume() {
-	sudo iscsiadm -m node -u
-	sudo iscsiadm -m node -o delete
+	sudo $ISCSIADM -m node -u
+	sudo $ISCSIADM -m node -o delete
 }
 
 get_scsi_disk() {
-	device_name=$(sudo iscsiadm -m session -P 3 |grep -i "Attached scsi disk" | awk '{print $4}')
+	device_name=$(sudo $ISCSIADM -m session -P 3 |grep -i "Attached scsi disk" | awk '{print $4}')
 	i=0
 	while [ -z $device_name ]; do
 		sleep 5
-		device_name=$(sudo iscsiadm -m session -P 3 |grep -i "Attached scsi disk" | awk '{print $4}')
+		device_name=$(sudo $ISCSIADM -m session -P 3 |grep -i "Attached scsi disk" | awk '{print $4}')
 		i=`expr $i + 1`
 		if [ $i -eq 10 ]; then
 			echo "scsi disk not found";
@@ -35,14 +37,38 @@ get_scsi_disk() {
 	done
 }
 
-run_data_integrity_test(){
+start_istgt() {
+	cd $DIR/src
+	sudo sh $SETUP_ISTGT &
+	ISTGT_PID=$!
+	sleep 5
+	cd ..
+}
+
+stop_istgt() {
+	if [ $ISTGT_PID -ne -1 ]; then
+		sudo kill -SIGKILL $ISTGT_PID
+	fi
+
+}
+
+run_mempool_test()
+{
+	$MEMPOOL_TEST
+	[[ $? -ne 0 ]] && echo "mempool test failed" && exit 1
+	return 0
+}
+
+write_and_verify_data(){
 	login_to_volume "$CONTROLLER_IP:3260"
 	sleep 5
 	get_scsi_disk
 	if [ "$device_name"!="" ]; then
 		sudo mkfs.ext2 -F /dev/$device_name
+		[[ $? -ne 0 ]] && echo "mkfs failed for $device_name" && exit 1
 
 		sudo mount /dev/$device_name /mnt/store
+		[[ $? -ne 0 ]] && echo "mount for $device_name" && exit 1
 
 		sudo dd if=/dev/urandom of=file1 bs=4k count=10000
 		hash1=$(sudo md5sum file1 | awk '{print $1}')
@@ -61,40 +87,55 @@ run_data_integrity_test(){
 	fi
 }
 
-prepare_test_env() {
+setup_test_env() {
 	sudo rm -f /tmp/test_vol*
 	sudo mkdir -p /mnt/store
 	sudo truncate -s 20G /tmp/test_vol1 /tmp/test_vol2 /tmp/test_vol3
 	logout_of_volume
+
+	start_istgt
 }
 
-prepare_test_env
+cleanup_test_env() {
+	stop_istgt
+	sudo rm -f /tmp/test_vol*
+	sudo rm -f /tmp/test_vol*
+	sudo rm -rf /mnt/store
+}
 
-cd src
-sudo sh ./setup_istgt.sh &
-controller_pid=$!
-cd ..
-sleep 15
-sudo ./src/replication_test "$CONTROLLER_IP" "$CONTROLLER_PORT" "$REPLICA1_IP" "$REPLICA1_PORT" "/tmp/test_vol1" &
-replica1_pid=$!
-sudo ./src/replication_test "$CONTROLLER_IP" "$CONTROLLER_PORT" "$REPLICA2_IP" "$REPLICA2_PORT" "/tmp/test_vol2" &
-replica2_pid=$!
-sudo ./src/replication_test "$CONTROLLER_IP" "$CONTROLLER_PORT" "$REPLICA3_IP" "$REPLICA3_PORT" "/tmp/test_vol3" &
-replica3_pid=$!
+run_data_integrity_test() {
+	local replica1_port="6161"
+	local replica2_port="6162"
+	local replica3_port="6163"
+	local replica1_ip="127.0.0.1"
+	local replica2_ip="127.0.0.1"
+	local replica3_ip="127.0.0.1"
 
-sleep 15
+	setup_test_env
+
+	sudo $REPLICATION_TEST "$CONTROLLER_IP" "$CONTROLLER_PORT" "$replica1_ip" "$replica1_port" "/tmp/test_vol1" &
+	replica1_pid=$!
+	sudo $REPLICATION_TEST "$CONTROLLER_IP" "$CONTROLLER_PORT" "$replica2_ip" "$replica2_port" "/tmp/test_vol2" &
+	replica2_pid=$!
+	sudo $REPLICATION_TEST "$CONTROLLER_IP" "$CONTROLLER_PORT" "$replica3_ip" "$replica3_port" "/tmp/test_vol3" &
+	replica3_pid=$!
+
+	sleep 15
+	write_and_verify_data
+
+	sudo kill -9 $replica3_pid
+	sleep 5
+	write_and_verify_data
+
+	sudo $REPLICATION_TEST "$CONTROLLER_IP" "$CONTROLLER_PORT" "$replica3_ip" "$replica3_port" "/tmp/test_vol3" &
+	replica3_pid=$!
+	sleep 5
+	write_and_verify_data
+
+	sudo kill -9 $replica1_pid $replica2_pid $replica3_pid
+	cleanup_test_env
+}
 
 run_data_integrity_test
-sudo kill -9 $replica3_pid
-sleep 5
-run_data_integrity_test
-sudo ./src/replication_test "$CONTROLLER_IP" "$CONTROLLER_PORT" "$REPLICA3_IP" "$REPLICA3_PORT" "/tmp/test_vol3" &
-replica3_pid=$!
-sleep 5
-run_data_integrity_test
-
-sudo kill -9 $controller_pid $replica1_pid $replica2_pid $replica3_pid
-ps -aux | grep -w replication_test | grep -v grep | awk '{print "kill -9 "$2}' | sudo sh
-ps -aux | grep -w istgt | grep -v grep | awk '{print "kill -9 "$2}' | sudo sh
-
+run_mempool_test
 exit 0

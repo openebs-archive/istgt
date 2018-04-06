@@ -1,0 +1,33 @@
+#
+# N.B.
+# This is the toplevel .gitignore file.
+# This is not the place for entries that are specific to
+# a subdirectory.  Instead add those files to the
+# .gitignore file in that subdirectory.
+#
+# N.B.
+# Please use 'git ls-files -i --exclude-standard'
+# command after changing this file, to see if there are
+# any tracked files which get ignored after the change.
+
+#
+# Normal rules
+#
+*.[oa]
+*.lo
+*.la
+*~
+*.swp
+
+
+#
+# Top level generic files
+#
+!.gitignore
+tags
+TAGS
+cscope.*
+*.patch
+*.orig
+config.log
+config.status
