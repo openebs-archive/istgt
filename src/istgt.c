@@ -2866,7 +2866,7 @@ main(int argc, char **argv)
 		ISTGT_ERRLOG("initialize_replication() failed\n");
 		goto initialize_error;
 	}
-        rc = pthread_create(&replication_thread, &istgt->attr, &start_replication,
+        rc = pthread_create(&replication_thread, &istgt->attr, &init_replication,
                         (void *)NULL);
         if (rc != 0) {
                 ISTGT_ERRLOG("pthread_create(replication_thread) failed\n");
