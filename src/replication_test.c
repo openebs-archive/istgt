@@ -56,40 +56,54 @@ send_mgmtack(int fd, zvol_op_code_t opcode, void *buf, char *replicaip, int repl
 {
 	mgmt_ack_data_t *mgmt_ack_data;
 	zvol_io_hdr_t *mgmt_ack_hdr;
-	int iovcnt, i, nbytes = 0;
-	int rc = 0;
-	struct iovec iovec[2];
+	int i, nbytes = 0;
+	int rc = 0, start;
+	struct iovec iovec[6];
 	build_mgmt_ack_hdr;
 	build_mgmt_ack_data;
 	iovec[0].iov_base = mgmt_ack_hdr;
-	iovec[1].iov_base = mgmt_ack_data;
-	iovec[0].iov_len = sizeof(zvol_io_hdr_t);
-	iovec[1].iov_len = sizeof(mgmt_ack_data_t);
-	nbytes += iovec[0].iov_len + iovec[1].iov_len;
-	iovcnt = 2;
-	while (nbytes) {
-		rc = writev(fd, iovec, 2);//Review iovec in this line
-		if (rc < 0) {
-			return -1;
-		}
-		nbytes -= rc;
-		if (nbytes == 0)
-			break;
-		/* adjust iovec length */
-		for (i = 0; i < iovcnt; i++) {
-			if (iovec[i].iov_len != 0 && iovec[i].iov_len > (size_t)rc) {
-				iovec[i].iov_base
-					= (void *) (((uintptr_t)iovec[i].iov_base) + rc);
-				iovec[i].iov_len -= rc;
+	iovec[0].iov_len = 16;
+
+	iovec[1].iov_base = ((uint8_t *)mgmt_ack_hdr) + 16;
+	iovec[1].iov_len = 16;
+
+	iovec[2].iov_base = ((uint8_t *)mgmt_ack_hdr) + 32;
+	iovec[2].iov_len = sizeof (zvol_io_hdr_t) - 32;
+
+	iovec[3].iov_base = mgmt_ack_data;
+	iovec[3].iov_len = 50;
+
+	iovec[4].iov_base = ((uint8_t *)mgmt_ack_data) + 50;
+	iovec[4].iov_len = 50;
+
+	iovec[5].iov_base = ((uint8_t *)mgmt_ack_data) + 100;
+	iovec[5].iov_len = sizeof (mgmt_ack_data_t) - 100;
+
+	for (start = 0; start < 6; start += 2) {
+		nbytes = iovec[start].iov_len + iovec[start + 1].iov_len;
+		while (nbytes) {
+			rc = writev(fd, &iovec[start], 2);//Review iovec in this line
+			if (rc < 0) {
+				return -1;
+			}
+			nbytes -= rc;
+			if (nbytes == 0)
 				break;
-			} else {
-				rc -= iovec[i].iov_len;
-				iovec[i].iov_len = 0;
+			/* adjust iovec length */
+			for (i = start; i < start + 2; i++) {
+				if (iovec[i].iov_len != 0 && iovec[i].iov_len > (size_t)rc) {
+					iovec[i].iov_base
+						= (void *) (((uintptr_t)iovec[i].iov_base) + rc);
+					iovec[i].iov_len -= rc;
+					break;
+				} else {
+					rc -= iovec[i].iov_len;
+					iovec[i].iov_len = 0;
+				}
 			}
 		}
 	}
 	return 0;
-
 }
 
 

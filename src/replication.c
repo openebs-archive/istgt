@@ -450,7 +450,8 @@ read_data(int fd, uint8_t *data, uint64_t len, int *errorno, int *fd_closed) {
 	if (errorno != NULL)
 		*errorno = 0;
 
-	while((rc = read(fd, data + nbytes, len - nbytes))) {
+	while(1) {
+		rc = read(fd, data + nbytes, len - nbytes);
 		if(rc < 0) {
 			if (errorno != NULL)
 				*errorno = errno;
@@ -458,6 +459,9 @@ read_data(int fd, uint8_t *data, uint64_t len, int *errorno, int *fd_closed) {
 				return nbytes;
 			else {
 				REPLICA_ERRLOG("received err %d on fd %d, closing it..\n", errno, fd);
+				/*
+				 * TODO: cleanup of replica need to be happen
+				 */
 				close(fd);
 				if (fd_closed != NULL)
 					*fd_closed = 1;
@@ -1003,7 +1007,7 @@ accept_mgmt_conns(int epfd, int sfd) {
 		}
 
 		event.data.fd = mgmt_fd;
-		event.events = EPOLLIN | EPOLLET;
+		event.events = EPOLLIN | EPOLLHUP | EPOLLERR | EPOLLET;
 		rc = epoll_ctl(epfd, EPOLL_CTL_ADD, mgmt_fd, &event);
 		if(rc == -1) {
 			REPLICA_ERRLOG("epoll_ctl() failed on fd %d, errno:%d.. closing it..", mgmt_fd, errno);
