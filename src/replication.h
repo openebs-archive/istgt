@@ -21,6 +21,8 @@
 #define MAXIPLEN 56
 #define MAXNAMELEN 256
 
+#define MAX(a,b) (((a)>(b))?(a):(b))
+
 typedef enum zvol_op_code_e {
 	ZVOL_OPCODE_HANDSHAKE = 1,
 	ZVOL_OPCODE_READ,
@@ -42,7 +44,12 @@ typedef struct mgmt_ack_data_s {
 	int port;
 } mgmt_ack_data_t;
 
-
+typedef enum cmd_state_s {
+	CMD_CREATED = 1,
+	CMD_ENQUEUED_TO_WAITQ,
+	CMD_ENQUEUED_TO_PENDINGQ,
+	CMD_EXECUTION_DONE,
+} cmd_state_t;
 
 typedef struct rcommon_cmd_s {
 	TAILQ_ENTRY(rcommon_cmd_s)  send_cmd_next; /* for rcommon_sendq */
@@ -50,8 +57,8 @@ typedef struct rcommon_cmd_s {
 	TAILQ_ENTRY(rcommon_cmd_s)  pending_cmd_next; /* for rcommon_pendingq */
 	int luworker_id;
 	int acks_recvd;
-	int completed;
-
+	int ios_aborted;
+	int copies_sent;
 	zvol_op_code_t opcode;
 	uint64_t io_seq;
 	uint64_t lun_id;
@@ -59,6 +66,8 @@ typedef struct rcommon_cmd_s {
 	uint64_t data_len;
 	uint64_t total_len;
 	int status;
+	bool completed;
+	cmd_state_t state;
 	void *data;
 	uint64_t total;
 	int64_t iovcnt;

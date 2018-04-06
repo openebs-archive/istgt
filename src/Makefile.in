@@ -116,8 +116,8 @@ mempool_test: $(MEMPOOL_TEST)
 build_image:
 	sh ./package.sh
 
-all: stamp-depend config.h $(SUBPROGRAM) istgtcontrol istgt	\
-	replication_test mempool_test build_image
+all: stamp-depend config.h $(SUBPROGRAM) istgtcontrol istgt replication_test mempool_test build_image
+dev: stamp-depend config.h $(SUBPROGRAM) istgtcontrol istgt replication_test mempool_test
 
 install: install-dirs
 	$(INSTALL) -m 0755 istgt $(DESTDIR)$(bindir)

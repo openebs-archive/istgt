@@ -91,13 +91,15 @@ size_t rcommon_cmd_mempool_count = RCOMMON_CMD_MEMPOOL_ENTRIES;
 	{\
 		rcomm_cmd = get_from_mempool(&rcommon_cmd_mempool);	\
 		rcomm_cmd->total = 0;\
+		rcomm_cmd->copies_sent = 0;\
 		rcomm_cmd->total_len = 0;\
 		rcomm_cmd->offset = offset;\
-		rcomm_cmd->data_len    = nbytes;\
-		rcomm_cmd->completed = 0;\
+		rcomm_cmd->data_len = nbytes;\
+		rcomm_cmd->state = CMD_CREATED;\
 		rcomm_cmd->luworker_id = cmd->luworkerindx;\
 		rcomm_cmd->acks_recvd = 0;\
 		rcomm_cmd->status = 0;\
+		rcomm_cmd->completed = false; \
 		switch(cmd->cdb0) {\
 			case SBC_WRITE_6:  \
 			case SBC_WRITE_10: \
@@ -5576,10 +5578,10 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	status = rcomm_cmd->status;
 	if(status == -1 )  {
 		ISTGT_LOG("STATUS = -1\n");
-		if(rcomm_cmd->completed == 1) {
+		if(rcomm_cmd->completed) {
 			put_to_mempool(&rcommon_cmd_mempool, rcomm_cmd);
 		} else {
-			rcomm_cmd->completed = 1;
+			rcomm_cmd->completed = true;
 		}
 		cmd->data = NULL;
 		rc = -1;
@@ -5588,12 +5590,12 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	}
 	rc = cmd->data_len = rcomm_cmd->data_len;
 	cmd->data = rcomm_cmd->data;
-	if(rcomm_cmd->completed == 1) {
+	if(rcomm_cmd->completed) {
 		MTX_UNLOCK(&spec->rcommonq_mtx);
 		put_to_mempool(&rcommon_cmd_mempool, rcomm_cmd);
 	} else {
 		MTX_UNLOCK(&spec->rcommonq_mtx);
-		rcomm_cmd->completed = 1;
+		rcomm_cmd->completed = true;
 	}
 	return rc;
 }
@@ -9093,7 +9095,7 @@ istgt_lu_disk_execute(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 	}
 
 	MTX_LOCK(&spec->state_mutex);
-	if (spec->state == ISTGT_LUN_BUSY && (!istgt_lu_disk_busy_excused(cdb[0]))) {
+	if ((spec->state == ISTGT_LUN_BUSY && (!istgt_lu_disk_busy_excused(cdb[0]))) || !spec->ready) {
 		lu_cmd->data_len  = 0;
 		lu_cmd->status = ISTGT_SCSI_STATUS_BUSY;
 		MTX_UNLOCK(&spec->state_mutex);

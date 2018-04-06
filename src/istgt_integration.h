@@ -71,4 +71,6 @@ int update_replica_list(int, spec_t *, int);
 int remove_replica_from_list(spec_t *, int);
 void unblock_blocked_cmds(replica_t *);
 replica_t *create_replica_entry(spec_t *, int, char *, int);
+void update_volstate(spec_t *);
+void clear_replica_cmd(spec_t *, replica_t *, rcmd_t *);
 #endif
