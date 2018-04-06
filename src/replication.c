@@ -1112,7 +1112,10 @@ read_io_resp_data:
 					if(resp_hdr->len != sizeof (mgmt_ack_data_t))
 						REPLICA_ERRLOG("mgmt_ack_len %lu not matching with size of mgmt_ack_data..\n",
 						    resp_hdr->len);
-					zvol_handshake(spec, replica);
+
+					/* dont process handshake on data connection */
+					if (fd != replica->iofd)
+						zvol_handshake(spec, replica);
 					break;
 			}
 			donecount++;
