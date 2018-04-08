@@ -450,7 +450,8 @@ read_data(int fd, uint8_t *data, uint64_t len, int *errorno, int *fd_closed) {
 	if (errorno != NULL)
 		*errorno = 0;
 
-	while((rc = read(fd, data + nbytes, len - nbytes))) {
+	while(1) {
+		rc = read(fd, data + nbytes, len - nbytes);
 		if(rc < 0) {
 			if (errorno != NULL)
 				*errorno = errno;
@@ -458,6 +459,9 @@ read_data(int fd, uint8_t *data, uint64_t len, int *errorno, int *fd_closed) {
 				return nbytes;
 			else {
 				REPLICA_ERRLOG("received err %d on fd %d, closing it..\n", errno, fd);
+				/*
+				 * TODO: cleanup of replica need to be happen
+				 */
 				close(fd);
 				if (fd_closed != NULL)
 					*fd_closed = 1;
@@ -477,85 +481,6 @@ read_data(int fd, uint8_t *data, uint64_t len, int *errorno, int *fd_closed) {
 		}
 	}
 	return nbytes;
-}
-
-#define read_io_resp() {\
-	if(replica->read_rem_data) {\
-		count = read_data(events[i].data.fd, (uint8_t *)replica->io_rsp_data \
-			+ replica->recv_len, replica->total_len - replica->recv_len, NULL, NULL);\
-		if(count < 0 && errno == EAGAIN) {\
-			MTX_UNLOCK(&replica->r_mtx);\
-			break;\
-		} else if(((uint64_t)count < (int64_t)replica->total_len - replica->recv_len) \
-				&& errno == EAGAIN) {\
-			replica->recv_len += count;\
-			MTX_UNLOCK(&replica->r_mtx);\
-			break;\
-		} else {\
-			replica->recv_len = 0;\
-			replica->total_len = 0;\
-			replica->read_rem_data = false;\
-			MTX_UNLOCK(&replica->r_mtx);\
-			goto execute_io;\
-		}\
-	} else if(replica->read_rem_hdr) {\
-		count = read_data(events[i].data.fd, (uint8_t *)replica->io_rsp \
-			+ replica->recv_len, replica->total_len - replica->recv_len, NULL, NULL);\
-		if(count < 0 && errno == EAGAIN) {\
-			MTX_UNLOCK(&replica->r_mtx);\
-			break;\
-		} else if(((uint64_t)count < replica->total_len - replica->recv_len) \
-			&& errno == EAGAIN) {\
-			replica->recv_len += count;\
-			MTX_UNLOCK(&replica->r_mtx);\
-			break;\
-		} else {\
-			replica->read_rem_hdr = false;\
-			replica->recv_len = 0;\
-			replica->total_len = 0;\
-		}\
-	} else {\
-		count = read_data(events[i].data.fd, (uint8_t *)replica->io_rsp, rsp_len, NULL, NULL);\
-		if((count < 0) && (errno == EAGAIN)) {\
-			MTX_UNLOCK(&replica->r_mtx);\
-			break;\
-		} else if(((uint64_t)count < rsp_len) && (errno == EAGAIN)) {\
-			replica->read_rem_hdr = true;\
-			replica->recv_len = count;\
-			replica->total_len = rsp_len;\
-			MTX_UNLOCK(&replica->r_mtx);\
-			break;\
-		}\
-		/* how about handling for other errno.. same for above and below 'if' cases also */\
-		replica->read_rem_hdr = false;\
-	}\
-	if(replica->io_rsp->opcode == ZVOL_OPCODE_HANDSHAKE) {\
-		MTX_UNLOCK(&replica->r_mtx);\
-		/* where are we handling handshake response */\
-		continue;\
-	}\
-	if(replica->io_rsp->opcode == ZVOL_OPCODE_READ) {\
-		read_io = true;\
-		data = malloc(replica->io_rsp->len);\
-		replica->io_rsp_data = data;\
-		count = read_data(events[i].data.fd, data, replica->io_rsp->len, NULL, NULL);\
-		if (count < 0 && errno == EAGAIN) {\
-			replica->read_rem_data = true;\
-			replica->recv_len = 0;\
-			replica->total_len = replica->io_rsp->len;\
-			MTX_UNLOCK(&replica->r_mtx);\
-			break;\
-		} else if((uint64_t)count < replica->io_rsp->len && errno == EAGAIN) {\
-			replica->read_rem_data = true;\
-			replica->recv_len = count;\
-			replica->total_len = replica->io_rsp->len;\
-			MTX_UNLOCK(&replica->r_mtx);\
-			break;\
-		}\
-		replica->read_rem_data = false;\
-	} else {\
-		read_io = false;\
-	}\
 }
 
 void unblock_blocked_cmds(replica_t *replica)
@@ -589,12 +514,15 @@ void unblock_blocked_cmds(replica_t *replica)
 }
 
 int
-handle_read_resp(spec_t *spec, replica_t *replica, zvol_io_hdr_t *io_rsp, void *data)
+handle_read_resp(spec_t *spec, replica_t *replica)
 {
 	int luworker_id;
 	bool io_found = false;
 	rcmd_t *rep_cmd = NULL;
 	rcommon_cmd_t *rcommq_ptr = NULL;
+	zvol_io_hdr_t *io_rsp = replica->io_resp_hdr;
+	void *data = replica->io_resp_data;
+
 	MTX_LOCK(&replica->r_mtx);
 	//Find IO in read queue, signal luworker, and dequeue
 	TAILQ_FOREACH(rep_cmd, &replica->read_waitq, rread_cmd_next) {
@@ -676,11 +604,13 @@ handle_read_resp(spec_t *spec, replica_t *replica, zvol_io_hdr_t *io_rsp, void *
 }
 
 int
-handle_write_resp(spec_t *spec, replica_t *replica, zvol_io_hdr_t *io_rsp)
+handle_write_resp(spec_t *spec, replica_t *replica)
 {
 	int luworker_id, i;
 	rcmd_t *rep_cmd = NULL;
 	rcommon_cmd_t *rcommq_ptr;
+	zvol_io_hdr_t *io_rsp = replica->io_resp_hdr;
+
 	MTX_LOCK(&replica->r_mtx);
 	TAILQ_FOREACH(rep_cmd, &replica->waitq, rwait_cmd_next) {
 		if(rep_cmd->io_seq == io_rsp->io_seq) {
@@ -723,18 +653,26 @@ handle_write_resp(spec_t *spec, replica_t *replica, zvol_io_hdr_t *io_rsp)
 	MTX_UNLOCK(&replica->r_mtx);
 	return 0;
 }
+
+typedef struct read_event {
+	int fd;
+	int *state;
+	zvol_io_hdr_t *resp_hdr;
+	void **resp_data;
+	int *read_count;
+} read_event_t;
+
+int read_io_resp(spec_t *spec, replica_t *replica, read_event_t *revent);
+
 //Receive IO responses in this thread
 void *
 replica_receiver(void *arg) {
 	spec_t *spec = (spec_t *)arg;
 	replica_t *replica;
-	int i, epfd, event_count, replica_count = 0;
-	int64_t count = 0;
-	void *data;
-	bool read_io = false;
+	int i, epfd, event_count, replica_count = 0, ret;
 	struct epoll_event event, *events;
-	size_t rsp_len = sizeof(zvol_io_hdr_t);
-	zvol_io_hdr_t *io_rsp = NULL;
+	read_event_t revent;
+
 	//Create a new epoll epfd
 	epfd = epoll_create1(0);
 	events = calloc(MAXEVENTS, sizeof(event));
@@ -769,18 +707,16 @@ replica_receiver(void *arg) {
 					}
 				}
 				MTX_UNLOCK(&spec->rq_mtx);
-				while(1) {
-					MTX_LOCK(&replica->r_mtx);
-					read_io_resp();
-					MTX_UNLOCK(&replica->r_mtx);
-execute_io:
-					io_rsp = replica->io_rsp;
-					//TODO A local replica queue needs to be maintained to avoid locing spec again and again
-					if(read_io) {
-						handle_read_resp(spec, replica, io_rsp, replica->io_rsp_data);
-					} else {
-						handle_write_resp(spec, replica, io_rsp);
-					}
+
+				revent.fd = events[i].data.fd;
+				revent.state = &(replica->io_state);
+				revent.resp_hdr = replica->io_resp_hdr;
+				revent.resp_data = &(replica->io_resp_data);
+				revent.read_count = &(replica->io_read);
+
+				ret = read_io_resp(spec, replica, &revent);
+
+				if (ret != 0) {
 					MTX_LOCK(&replica->r_mtx);
 					unblock_blocked_cmds(replica);
 					MTX_UNLOCK(&replica->r_mtx);
@@ -798,7 +734,7 @@ create_replica_entry(spec_t *spec, int mgmt_fd)
 {
 	replica_t *replica = (replica_t *)malloc(sizeof(replica_t));
 	replica->mgmt_fd = mgmt_fd;
-	replica->mgmt_io_state = READ_MGMT_ACK_HDR;
+	replica->mgmt_io_state = READ_IO_RESP_HDR;
 	replica->mgmt_io_read = 0;
 	replica->mgmt_ack = (zvol_io_hdr_t *)malloc(sizeof(zvol_io_hdr_t));
 	replica->mgmt_ack_data = (mgmt_ack_data_t *)malloc(sizeof(mgmt_ack_data_t));
@@ -841,12 +777,10 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd, char *replicaip
 	replica->wrio_seq = 0;
 	replica->rrio_seq = 0;
 	replica->spec = spec;
-	replica->io_rsp = (zvol_io_hdr_t *)malloc(sizeof(zvol_io_hdr_t));
-	replica->io_rsp_data = NULL;
-	replica->recv_len = 0;
-	replica->read_rem_data = false;
-	replica->read_rem_hdr = false;
-	replica->total_len = 0;
+	replica->io_resp_hdr = (zvol_io_hdr_t *)malloc(sizeof(zvol_io_hdr_t));
+	replica->io_resp_data = NULL;
+	replica->io_state = READ_IO_RESP_HDR;
+	replica->io_read = 0;
 	replica->removed = false;
 	MTX_LOCK(&spec->rq_mtx);
 	replica->id = spec->replica_count;
@@ -965,7 +899,7 @@ accept_mgmt_conns(int epfd, int sfd) {
 		}
 
 		event.data.fd = mgmt_fd;
-		event.events = EPOLLIN | EPOLLET;
+		event.events = EPOLLIN | EPOLLHUP | EPOLLERR | EPOLLET;
 		rc = epoll_ctl(epfd, EPOLL_CTL_ADD, mgmt_fd, &event);
 		if(rc == -1) {
 			REPLICA_ERRLOG("epoll_ctl() failed on fd %d, errno:%d.. closing it..", mgmt_fd, errno);
@@ -981,12 +915,12 @@ accept_mgmt_conns(int epfd, int sfd) {
  * breaks if fd is closed or drained recv buf of fd
  * updates amount of data read to continue next time
  */
-#define CHECK_AND_BREAK_IF_PARTIAL(fd_closed, replica, count, reqlen) \
+#define CHECK_AND_ADD_BREAK_IF_PARTIAL(fd_closed, io_read, count, reqlen) \
 { \
 	if (fd_closed == 1) \
 		break; \
 	if (count != reqlen) { \
-		replica->mgmt_io_read += count; \
+		(io_read) += count; \
 		break; \
 	} \
 }
@@ -1025,14 +959,84 @@ get_replica(int mgmt_fd, spec_t **s)
 }
 
 /*
+ * initial state is read io_resp_hdr, which reads IO response.
+ * it transitions to read io_resp_data based on length in hdr.
+ * once data is handled, it goes to read hdr which can be new response.
+ * this goes on until EAGAIN or connection gets closed.
+ */
+int
+read_io_resp(spec_t *spec, replica_t *replica, read_event_t *revent)
+{
+	int fd = revent->fd;
+	int *state = revent->state;
+	zvol_io_hdr_t *resp_hdr = revent->resp_hdr;
+	void **resp_data = revent->resp_data;
+	int *read_count = revent->read_count;
+	uint64_t reqlen, count;
+	int errorno = 0, fd_closed = 0;
+	int donecount = 0;
+
+	switch(*state) {
+		case READ_IO_RESP_HDR:
+read_io_resp_hdr:
+			reqlen = sizeof (zvol_io_hdr_t) - (*read_count);
+			count = read_data(fd, ((uint8_t *)resp_hdr) + (*read_count), reqlen, &errorno, &fd_closed);
+			CHECK_AND_ADD_BREAK_IF_PARTIAL(fd_closed, (*read_count), count, reqlen);
+
+			*read_count = 0;
+			if (resp_hdr->len != 0) {
+			/* this will not be NULL for mgmt_ack IO */
+				if ((*resp_data) == NULL)
+					(*resp_data) = malloc(resp_hdr->len);
+			}
+			*state = READ_IO_RESP_DATA;
+			if (errorno == EAGAIN || errorno == EWOULDBLOCK)
+				break;
+			goto read_io_resp_data;
+		case READ_IO_RESP_DATA:
+read_io_resp_data:
+			reqlen = resp_hdr->len - (*read_count);
+			if (reqlen != 0) {
+				count = read_data(fd, ((uint8_t *)(*resp_data)) + (*read_count), reqlen, &errorno, &fd_closed);
+				CHECK_AND_ADD_BREAK_IF_PARTIAL(fd_closed, (*read_count), count, reqlen);
+			}
+
+			*read_count = 0;
+			switch (resp_hdr->opcode) {
+				case ZVOL_OPCODE_READ:
+					handle_read_resp(spec, replica);
+					replica->io_resp_data = NULL;
+					break;
+				case ZVOL_OPCODE_WRITE:
+					handle_write_resp(spec, replica);
+					break;
+				case ZVOL_OPCODE_HANDSHAKE:
+					if(resp_hdr->len != sizeof (mgmt_ack_data_t))
+						REPLICA_ERRLOG("mgmt_ack_len %lu not matching with size of mgmt_ack_data..\n",
+						    resp_hdr->len);
+
+					/* dont process handshake on data connection */
+					if (fd != replica->iofd)
+						zvol_handshake(spec, replica);
+					break;
+			}
+			donecount++;
+			*state = READ_IO_RESP_HDR;
+			if (errorno == EAGAIN || errorno == EWOULDBLOCK)
+				break;
+			goto read_io_resp_hdr;
+	}
+	return donecount;
+}
+
+/*
  * reads data on management fd until EAGAIN
  */
 void
 handle_read_data_event(int fd)
 {
-	uint64_t reqlen, count;
-	int errorno = 0, fd_closed = 0;
 	spec_t *spec = NULL;
+	read_event_t revent;
 
 	replica_t *replica = get_replica(fd, &spec);
 	if (replica == NULL || spec == NULL) {
@@ -1040,50 +1044,13 @@ handle_read_data_event(int fd)
 		return;
 	}
 
-	/*
-	 * initial state is read mgmt_ack_hdr, which reads response for handshake message.
-	 * it transitions to read mgmt_ack_data based on length in mgmt_ack_hdr.
-	 * once mgmt_ack_data is handled, it goes to read mgmt_ack_hdr which can be new response.
-	 * this goes on until EAGAIN or connection gets closed.
-	 */
-	switch(replica->mgmt_io_state) {
-		case READ_MGMT_ACK_HDR:
-read_mgmt_ack_hdr:
-			reqlen = sizeof (zvol_io_hdr_t) - replica->mgmt_io_read;
-			count = read_data(fd, (uint8_t *)replica->mgmt_ack + replica->mgmt_io_read, reqlen, &errorno, &fd_closed);
-			CHECK_AND_BREAK_IF_PARTIAL(fd_closed, replica, count, reqlen);
+	revent.fd = fd;
+	revent.state = &(replica->mgmt_io_state);
+	revent.resp_hdr = replica->mgmt_ack;
+	revent.resp_data = (void **)(&(replica->mgmt_ack_data));
+	revent.read_count = &(replica->mgmt_io_read);
 
-			replica->mgmt_io_read = 0;
-			switch(replica->mgmt_ack->opcode) {
-				case ZVOL_OPCODE_HANDSHAKE:
-					replica->mgmt_io_state = READ_MGMT_ACK_DATA;
-					if (errorno == EAGAIN || errorno == EWOULDBLOCK)
-						break;
-					goto read_mgmt_ack_data;
-				default:
-					goto read_mgmt_ack_hdr;
-			}
-			break;
-
-		case READ_MGMT_ACK_DATA:
-			if(replica->mgmt_ack->len != sizeof (mgmt_ack_data_t)) {
-				REPLICA_ERRLOG("mgmt_ack_len %lu not matching with size of mgmt_ack_data..\n",
-				    replica->mgmt_ack->len);
-				replica->mgmt_ack->len = sizeof (mgmt_ack_data_t);
-			}
-read_mgmt_ack_data:
-			reqlen = replica->mgmt_ack->len - replica->mgmt_io_read;
-			count = read_data(fd, (uint8_t *)replica->mgmt_ack_data + replica->mgmt_io_read, reqlen, &errorno, &fd_closed);
-			CHECK_AND_BREAK_IF_PARTIAL(fd_closed, replica, count, reqlen);
-
-			zvol_handshake(spec, replica);
-
-			replica->mgmt_io_read = 0;
-			replica->mgmt_io_state = READ_MGMT_ACK_HDR;
-			if (errorno == EAGAIN || errorno == EWOULDBLOCK)
-				break;
-			goto read_mgmt_ack_hdr;
-	}
+	read_io_resp(spec, replica, &revent);
 }
 
 /*

@@ -30,10 +30,10 @@ typedef enum replica_state_s {
  */
 
 /* to read mgmt IO hdr */
-#define READ_MGMT_ACK_HDR	1
+#define READ_IO_RESP_HDR	1
 
 /* to read handshake msg data */
-#define READ_MGMT_ACK_DATA	2
+#define READ_IO_RESP_DATA	2
 
 typedef struct zvol_io_hdr_s zvol_io_hdr_t;
 typedef struct mgmt_ack_data_s mgmt_ack_data_t;
@@ -59,12 +59,10 @@ typedef struct replica_s {
 	uint64_t rrio_seq;
 	uint64_t wrio_seq;
 
-	zvol_io_hdr_t *io_rsp;
-	void *io_rsp_data;
-	uint64_t recv_len;
-        uint64_t total_len;
-	bool read_rem_data;
-	bool read_rem_hdr;
+	zvol_io_hdr_t *io_resp_hdr;
+	void *io_resp_data;
+	int io_state;
+	int io_read; //amount of IO data read in current IO state
 	bool removed;
 	int mgmt_io_state;
 	int mgmt_io_read; //amount of data read in current state
@@ -84,8 +82,8 @@ void *replicator(void *);
 void *replica_sender(void *);
 void *replica_receiver(void *);
 int initialize_replication(void);
-int handle_write_resp(spec_t *, replica_t *, zvol_io_hdr_t *);
-int handle_read_resp(spec_t *, replica_t *, zvol_io_hdr_t *, void *);
+int handle_write_resp(spec_t *, replica_t *);
+int handle_read_resp(spec_t *, replica_t *);
 int update_replica_list(int, spec_t *, int);
 int remove_replica_from_list(spec_t *, int);
 void unblock_blocked_cmds(replica_t *);
