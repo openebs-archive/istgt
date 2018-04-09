@@ -18,11 +18,9 @@ typedef struct istgt_lu_disk_t spec_t;
 typedef struct rcmd_s rcmd_t;
 
 typedef enum replica_state_s {
-	ADDED_TO_SPEC,
-	NEED_TO_ADD_TO_EPOLL,
-	ADDED_TO_EPOLL,
-	REMOVED_FROM_EPOLL,
-	NEED_REMOVAL_FROM_EPOLL,
+	REPLICA_DEGRADED = 1,
+	REPLICA_HELATHY,
+	REPLICA_ERRORED,
 } replica_state_t;
 
 /* replica state on mgmt thread for mgmt IOs
@@ -52,6 +50,7 @@ typedef struct replica_s {
 	int id;
 	int iofd;
 	int mgmt_fd;
+	int sender_epfd;
 	int port;
 	char *ip;
 	uint64_t least_recvd;
