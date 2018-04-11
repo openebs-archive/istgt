@@ -281,29 +281,18 @@ write_to_socket:
 void *
 replica_sender(void *arg) {
 	replica_t *replica = (replica_t *)arg;
-	int epfd, rc;
+	int rc;
 	rcommon_cmd_t *cmd = NULL;
 	rcmd_t *rcmd = NULL;
-	struct epoll_event event;
 	rcommon_cmd_t *rcommq_ptr;//REMOVE
-	epfd = epoll_create1(0);
-
-	event.data.fd = replica->iofd;
-	event.events = EPOLLOUT;
-	rc = epoll_ctl(epfd, EPOLL_CTL_ADD, replica->iofd, &event);
-	if (rc == -1) {
-		REPLICA_LOG("ERROR\n");
-		exit(1);
-	}
 	while(1) {
 		MTX_LOCK(&replica->r_mtx);
 dequeue_rsendq:
 		rcmd = TAILQ_FIRST(&replica->sendq);
 		if(!rcmd) {
 			pthread_cond_wait(&replica->r_cond, &replica->r_mtx);
-			if(replica->removed == true) {
+			if(replica->state == REPLICA_ERRORED) {
 				MTX_UNLOCK(&replica->r_mtx);
-				close(epfd);
 				break;
 			}
 			goto dequeue_rsendq;
@@ -319,46 +308,13 @@ dequeue_rsendq:
 		}
 		MTX_UNLOCK(&replica->r_mtx);
 		cmd = rcmd->rcommq_ptr;
-		rc = sendio(epfd, replica->iofd, cmd, rcmd);
+		rc = sendio(replica->sender_epfd, replica->iofd, cmd, rcmd);
 		if(rc < 0) {
 			remove_replica_from_list(replica->spec, replica->iofd);
-			close(epfd);
 			break;
 		}
 	}
 	return(NULL);
-}
-
-int
-update_replica_list(int epfd, spec_t *spec, int replica_count) {
-	replica_t *replica;
-	struct epoll_event event;
-	int rc;
-	MTX_LOCK(&spec->rq_mtx);
-	TAILQ_FOREACH(replica, &spec->rq, r_next) {
-		if(replica->state == ADDED_TO_EPOLL) {
-			continue;
-		} else if(replica->state == ADDED_TO_SPEC){
-			event.data.fd = replica->iofd;
-			event.events = EPOLLIN | EPOLLET;
-			rc = epoll_ctl(epfd, EPOLL_CTL_ADD, replica->iofd, &event);
-			if (rc == -1) {
-				MTX_UNLOCK(&spec->rq_mtx);
-				return -1;
-			}
-			replica->state = ADDED_TO_EPOLL;
-			replica_count++;
-		} else if(replica->state == NEED_REMOVAL_FROM_EPOLL) {
-			rc = epoll_ctl(epfd, EPOLL_CTL_DEL, replica->iofd, &event);
-			if (rc == -1) {
-				MTX_UNLOCK(&spec->rq_mtx);
-				return -1;
-			}
-			replica->state = REMOVED_FROM_EPOLL;
-		}
-	}
-	MTX_UNLOCK(&spec->rq_mtx);
-	return replica_count;
 }
 
 void update_volstate(spec_t *spec) {
@@ -420,13 +376,15 @@ void clear_replica_cmd(spec_t *spec, replica_t *replica, rcmd_t *rep_cmd) {
 int
 remove_replica_from_list(spec_t *spec, int iofd) {
 	replica_t *replica;
-	int ios_aborted = 0;
+	int ios_aborted = 0, rc;
 	rcmd_t *rep_cmd = NULL;
+	struct epoll_event event;
 	MTX_LOCK(&spec->rq_mtx);
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
 		if(iofd == replica->iofd) {
 			REPLICA_LOG("REMOVE REPLICA FROM LIST\n");
 			MTX_LOCK(&replica->r_mtx);
+			replica->state = REPLICA_ERRORED;
 			//Empty waitq of replica
 			while((rep_cmd = TAILQ_FIRST(&replica->waitq))) {
 				clear_replica_cmd(spec, replica, rep_cmd);
@@ -447,7 +405,12 @@ remove_replica_from_list(spec_t *spec, int iofd) {
 			//based on state of  replica when it gets disconnected
 			update_volstate(spec);
 			TAILQ_REMOVE(&spec->rq, replica, r_next);
+			rc = epoll_ctl(spec->receiver_epfd, EPOLL_CTL_DEL, replica->iofd, &event);
+			if (rc == -1) {
+				return -1;
+			}
 			close(replica->iofd);
+			close(replica->sender_epfd);
 			break;
 		}
 	}
@@ -689,12 +652,12 @@ void *
 replica_receiver(void *arg) {
 	spec_t *spec = (spec_t *)arg;
 	replica_t *replica;
-	int i, epfd, event_count, replica_count = 0, ret;
+	int i, event_count, replica_count = 0, ret;
 	struct epoll_event event, *events;
 	read_event_t revent;
 
 	//Create a new epoll epfd
-	epfd = epoll_create1(0);
+	int epfd = spec->receiver_epfd;
 	events = calloc(MAXEVENTS, sizeof(event));
 	while(1) {
 		if(replica_count == 0) {
@@ -704,10 +667,6 @@ replica_receiver(void *arg) {
 				pthread_cond_wait(&spec->rq_cond, &spec->rq_mtx);
 			}
 			MTX_UNLOCK(&spec->rq_mtx);
-		}
-		//Check if number of available replicas have changed
-		if(replica_count != spec->replica_count) {
-			replica_count = update_replica_list(epfd, spec, replica_count);
 		}
 		//Wait for events on all iofds
 		event_count = epoll_wait(epfd, events, MAXEVENTS, -1);
@@ -775,12 +734,12 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd, char *replicaip
 	rc = pthread_mutex_init(&replica->r_mtx, NULL); //check
 	if (rc != 0) {
 		REPLICA_ERRLOG("pthread_mutex_init() failed errno:%d\n", errno);
-		exit(EXIT_FAILURE);
+		return NULL;
 	}
 	rc = pthread_cond_init(&replica->r_cond, NULL); //check
 	if (rc != 0) {
 		REPLICA_ERRLOG("pthread_cond_init() failed errno:%d\n", errno);
-		exit(EXIT_FAILURE);
+		return NULL;
 	}
 	TAILQ_INIT(&replica->sendq);
 	TAILQ_INIT(&replica->waitq);
@@ -790,7 +749,7 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd, char *replicaip
 	replica->ip = malloc(strlen(replicaip)+1);
 	strcpy(replica->ip, replicaip);
 	replica->port = replica_port;
-	replica->state = ADDED_TO_SPEC;
+	replica->state = REPLICA_DEGRADED;
 	replica->least_recvd = 0;
 	replica->wrio_seq = 0;
 	replica->rrio_seq = 0;
@@ -809,12 +768,6 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd, char *replicaip
 	if(spec->replica_count == 1)
 		pthread_cond_signal(&spec->rq_cond);
 	MTX_UNLOCK(&spec->rq_mtx);
-	rc = pthread_create(&replica_sender_thread, NULL, &replica_sender,
-			(void *)replica);
-	if (rc != 0) {
-		ISTGT_ERRLOG("pthread_create(replicator_thread) failed\n");
-		return NULL;
-	}
 	zvol_io_hdr_t *rio;
 	rio = (zvol_io_hdr_t *)malloc(sizeof(zvol_io_hdr_t));
 	rio->opcode = ZVOL_OPCODE_HANDSHAKE;
@@ -826,6 +779,27 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd, char *replicaip
 	free(rio);
 	rio = NULL;
 	update_volstate(spec);
+	struct epoll_event event;
+	event.data.fd = replica->iofd;
+	event.events = EPOLLIN | EPOLLET;
+	rc = epoll_ctl(spec->receiver_epfd, EPOLL_CTL_ADD, iofd, &event);
+	if (rc == -1) {
+		return NULL;
+	}
+	replica->sender_epfd = epoll_create1(0);
+	event.data.fd = replica->iofd;
+	event.events = EPOLLOUT;
+	rc = epoll_ctl(replica->sender_epfd, EPOLL_CTL_ADD, replica->iofd, &event);
+	if (rc == -1) {
+		REPLICA_LOG("epoll_ctl_add failed errno:%d\n", errno);
+		return NULL;
+	}
+	rc = pthread_create(&replica_sender_thread, NULL, &replica_sender,
+			(void *)replica);
+	if (rc != 0) {
+		ISTGT_ERRLOG("pthread_create(replicator_thread) failed\n");
+		return NULL;
+	}
 	return replica;
 }
 
@@ -1223,6 +1197,9 @@ initialize_volume(spec_t *spec) {
 	spec->healthy_rcount = 0;
 	spec->degraded_rcount = 0;
 	spec->ready = false;
+	spec->receiver_epfd = epoll_create1(0);
+	if(spec->receiver_epfd < 0)
+		return -1;
 	rc = pthread_mutex_init(&spec->rcommonq_mtx, NULL); //check
 	if (rc != 0) {
 		perror("rq_mtx_init failed");

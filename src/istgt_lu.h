@@ -824,6 +824,7 @@ typedef struct istgt_lu_disk_t {
 	int healthy_rcount;
 	int degraded_rcount;
 	bool ready;
+	int receiver_epfd;
 	/*Common for both the above queues,
 	Since same cmd is part of both the queues*/
 	pthread_cond_t rq_cond;
