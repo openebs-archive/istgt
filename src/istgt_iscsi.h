@@ -211,7 +211,7 @@ typedef struct istgt_r2t_task_t {
 
 	uint64_t iobufsize;
 	int iobufindx;
-	struct iovec iobuf[20];
+	struct iovec iobuf[40];
 	//int iobufoff[20]; int iobufsize[20]; uint8_t *iobuf[20];
 
 	uint32_t R2TSN;

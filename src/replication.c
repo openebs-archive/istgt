@@ -397,6 +397,11 @@ remove_replica_from_list(spec_t *spec, int iofd) {
 				TAILQ_REMOVE(&replica->blockedq, rep_cmd, rblocked_cmd_next);
 				ios_aborted++;
 			}
+			while((rep_cmd = TAILQ_FIRST(&replica->read_waitq))) {
+				clear_replica_cmd(spec, replica, rep_cmd);
+				TAILQ_REMOVE(&replica->read_waitq, rep_cmd, rread_cmd_next);
+				ios_aborted++;
+			}
 			replica->removed = true;
 			pthread_cond_signal(&replica->r_cond);
 			MTX_UNLOCK(&replica->r_mtx);
@@ -405,10 +410,7 @@ remove_replica_from_list(spec_t *spec, int iofd) {
 			//based on state of  replica when it gets disconnected
 			update_volstate(spec);
 			TAILQ_REMOVE(&spec->rq, replica, r_next);
-			rc = epoll_ctl(spec->receiver_epfd, EPOLL_CTL_DEL, replica->iofd, &event);
-			if (rc == -1) {
-				return -1;
-			}
+			epoll_ctl(spec->receiver_epfd, EPOLL_CTL_DEL, replica->iofd, &event);
 			close(replica->iofd);
 			close(replica->sender_epfd);
 			break;
@@ -455,7 +457,10 @@ read_data(int fd, uint8_t *data, uint64_t len, int *errorno, int *fd_closed) {
 			}
 		}
 		else if (rc == 0) {
-			REPLICA_ERRLOG("received EOF on fd %d..\n", fd);
+			REPLICA_ERRLOG("received EOF on fd %d, closing it..\n", fd);
+			close(fd);
+			if (fd_closed != NULL)
+				*fd_closed = 1;
 			break;
 		}
 		nbytes += rc;
