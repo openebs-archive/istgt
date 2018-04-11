@@ -99,7 +99,9 @@ int allocate_replica_id(spec_t *spec) {
 }
 
 void release_replica_id(spec_t *spec, int replica_id) {
+	MTX_LOCK(&spec->rq_mtx);
 	spec->replica_ids &= ~(1 << replica_id);
+	MTX_UNLOCK(&spec->rq_mtx);
 }
 
 
@@ -148,11 +150,11 @@ replica_t *get_next_replica(spec_t *spec, replica_t *replica) {
 	if(replica == NULL) {
 		replica = TAILQ_FIRST(&spec->rq);
 	} else {
-		replica->refcount--;
+		__sync_fetch_and_sub(&replica->refcount, 1);
 		replica = TAILQ_NEXT(replica, r_next);
 	}
 	if(replica != NULL)
-		replica->refcount++;
+		__sync_fetch_and_add(&replica->refcount, 1);
 	MTX_UNLOCK(&spec->rq_mtx);
 	return replica;
 }
@@ -203,8 +205,10 @@ dequeue_common_sendq:
 			//Create an entry for replica queue
 			build_rcmd();
 			MTX_LOCK(&replica->r_mtx);
-			if(replica->removed) {
+			if(replica->state == REPLICA_ERRORED) {
+				put_to_mempool(&rcmd_mempool, rcmd);
 				MTX_UNLOCK(&replica->r_mtx);
+				replica = get_next_replica(spec, replica);
 				continue;
 			}
 			cmd->bitset |= (1 << replica->id);
@@ -290,9 +294,7 @@ write_to_socket:
 void *
 replica_sender(void *arg) {
 	replica_t *replica = (replica_t *)arg;
-	MTX_LOCK(&replica->spec->rq_mtx);
-	replica->refcount++;
-	MTX_UNLOCK(&replica->spec->rq_mtx);
+	__sync_fetch_and_add(&replica->refcount, 1);
 	int rc;
 	rcommon_cmd_t *cmd = NULL;
 	rcmd_t *rcmd = NULL;
@@ -305,6 +307,7 @@ dequeue_rsendq:
 			pthread_cond_wait(&replica->r_cond, &replica->r_mtx);
 			if(replica->state == REPLICA_ERRORED) {
 				MTX_UNLOCK(&replica->r_mtx);
+				cleanup_replica(replica);
 				break;
 			}
 			goto dequeue_rsendq;
@@ -321,20 +324,18 @@ dequeue_rsendq:
 		MTX_UNLOCK(&replica->r_mtx);
 		cmd = rcmd->rcommq_ptr;
 		rc = sendio(replica->sender_epfd, replica->iofd, cmd, rcmd);
-		if(rc < 0) {
-			if(replica->state == REPLICA_ERRORED) {
-				break;
-			}
-			MTX_LOCK(&replica->r_mtx);
-			remove_replica_from_list(replica->spec, replica->iofd);
-			replica->state = REPLICA_ERRORED;
+		MTX_LOCK(&replica->r_mtx);
+		if(replica->state == REPLICA_ERRORED) {
 			MTX_UNLOCK(&replica->r_mtx);
+			cleanup_replica(replica);
+			break;
+		} else if (rc < 0) {
+			MTX_UNLOCK(&replica->r_mtx);
+			remove_replica_from_list(replica->spec, replica);
 			break;
 		}
+		MTX_UNLOCK(&replica->r_mtx);
 	}
-	MTX_LOCK(&replica->spec->rq_mtx);
-	replica->refcount--;
-	MTX_UNLOCK(&replica->spec->rq_mtx);
 	return(NULL);
 }
 
@@ -388,45 +389,37 @@ void clear_replica_cmd(spec_t *spec, replica_t *replica, rcmd_t *rep_cmd) {
 	}
 }
 
-
-int
-remove_replica_from_list(spec_t *spec, int iofd) {
-	replica_t *replica;
-	int ios_aborted = 0;
+void
+remove_replica_from_list(spec_t *spec, replica_t *replica) {
+	int ios_aborted = 0, rep_id;
 	rcmd_t *rep_cmd = NULL;
 	MTX_LOCK(&spec->rq_mtx);
-	TAILQ_FOREACH(replica, &spec->rq, r_next) {
-		if(iofd == replica->iofd) {
-			REPLICA_LOG("REMOVE REPLICA FROM LIST\n");
-			MTX_LOCK(&replica->r_mtx);
-			replica->state = REPLICA_ERRORED;
-			//Empty waitq of replica
-			while((rep_cmd = TAILQ_FIRST(&replica->waitq))) {
-				clear_replica_cmd(spec, replica, rep_cmd);
-				TAILQ_REMOVE(&replica->waitq, rep_cmd, rwait_cmd_next);
-				ios_aborted++;
-			}
-			//Empty blockedq of replica
-			while((rep_cmd = TAILQ_FIRST(&replica->blockedq))) {
-				clear_replica_cmd(spec, replica, rep_cmd);
-				TAILQ_REMOVE(&replica->blockedq, rep_cmd, rblocked_cmd_next);
-				ios_aborted++;
-			}
-			replica->removed = true;
-			pthread_cond_signal(&replica->r_cond);
-			//TODO Update spec->degraded_rcount || spec->healthy_rcount over here
-			//based on state of  replica when it gets disconnected
-			TAILQ_REMOVE(&spec->rq, replica, r_next);
-			release_replica_id(spec, replica->id);
-			cleanup_replica(replica);
-			MTX_UNLOCK(&replica->r_mtx);
-			update_volstate(spec);
-			break;
-		}
+	MTX_LOCK(&replica->r_mtx);
+	REPLICA_LOG("REMOVE REPLICA FROM LIST\n");
+	if(replica->state == REPLICA_DEGRADED)
+		spec->degraded_rcount--;
+	if(replica->state == REPLICA_HEALTHY)
+		spec->healthy_rcount--;
+	update_volstate(spec);
+	replica->state = REPLICA_ERRORED;
+	//Empty waitq of replica
+	while((rep_cmd = TAILQ_FIRST(&replica->waitq))) {
+		clear_replica_cmd(spec, replica, rep_cmd);
+		TAILQ_REMOVE(&replica->waitq, rep_cmd, rwait_cmd_next);
+		ios_aborted++;
 	}
+	//Empty blockedq of replica
+	while((rep_cmd = TAILQ_FIRST(&replica->blockedq))) {
+		clear_replica_cmd(spec, replica, rep_cmd);
+		TAILQ_REMOVE(&replica->blockedq, rep_cmd, rblocked_cmd_next);
+		ios_aborted++;
+	}
+	pthread_cond_signal(&replica->r_cond);
+	TAILQ_REMOVE(&spec->rq, replica, r_next);
 	MTX_UNLOCK(&spec->rq_mtx);
-	REPLICA_LOG("%d IOs aborted for replica %d", ios_aborted, replica->id);
-	return 0;
+	rep_id = replica->id;
+	cleanup_replica(replica);
+	REPLICA_LOG("%d IOs aborted for replica %d", ios_aborted, rep_id);
 }
 
 /*
@@ -657,8 +650,24 @@ typedef struct read_event {
 	int *read_count;
 } read_event_t;
 
-int read_io_resp(spec_t *spec, replica_t *replica, read_event_t *revent);
+int read_and_process_io_resp(spec_t *spec, replica_t *replica, read_event_t *revent);
 
+replica_t *
+get_replica_from_iofd(spec_t *spec, int iofd) {
+	replica_t *replica;
+	MTX_LOCK(&spec->rq_mtx);
+	TAILQ_FOREACH(replica, &spec->rq, r_next) {
+		if(iofd == replica->iofd) {
+			MTX_LOCK(&replica->r_mtx);
+			__sync_fetch_and_add(&replica->refcount, 1);
+			MTX_UNLOCK(&replica->r_mtx);
+			MTX_UNLOCK(&spec->rq_mtx);
+			return replica;
+		}
+	}
+	MTX_UNLOCK(&spec->rq_mtx);
+	return NULL;
+}
 //Receive IO responses in this thread
 void *
 replica_receiver(void *arg) {
@@ -687,18 +696,30 @@ replica_receiver(void *arg) {
 			if ((events[i].events & EPOLLERR) ||
 					(events[i].events & EPOLLHUP) ||
 					(!(events[i].events & EPOLLIN))) {
-				remove_replica_from_list(spec, events[i].data.fd);
+				get_replica_from_iofd(spec, events[i].data.fd);
+				remove_replica_from_list(spec, replica);
 				REPLICA_LOG("epoll error\n");
 				continue;
 			} else {
 				MTX_LOCK(&spec->rq_mtx);
 				TAILQ_FOREACH(replica, &spec->rq, r_next) {
 					if(events[i].data.fd == replica->iofd) {
-						replica->refcount++;
+						MTX_LOCK(&replica->r_mtx);
+						if(replica->state == REPLICA_ERRORED) {
+							MTX_UNLOCK(&replica->r_mtx);
+							cleanup_replica(replica);
+							replica = NULL;
+							break;
+						}
+						MTX_UNLOCK(&replica->r_mtx);
+						__sync_fetch_and_add(&replica->refcount, 1);
 						break;
 					}
 				}
 				MTX_UNLOCK(&spec->rq_mtx);
+				if(replica == NULL) {
+					continue;
+				}
 
 				revent.fd = events[i].data.fd;
 				revent.state = &(replica->io_state);
@@ -706,19 +727,21 @@ replica_receiver(void *arg) {
 				revent.resp_data = &(replica->io_resp_data);
 				revent.read_count = &(replica->io_read);
 
-				ret = read_io_resp(spec, replica, &revent);
-				if (ret == -1) {
+				ret = read_and_process_io_resp(spec, replica, &revent);
+				MTX_LOCK(&replica->r_mtx);
+				if(replica->state == REPLICA_ERRORED) {
+					MTX_UNLOCK(&replica->r_mtx);
 					cleanup_replica(replica);
 					continue;
-				}
-				if (ret != 0) {
-					MTX_LOCK(&replica->r_mtx);
+				} else if (ret == -1) {
+					MTX_UNLOCK(&replica->r_mtx);
+					remove_replica_from_list(spec, replica);
+					continue;
+				} else if (ret != 0) {
 					unblock_blocked_cmds(replica);
 					MTX_UNLOCK(&replica->r_mtx);
 				}
-				MTX_LOCK(&spec->rq_mtx);
-				replica->refcount--;
-				MTX_UNLOCK(&spec->rq_mtx);
+				__sync_fetch_and_sub(&replica->refcount, 1);
 			}
 		}
 	}
@@ -727,6 +750,7 @@ replica_receiver(void *arg) {
 }
 
 void cleanup_replica(replica_t *replica) {
+	MTX_LOCK(&replica->r_mtx);
 	if(replica->mgmt_fd != -1)  {
 		close(replica->mgmt_fd);
 		replica->mgmt_fd = -1;
@@ -739,7 +763,9 @@ void cleanup_replica(replica_t *replica) {
 		close(replica->sender_epfd);
 		replica->sender_epfd = -1;
 	}
-	if(--replica->refcount != 0) {
+	__sync_fetch_and_sub(&replica->refcount, 1);
+	if(replica->refcount != 0) {
+		MTX_UNLOCK(&replica->r_mtx);
 		return;
 	}
 	if(replica->io_resp_hdr) {
@@ -750,6 +776,8 @@ void cleanup_replica(replica_t *replica) {
 	}
 	free(replica->mgmt_ack);
 	free(replica->mgmt_ack_data);
+	MTX_UNLOCK(&replica->r_mtx);
+	release_replica_id(replica->spec, replica->id);
 	free(replica);
 }
 
@@ -758,8 +786,9 @@ replica_t *
 create_replica_entry(spec_t *spec, int mgmt_fd)
 {
 	replica_t *replica = (replica_t *)malloc(sizeof(replica_t));
-	replica->mgmt_fd = mgmt_fd;
 	replica->refcount = 0;
+	__sync_fetch_and_add(&replica->refcount, 1);
+	replica->mgmt_fd = mgmt_fd;
 	replica->iofd = -1;
 	replica->io_resp_hdr = NULL;
 	replica->ip = NULL;
@@ -770,8 +799,9 @@ create_replica_entry(spec_t *spec, int mgmt_fd)
 	MTX_LOCK(&spec->rq_mtx);
 	replica->id = allocate_replica_id(spec);
 	if(replica->id == -1) {
-		cleanup_replica(replica);
 		MTX_UNLOCK(&spec->rq_mtx);
+		cleanup_replica(replica);
+		free(replica);
 		return NULL;
 	}
 	TAILQ_INSERT_TAIL(&spec->rwaitq, replica, r_waitnext);
@@ -820,14 +850,8 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd, char *replicaip
 	replica->io_resp_data = NULL;
 	replica->io_state = READ_IO_RESP_HDR;
 	replica->io_read = 0;
-	replica->removed = false;
 	MTX_LOCK(&spec->rq_mtx);
 	TAILQ_REMOVE(&spec->rwaitq, replica, r_waitnext);
-	spec->degraded_rcount++;
-	TAILQ_INSERT_TAIL(&spec->rq, replica, r_next);
-	if(spec->degraded_rcount + spec->healthy_rcount == 1)
-		pthread_cond_signal(&spec->rq_cond);
-	update_volstate(spec);
 	MTX_UNLOCK(&spec->rq_mtx);
 	zvol_io_hdr_t *rio;
 	rio = (zvol_io_hdr_t *)malloc(sizeof(zvol_io_hdr_t));
@@ -860,6 +884,13 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd, char *replicaip
 		ISTGT_ERRLOG("pthread_create(replicator_thread) failed\n");
 		return NULL;
 	}
+	MTX_LOCK(&spec->rq_mtx);
+	spec->degraded_rcount++;
+	TAILQ_INSERT_TAIL(&spec->rq, replica, r_next);
+	if(spec->degraded_rcount + spec->healthy_rcount == 1)
+		pthread_cond_signal(&spec->rq_cond);
+	update_volstate(spec);
+	MTX_UNLOCK(&spec->rq_mtx);
 	return replica;
 cleanup:
 	cleanup_replica(replica);
@@ -1023,7 +1054,7 @@ get_replica(int mgmt_fd, spec_t **s)
  * this goes on until EAGAIN or connection gets closed.
  */
 int
-read_io_resp(spec_t *spec, replica_t *replica, read_event_t *revent)
+read_and_process_io_resp(spec_t *spec, replica_t *replica, read_event_t *revent)
 {
 	int fd = revent->fd;
 	int *state = revent->state;
@@ -1036,7 +1067,7 @@ read_io_resp(spec_t *spec, replica_t *replica, read_event_t *revent)
 
 	switch(*state) {
 		case READ_IO_RESP_HDR:
-read_io_resp_hdr:
+read_and_process_io_resp_hdr:
 			reqlen = sizeof (zvol_io_hdr_t) - (*read_count);
 			count = read_data(fd, ((uint8_t *)resp_hdr) + (*read_count), reqlen, &errorno, &fd_closed);
 			CHECK_AND_ADD_BREAK_IF_PARTIAL(fd_closed, (*read_count), count, reqlen);
@@ -1050,9 +1081,9 @@ read_io_resp_hdr:
 			*state = READ_IO_RESP_DATA;
 			if (errorno == EAGAIN || errorno == EWOULDBLOCK)
 				break;
-			goto read_io_resp_data;
+			goto read_and_process_io_resp_data;
 		case READ_IO_RESP_DATA:
-read_io_resp_data:
+read_and_process_io_resp_data:
 			reqlen = resp_hdr->len - (*read_count);
 			if (reqlen != 0) {
 				count = read_data(fd, ((uint8_t *)(*resp_data)) + (*read_count), reqlen, &errorno, &fd_closed);
@@ -1082,7 +1113,7 @@ read_io_resp_data:
 			*state = READ_IO_RESP_HDR;
 			if (errorno == EAGAIN || errorno == EWOULDBLOCK)
 				break;
-			goto read_io_resp_hdr;
+			goto read_and_process_io_resp_hdr;
 	}
 	if(fd_closed == 1) {
 		return -1;
@@ -1112,7 +1143,7 @@ handle_read_data_event(int fd)
 	revent.resp_data = (void **)(&(replica->mgmt_ack_data));
 	revent.read_count = &(replica->mgmt_io_read);
 
-	read_io_resp(spec, replica, &revent);
+	read_and_process_io_resp(spec, replica, &revent);
 }
 
 /*

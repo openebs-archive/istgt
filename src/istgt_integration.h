@@ -18,9 +18,9 @@ typedef struct istgt_lu_disk_t spec_t;
 typedef struct rcmd_s rcmd_t;
 
 typedef enum replica_state_s {
-	REPLICA_DEGRADED = 1,
-	REPLICA_HELATHY,
-	REPLICA_ERRORED,
+	REPLICA_DEGRADED = 1, //Every replica is attached in degraded state
+	REPLICA_HEALTHY,      //Replica is moved to this state when replica state enquiry returns healthy
+	REPLICA_ERRORED,      //When there is an error on any of the fds, replica is moved to this state
 } replica_state_t;
 
 /* replica state on mgmt thread for mgmt IOs
@@ -85,7 +85,7 @@ int initialize_replication(void);
 int handle_write_resp(spec_t *, replica_t *);
 int handle_read_resp(spec_t *, replica_t *);
 int update_replica_list(int, spec_t *, int);
-int remove_replica_from_list(spec_t *, int);
+void remove_replica_from_list(spec_t *, replica_t *);
 void unblock_blocked_cmds(replica_t *);
 
 replica_t *create_replica_entry(spec_t *, int);

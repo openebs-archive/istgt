@@ -128,6 +128,7 @@ int allocate_replica_id(spec_t *);
 void release_replica_id(spec_t *, int);
 void cleanup_replica(replica_t *);
 replica_t *get_next_replica(spec_t *, replica_t *);
+replica_t *get_replica_from_iofd(spec_t *, int);
 #define REPLICA_LOG(fmt, ...)  syslog(LOG_NOTICE, 	 "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
 #define REPLICA_NOTICELOG(fmt, ...) syslog(LOG_NOTICE, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
 #define REPLICA_ERRLOG(fmt, ...) syslog(LOG_ERR,  	 "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
