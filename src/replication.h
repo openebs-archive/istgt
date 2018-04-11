@@ -74,7 +74,6 @@ typedef struct rcommon_cmd_s {
 	void *data;
 	uint64_t total;
 	int64_t iovcnt;
-	uint64_t bitset;
 	struct iovec iov[41];
 } rcommon_cmd_t;
 

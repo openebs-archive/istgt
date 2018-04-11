@@ -127,6 +127,19 @@ send_mgmtio(int fd, zvol_op_code_t mgmt_opcode, void *buf, size_t data_len) {
 	return 0;
 }
 
+#define CHECK_FOR_BLOCKAGE_IN_Q(queue, next) {\
+	if(cmd_blocked == false) {\
+		TAILQ_FOREACH(pending_rcmd, queue, next) {\
+			pending_cmd = pending_rcmd->rcommq_ptr;\
+			check_for_blockage();\
+			if(cmd_blocked == true) {\
+				TAILQ_INSERT_TAIL(&replica->blockedq, rcmd, rblocked_cmd_next);\
+				break;\
+			}\
+		}\
+	}\
+}
+
 //Picks cmds from send queue and sends them to replica
 void *
 replicator(void *arg) {
@@ -178,24 +191,10 @@ dequeue_common_sendq:
 				TAILQ_INSERT_TAIL(&replica->blockedq, rcmd, rblocked_cmd_next);
 			else {
 				cmd_blocked = false;
-				TAILQ_FOREACH(pending_rcmd, &replica->sendq, rsend_cmd_next) {
-					pending_cmd = pending_rcmd->rcommq_ptr;
-					check_for_blockage();
-					if(cmd_blocked == true) {
-						TAILQ_INSERT_TAIL(&replica->blockedq, rcmd, rblocked_cmd_next);
-						break;
-					}
-				}
-				if(cmd_blocked == false) {
-					TAILQ_FOREACH(pending_rcmd, &replica->waitq, rwait_cmd_next) {
-						pending_cmd = pending_rcmd->rcommq_ptr;
-						check_for_blockage();
-						if(cmd_blocked == true) {
-							TAILQ_INSERT_TAIL(&replica->blockedq, rcmd, rblocked_cmd_next);
-							break;
-						}
-					}
-				}
+				CHECK_FOR_BLOCKAGE_IN_Q((&replica->sendq), rsend_cmd_next)
+				CHECK_FOR_BLOCKAGE_IN_Q((&replica->waitq), rwait_cmd_next)
+				CHECK_FOR_BLOCKAGE_IN_Q((&replica->read_waitq), rread_cmd_next)
+
 				if(cmd_blocked == false) {
 					TAILQ_INSERT_TAIL(&replica->sendq, rcmd, rsend_cmd_next);
 					if(rcmd->opcode == ZVOL_OPCODE_READ) {
@@ -376,7 +375,7 @@ void clear_replica_cmd(spec_t *spec, replica_t *replica, rcmd_t *rep_cmd) {
 int
 remove_replica_from_list(spec_t *spec, int iofd) {
 	replica_t *replica;
-	int ios_aborted = 0, rc;
+	int ios_aborted = 0;
 	rcmd_t *rep_cmd = NULL;
 	struct epoll_event event;
 	MTX_LOCK(&spec->rq_mtx);
