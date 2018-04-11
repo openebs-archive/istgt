@@ -123,12 +123,12 @@ run_data_integrity_test() {
 	sleep 15
 	write_and_verify_data
 
-	sudo kill -9 $replica3_pid
+	sudo kill -9 $replica1_pid
 	sleep 5
 	write_and_verify_data
 
-	sudo $REPLICATION_TEST "$CONTROLLER_IP" "$CONTROLLER_PORT" "$replica3_ip" "$replica3_port" "/tmp/test_vol3" &
-	replica3_pid=$!
+	sudo $REPLICATION_TEST "$CONTROLLER_IP" "$CONTROLLER_PORT" "$replica1_ip" "$replica1_port" "/tmp/test_vol1" &
+	replica1_pid=$!
 	sleep 5
 	write_and_verify_data
 

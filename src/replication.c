@@ -172,6 +172,9 @@ dequeue_common_sendq:
 		//Enqueue to individual replica cmd queues and send on the respective fds
 		read_cmd_sent = false;
 		MTX_LOCK(&spec->rq_mtx);
+
+		//this lock is required to make sure copies_sent is incremented before processing the responses and exiting
+		MTX_LOCK(&cmd->rcommand_mtx);
 		TAILQ_FOREACH(replica, &spec->rq, r_next) {
 			if(replica == NULL) {
 				REPLICA_LOG("Replica not present");
@@ -208,6 +211,7 @@ dequeue_common_sendq:
 				break;
 			}
 		}
+		MTX_UNLOCK(&cmd->rcommand_mtx);
 		MTX_UNLOCK(&spec->rq_mtx);
 	}
 }
