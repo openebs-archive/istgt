@@ -48,6 +48,7 @@ typedef struct replica_s {
 	replica_state_t state;
 	spec_t *spec;
 	int id;
+	int refcount;
 	int iofd;
 	int mgmt_fd;
 	int sender_epfd;
