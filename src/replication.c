@@ -145,20 +145,6 @@ send_mgmtio(int fd, zvol_op_code_t mgmt_opcode, void *buf, size_t data_len) {
 	return 0;
 }
 
-replica_t *get_next_replica(spec_t *spec, replica_t *replica) {
-	MTX_LOCK(&spec->rq_mtx);
-	if(replica == NULL) {
-		replica = TAILQ_FIRST(&spec->rq);
-	} else {
-		__sync_fetch_and_sub(&replica->refcount, 1);
-		replica = TAILQ_NEXT(replica, r_next);
-	}
-	if(replica != NULL)
-		__sync_fetch_and_add(&replica->refcount, 1);
-	MTX_UNLOCK(&spec->rq_mtx);
-	return replica;
-}
-
 //Picks cmds from send queue and sends them to replica
 void *
 replicator(void *arg) {
@@ -199,16 +185,16 @@ dequeue_common_sendq:
 
 		//Enqueue to individual replica cmd queues and send on the respective fds
 		read_cmd_sent = false;
-		replica = NULL;
-		replica = get_next_replica(spec, replica);
-		while(replica != NULL) {
+		MTX_LOCK(&spec->rq_mtx);
+		TAILQ_FOREACH(replica, &spec->rq, r_next) {
 			//Create an entry for replica queue
 			build_rcmd();
 			MTX_LOCK(&replica->r_mtx);
+			__sync_fetch_and_add(&replica->refcount, 1);
 			if(replica->state == REPLICA_ERRORED) {
 				put_to_mempool(&rcmd_mempool, rcmd);
+				__sync_fetch_and_sub(&replica->refcount, 1);
 				MTX_UNLOCK(&replica->r_mtx);
-				replica = get_next_replica(spec, replica);
 				continue;
 			}
 			cmd->bitset |= (1 << replica->id);
@@ -222,12 +208,13 @@ dequeue_common_sendq:
 				}
 				pthread_cond_signal(&replica->r_cond);
 			}
+			__sync_fetch_and_sub(&replica->refcount, 1);
 			MTX_UNLOCK(&replica->r_mtx);
 			if((rcmd->opcode == ZVOL_OPCODE_READ) && read_cmd_sent) {
 				break;
 			}
-			replica = get_next_replica(spec, replica);
 		}
+		MTX_UNLOCK(&spec->rq_mtx);
 	}
 }
 
@@ -345,7 +332,6 @@ void update_volstate(spec_t *spec) {
 		(spec->healthy_rcount  + spec->degraded_rcount 
 			>= MAX(spec->replication_factor - spec->consistency_factor + 1, spec->consistency_factor))) {
 		spec->ready = true;
-		pthread_cond_broadcast(&spec->rq_cond);
 	} else {
 		spec->ready = false;
 	}
@@ -418,6 +404,9 @@ remove_replica_from_list(spec_t *spec, replica_t *replica) {
 	TAILQ_REMOVE(&spec->rq, replica, r_next);
 	MTX_UNLOCK(&spec->rq_mtx);
 	rep_id = replica->id;
+	MTX_LOCK(&replica->r_mtx);
+	__sync_fetch_and_sub(&replica->refcount, 1);
+	MTX_UNLOCK(&replica->r_mtx);
 	cleanup_replica(replica);
 	REPLICA_LOG("%d IOs aborted for replica %d", ios_aborted, rep_id);
 }
@@ -681,14 +670,6 @@ replica_receiver(void *arg) {
 	int epfd = spec->receiver_epfd;
 	events = calloc(MAXEVENTS, sizeof(event));
 	while(1) {
-		if(spec->degraded_rcount + spec->healthy_rcount == 0) {
-			MTX_LOCK(&spec->rq_mtx);
-			if(spec->degraded_rcount + spec->healthy_rcount == 0) {
-				//Wait until at least one IO connection has been made to a registered replica
-				pthread_cond_wait(&spec->rq_cond, &spec->rq_mtx);
-			}
-			MTX_UNLOCK(&spec->rq_mtx);
-		}
 		//Wait for events on all iofds
 		event_count = epoll_wait(epfd, events, MAXEVENTS, -1);
 		for(i=0; i< event_count; i++) {
@@ -739,9 +720,9 @@ replica_receiver(void *arg) {
 					continue;
 				} else if (ret != 0) {
 					unblock_blocked_cmds(replica);
+					__sync_fetch_and_sub(&replica->refcount, 1);
 					MTX_UNLOCK(&replica->r_mtx);
 				}
-				__sync_fetch_and_sub(&replica->refcount, 1);
 			}
 		}
 	}
@@ -819,12 +800,14 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd, char *replicaip
 
 	int rc;
 	pthread_t replica_sender_thread;
-	rc = pthread_mutex_init(&replica->r_mtx, NULL); //check
+	__sync_fetch_and_add(&replica->refcount, 1);
+	rc = pthread_mutex_init(&replica->r_mtx, NULL);
 	if (rc != 0) {
 		REPLICA_ERRLOG("pthread_mutex_init() failed errno:%d\n", errno);
+		//TODO what if mutex is not inited, in cleanup we are taking this lock
 		goto cleanup;
 	}
-	rc = pthread_cond_init(&replica->r_cond, NULL); //check
+	rc = pthread_cond_init(&replica->r_cond, NULL);
 	if (rc != 0) {
 		REPLICA_ERRLOG("pthread_cond_init() failed errno:%d\n", errno);
 		rc = pthread_mutex_destroy(&replica->r_mtx);
@@ -868,7 +851,8 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd, char *replicaip
 	event.events = EPOLLIN | EPOLLET;
 	rc = epoll_ctl(spec->receiver_epfd, EPOLL_CTL_ADD, iofd, &event);
 	if (rc == -1) {
-		return NULL;
+		REPLICA_LOG("epoll_ctl_add failed errno:%d\n", errno);
+		goto cleanup;
 	}
 	replica->sender_epfd = epoll_create1(0);
 	event.data.fd = replica->iofd;
@@ -876,19 +860,17 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd, char *replicaip
 	rc = epoll_ctl(replica->sender_epfd, EPOLL_CTL_ADD, replica->iofd, &event);
 	if (rc == -1) {
 		REPLICA_LOG("epoll_ctl_add failed errno:%d\n", errno);
-		return NULL;
+		goto cleanup;
 	}
 	rc = pthread_create(&replica_sender_thread, NULL, &replica_sender,
 			(void *)replica);
 	if (rc != 0) {
-		ISTGT_ERRLOG("pthread_create(replicator_thread) failed\n");
-		return NULL;
+		REPLICA_ERRLOG("pthread_create(replicator_thread) failed\n");
+		goto cleanup;
 	}
 	MTX_LOCK(&spec->rq_mtx);
 	spec->degraded_rcount++;
 	TAILQ_INSERT_TAIL(&spec->rq, replica, r_next);
-	if(spec->degraded_rcount + spec->healthy_rcount == 1)
-		pthread_cond_signal(&spec->rq_cond);
 	update_volstate(spec);
 	MTX_UNLOCK(&spec->rq_mtx);
 	return replica;
