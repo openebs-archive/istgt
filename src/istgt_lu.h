@@ -818,11 +818,11 @@ typedef struct istgt_lu_disk_t {
 	TAILQ_HEAD(, rcommon_cmd_s) rcommon_pendingq; //Contains IOs waiting for acks from remaining replicas
 	TAILQ_HEAD(, replica_s) rq; //Queue of replicas connected to this spec(volume)
 	TAILQ_HEAD(, replica_s) rwaitq; //Queue of replicas completed handshake, and yet to have data connection to this spec(volume)
-	int replica_count;
 	int replication_factor;
 	int consistency_factor;
 	int healthy_rcount;
 	int degraded_rcount;
+	uint64_t replica_ids;
 	bool ready;
 	int receiver_epfd;
 	/*Common for both the above queues,
