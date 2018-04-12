@@ -551,7 +551,7 @@ handle_read_resp(spec_t *spec, replica_t *replica)
 #define handle_consistency_met() {\
 	rcommq_ptr->status = 1; \
 	TAILQ_REMOVE(&spec->rcommon_waitq, rcommq_ptr, wait_cmd_next); \
-	if (rcommq_ptr->acks_recvd != rcommq_ptr->copies_sent) { \
+	if ((rcommq_ptr->acks_recvd + rcommq_ptr->ios_aborted) != rcommq_ptr->copies_sent) { \
 		rcommq_ptr->state = CMD_ENQUEUED_TO_PENDINGQ; \
 		TAILQ_INSERT_TAIL(&spec->rcommon_pendingq, rcommq_ptr, pending_cmd_next); \
 	} else { \
