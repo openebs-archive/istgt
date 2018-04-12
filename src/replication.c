@@ -173,8 +173,6 @@ dequeue_common_sendq:
 		read_cmd_sent = false;
 		MTX_LOCK(&spec->rq_mtx);
 
-		//this lock is required to make sure copies_sent is incremented before processing the responses and exiting
-		MTX_LOCK(&cmd->rcommand_mtx);
 		TAILQ_FOREACH(replica, &spec->rq, r_next) {
 			if(replica == NULL) {
 				REPLICA_LOG("Replica not present");
@@ -211,7 +209,6 @@ dequeue_common_sendq:
 				break;
 			}
 		}
-		MTX_UNLOCK(&cmd->rcommand_mtx);
 		MTX_UNLOCK(&spec->rq_mtx);
 	}
 }
@@ -375,6 +372,12 @@ void clear_replica_cmd(spec_t *spec, replica_t *replica, rcmd_t *rep_cmd) {
 	}
 }
 
+#define EMPTY_Q_OF_REPLICA(queue, next) \
+	while((rep_cmd = TAILQ_FIRST((queue)))) { \
+		clear_replica_cmd(spec, replica, rep_cmd); \
+		TAILQ_REMOVE((queue), rep_cmd, next); \
+		ios_aborted++; \
+	}
 
 int
 remove_replica_from_list(spec_t *spec, int iofd) {
@@ -385,43 +388,33 @@ remove_replica_from_list(spec_t *spec, int iofd) {
 	MTX_LOCK(&spec->rq_mtx);
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
 		if(iofd == replica->iofd) {
+			TAILQ_REMOVE(&spec->rq, replica, r_next);
+			spec->replica_count--;
+			update_volstate(spec);
 			REPLICA_LOG("REMOVE REPLICA FROM LIST\n");
 			MTX_LOCK(&replica->r_mtx);
+			MTX_UNLOCK(&spec->rq_mtx);
 			replica->state = REPLICA_ERRORED;
-			//Empty waitq of replica
-			while((rep_cmd = TAILQ_FIRST(&replica->waitq))) {
-				clear_replica_cmd(spec, replica, rep_cmd);
-				TAILQ_REMOVE(&replica->waitq, rep_cmd, rwait_cmd_next);
-				ios_aborted++;
-			}
-			//Empty blockedq of replica
-			while((rep_cmd = TAILQ_FIRST(&replica->blockedq))) {
-				clear_replica_cmd(spec, replica, rep_cmd);
-				TAILQ_REMOVE(&replica->blockedq, rep_cmd, rblocked_cmd_next);
-				ios_aborted++;
-			}
-			while((rep_cmd = TAILQ_FIRST(&replica->read_waitq))) {
-				clear_replica_cmd(spec, replica, rep_cmd);
-				TAILQ_REMOVE(&replica->read_waitq, rep_cmd, rread_cmd_next);
-				ios_aborted++;
-			}
+
+			EMPTY_Q_OF_REPLICA((&replica->waitq), rwait_cmd_next)
+			EMPTY_Q_OF_REPLICA((&replica->blockedq), rblocked_cmd_next)
+			EMPTY_Q_OF_REPLICA((&replica->read_waitq), rread_cmd_next)
+
 			replica->removed = true;
 			pthread_cond_signal(&replica->r_cond);
 			MTX_UNLOCK(&replica->r_mtx);
-			spec->replica_count--;
 			//TODO Update spec->degraded_rcount || spec->healthy_rcount over here
 			//based on state of  replica when it gets disconnected
-			update_volstate(spec);
-			TAILQ_REMOVE(&spec->rq, replica, r_next);
 			epoll_ctl(spec->receiver_epfd, EPOLL_CTL_DEL, replica->iofd, &event);
 			close(replica->iofd);
 			close(replica->sender_epfd);
 			break;
 		}
 	}
-	MTX_UNLOCK(&spec->rq_mtx);
 	if (replica != NULL)
 		REPLICA_LOG("%d IOs aborted for replica %d", ios_aborted, replica->id);
+	else
+		MTX_UNLOCK(&spec->rq_mtx);
 	return 0;
 }
 
@@ -618,12 +611,22 @@ handle_write_resp(spec_t *spec, replica_t *replica)
 			if(rep_cmd->ack_recvd == true) {
 				replica->least_recvd++;
 				MTX_UNLOCK(&replica->r_mtx);
+
+				//below lock/unlock sequence is to make sure atomically that
+				//copies_sent is incremented by adding command to all replicas.
+				//this is actually required only in the case of
+				//(rcommq_ptr->acks_recvd + rcommq_ptr->ios_aborted == rcommq_ptr->copies_sent)
+				MTX_LOCK(&spec->rq_mtx);
+				MTX_UNLOCK(&spec->rq_mtx);
+
 				MTX_LOCK(&spec->rcommonq_mtx);
 				MTX_LOCK(&rcommq_ptr->rcommand_mtx);
 				rcommq_ptr->acks_recvd++;
 				luworker_id = rcommq_ptr->luworker_id;
 
 				if (rcommq_ptr->acks_recvd == spec->consistency_factor) {
+					//above condition will be met only once, so, below condition not required
+					//if (rcommq_ptr->status != 1)
 					handle_consistency_met();
 				} else if (rcommq_ptr->acks_recvd + rcommq_ptr->ios_aborted
 						== rcommq_ptr->copies_sent) {
