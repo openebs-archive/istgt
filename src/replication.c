@@ -30,11 +30,10 @@ extern size_t rcommon_cmd_mempool_count;
 
 #define build_replica_io_hdr() \
 {\
-	rio = (zvol_io_hdr_t *)malloc(sizeof(zvol_io_hdr_t));\
-	rio->opcode = cmd->opcode;\
-	rio->io_seq = cmd->io_seq;\
-	rio->offset = cmd->offset;\
-	rio->len    = cmd->data_len;\
+	rio.opcode = cmd->opcode;\
+	rio.io_seq = cmd->io_seq;\
+	rio.offset = cmd->offset;\
+	rio.len    = cmd->data_len;\
 }
 #define build_replica_mgmt_hdr() \
 {\
@@ -128,19 +127,32 @@ send_mgmtio(int fd, zvol_op_code_t mgmt_opcode, void *buf, size_t data_len) {
 	return 0;
 }
 
+#define CHECK_FOR_BLOCKAGE_IN_Q(queue, next) {\
+	if(cmd_blocked == false) {\
+		TAILQ_FOREACH(pending_rcmd, queue, next) {\
+			pending_cmd = pending_rcmd->rcommq_ptr;\
+			check_for_blockage();\
+			if(cmd_blocked == true) {\
+				TAILQ_INSERT_TAIL(&replica->blockedq, rcmd, rblocked_cmd_next);\
+				break;\
+			}\
+		}\
+	}\
+}
+
 //Picks cmds from send queue and sends them to replica
 void *
 replicator(void *arg) {
 	spec_t *spec = (spec_t *)arg;
 	replica_t *replica;
 	bool read_cmd_sent;
-	uint64_t bitset;
 	int i = 0;
 	rcommon_cmd_t *cmd = NULL;
 	rcmd_t *rcmd = NULL;
 	bool cmd_blocked = false;
 	uint64_t io_seq = 0;
 	rcommon_cmd_t *pending_cmd;
+	rcmd_t *pending_rcmd;
 
 	while(1) {
 		MTX_LOCK(&spec->rcommonq_mtx);
@@ -152,23 +164,15 @@ dequeue_common_sendq:
 		}
 		cmd->io_seq = ++io_seq;
 		cmd->acks_recvd = 0;
-		cmd->bitset = 0;
 		TAILQ_REMOVE(&spec->rcommon_sendq, cmd, send_cmd_next);
-		cmd->state = CMD_ENQUEUED_TO_WAITQ; \
+		cmd->state = CMD_ENQUEUED_TO_WAITQ;
 		TAILQ_INSERT_TAIL(&spec->rcommon_waitq, cmd, wait_cmd_next);
-		//Check for blockage in rcommon_pendingq and set corresponding blocked replica bits
-		bitset = 0;
-		TAILQ_FOREACH(pending_cmd, &spec->rcommon_pendingq, pending_cmd_next) {
-			check_for_blockage();
-			if(cmd_blocked == true) {
-				bitset |= pending_cmd->bitset;
-			}
-		}
 		MTX_UNLOCK(&spec->rcommonq_mtx);
 
 		//Enqueue to individual replica cmd queues and send on the respective fds
 		read_cmd_sent = false;
 		MTX_LOCK(&spec->rq_mtx);
+
 		TAILQ_FOREACH(replica, &spec->rq, r_next) {
 			if(replica == NULL) {
 				REPLICA_LOG("Replica not present");
@@ -182,16 +186,23 @@ dequeue_common_sendq:
 				MTX_UNLOCK(&replica->r_mtx);
 				continue;
 			}
-			cmd->bitset |= (1 << replica->id);
 			cmd->copies_sent++;
-			if(bitset & (1 << replica->id)) {
+
+			if (!TAILQ_EMPTY(&replica->blockedq))
 				TAILQ_INSERT_TAIL(&replica->blockedq, rcmd, rblocked_cmd_next);
-			} else {
-				TAILQ_INSERT_TAIL(&replica->sendq, rcmd, rsend_cmd_next);
-				if(rcmd->opcode == ZVOL_OPCODE_READ) {
-					read_cmd_sent = true;
+			else {
+				cmd_blocked = false;
+				CHECK_FOR_BLOCKAGE_IN_Q((&replica->sendq), rsend_cmd_next)
+				CHECK_FOR_BLOCKAGE_IN_Q((&replica->waitq), rwait_cmd_next)
+				CHECK_FOR_BLOCKAGE_IN_Q((&replica->read_waitq), rread_cmd_next)
+
+				if(cmd_blocked == false) {
+					TAILQ_INSERT_TAIL(&replica->sendq, rcmd, rsend_cmd_next);
+					if(rcmd->opcode == ZVOL_OPCODE_READ) {
+						read_cmd_sent = true;
+					}
+					pthread_cond_signal(&replica->r_cond);
 				}
-				pthread_cond_signal(&replica->r_cond);
 			}
 			MTX_UNLOCK(&replica->r_mtx);
 			if((rcmd->opcode == ZVOL_OPCODE_READ) && read_cmd_sent) {
@@ -206,11 +217,17 @@ int
 wait_for_fd(int epfd) {
 	int event_count = 0;
 	struct epoll_event event;
+epollwait:
 	event_count = epoll_wait(epfd, &event, 1, -1);
-	if ((event.events & EPOLLERR) ||
-			(event.events & EPOLLHUP) ||
-			(!(event.events & EPOLLOUT))) {
-		REPLICA_LOG("epoll error: %d\n", errno);
+
+	if (event_count < 0) {
+		if (errno == EINTR)
+			goto epollwait;
+		REPLICA_ERRLOG("epoll_wait ret %d err %d.. better to restart..\n", event_count, errno);
+		goto epollwait;
+	}
+	if (!(event.events & EPOLLOUT)) {
+		REPLICA_LOG("epoll err event %d on fd %d..\n", event.events, event.data.fd);
 		return -1;
 	} else {
 		return 0;
@@ -219,13 +236,13 @@ wait_for_fd(int epfd) {
 
 int
 sendio(int epfd, int fd, rcommon_cmd_t *cmd, rcmd_t *rcmd) {
-	zvol_io_hdr_t *rio = NULL;
+	zvol_io_hdr_t rio;
 	int i = 0;
 	int64_t rc = 0;
 	int64_t nbytes = 0;
 	nbytes = cmd->total_len;
 	build_replica_io_hdr();
-	rcmd->iov[0].iov_base = rio;
+	rcmd->iov[0].iov_base = &rio;
 	rcmd->iov[0].iov_len = sizeof(zvol_io_hdr_t);
 	nbytes += sizeof(zvol_io_hdr_t);
 	while (nbytes) {
@@ -233,15 +250,16 @@ write_to_socket:
 		rc = writev(fd, rcmd->iov, rcmd->iovcnt+1);
 		if (rc < 0) {
 			if (errno == EAGAIN) {
-				wait_for_fd(epfd);
-				goto write_to_socket;
+				rc = wait_for_fd(epfd);
+				if (rc == 0)
+					goto write_to_socket;
+				return -1;
 			} else {
-				//REPLICA_LOG("write error %d on replica %s\n", rc, rcmd->r->ip);
-				free(rio);
-				rio = NULL;
+				REPLICA_LOG("write error %ld on fd %d\n", rc, fd);
 				return -1;
 			}
-		}
+		} else if (rc == 0)
+			REPLICA_LOG("fd %d returned 0\n", fd);
 		nbytes -= rc;
 		if (nbytes <= 0)
 			break;
@@ -257,8 +275,6 @@ write_to_socket:
 			}
 		}
 	}
-	free(rio);
-	rio = NULL;
 	return 0;
 }
 
@@ -312,88 +328,93 @@ void update_volstate(spec_t *spec) {
 		spec->ready = false;
 	}
 }
-//TODO Use locks for accessing rcommq_ptr, common waitq and common pendingq
+
 void clear_replica_cmd(spec_t *spec, replica_t *replica, rcmd_t *rep_cmd) {
-	int i;
 	rcommon_cmd_t *rcommq_ptr = rep_cmd->rcommq_ptr;
 	int luworker_id = rcommq_ptr->luworker_id;
-	rcommq_ptr->bitset &= ~(1 << replica->id);
 	//TODO Add check for acks_received in read also, same as write
 	if(rep_cmd->opcode == ZVOL_OPCODE_READ) {
+		MTX_LOCK(&rcommq_ptr->rcommand_mtx);
 		rcommq_ptr->state = CMD_EXECUTION_DONE;
 		rcommq_ptr->status = -1;
 		rcommq_ptr->completed = true;
+		MTX_UNLOCK(&rcommq_ptr->rcommand_mtx);
 		signal_luworker();
 	} else if(rep_cmd->opcode == ZVOL_OPCODE_WRITE) {
+		MTX_LOCK(&spec->rcommonq_mtx);
+		MTX_LOCK(&rcommq_ptr->rcommand_mtx);
 		rcommq_ptr->ios_aborted++;
 		if(rcommq_ptr->acks_recvd + rcommq_ptr->ios_aborted
 				== rcommq_ptr->copies_sent) {
-			for (i=1; i < rcommq_ptr->iovcnt + 1; i++) {
-				xfree(rcommq_ptr->iov[i].iov_base);
-			}
 			rcommq_ptr->ios_aborted++;
-			if(rcommq_ptr->state == CMD_ENQUEUED_TO_PENDINGQ) {
+			if(rcommq_ptr->state == CMD_ENQUEUED_TO_PENDINGQ)
 				TAILQ_REMOVE(&spec->rcommon_pendingq, rcommq_ptr, pending_cmd_next);
-			} else if(rcommq_ptr->state == CMD_ENQUEUED_TO_WAITQ) {
+			else if(rcommq_ptr->state == CMD_ENQUEUED_TO_WAITQ)
 				TAILQ_REMOVE(&spec->rcommon_waitq, rcommq_ptr, wait_cmd_next);
-			}
+			MTX_UNLOCK(&spec->rcommonq_mtx);
 			rcommq_ptr->state = CMD_EXECUTION_DONE;
 			if(rcommq_ptr->completed) {
-				put_to_mempool(&rcommon_cmd_mempool, rcommq_ptr);
+				MTX_UNLOCK(&rcommq_ptr->rcommand_mtx);
+				clear_rcomm_cmd(rcommq_ptr);
 			} else {
 				rcommq_ptr->completed = true;
 				if (rcommq_ptr->acks_recvd < spec->consistency_factor) {
 					rcommq_ptr->status = -1;
 					signal_luworker();
 				}
+				MTX_UNLOCK(&rcommq_ptr->rcommand_mtx);
 			}
+		}
+		else {
+			MTX_UNLOCK(&rcommq_ptr->rcommand_mtx);
+			MTX_UNLOCK(&spec->rcommonq_mtx);
 		}
 	}
 }
 
+#define EMPTY_Q_OF_REPLICA(queue, next) \
+	while((rep_cmd = TAILQ_FIRST((queue)))) { \
+		clear_replica_cmd(spec, replica, rep_cmd); \
+		TAILQ_REMOVE((queue), rep_cmd, next); \
+		ios_aborted++; \
+	}
 
 int
 remove_replica_from_list(spec_t *spec, int iofd) {
 	replica_t *replica;
-	int ios_aborted = 0, rc;
+	int ios_aborted = 0;
 	rcmd_t *rep_cmd = NULL;
 	struct epoll_event event;
 	MTX_LOCK(&spec->rq_mtx);
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
 		if(iofd == replica->iofd) {
+			TAILQ_REMOVE(&spec->rq, replica, r_next);
+			spec->replica_count--;
+			update_volstate(spec);
 			REPLICA_LOG("REMOVE REPLICA FROM LIST\n");
 			MTX_LOCK(&replica->r_mtx);
+			MTX_UNLOCK(&spec->rq_mtx);
 			replica->state = REPLICA_ERRORED;
-			//Empty waitq of replica
-			while((rep_cmd = TAILQ_FIRST(&replica->waitq))) {
-				clear_replica_cmd(spec, replica, rep_cmd);
-				TAILQ_REMOVE(&replica->waitq, rep_cmd, rwait_cmd_next);
-				ios_aborted++;
-			}
-			//Empty blockedq of replica
-			while((rep_cmd = TAILQ_FIRST(&replica->blockedq))) {
-				clear_replica_cmd(spec, replica, rep_cmd);
-				TAILQ_REMOVE(&replica->blockedq, rep_cmd, rblocked_cmd_next);
-				ios_aborted++;
-			}
+
+			EMPTY_Q_OF_REPLICA((&replica->waitq), rwait_cmd_next)
+			EMPTY_Q_OF_REPLICA((&replica->blockedq), rblocked_cmd_next)
+			EMPTY_Q_OF_REPLICA((&replica->read_waitq), rread_cmd_next)
+
 			replica->removed = true;
 			pthread_cond_signal(&replica->r_cond);
 			MTX_UNLOCK(&replica->r_mtx);
-			spec->replica_count--;
 			//TODO Update spec->degraded_rcount || spec->healthy_rcount over here
 			//based on state of  replica when it gets disconnected
-			update_volstate(spec);
-			TAILQ_REMOVE(&spec->rq, replica, r_next);
-			rc = epoll_ctl(spec->receiver_epfd, EPOLL_CTL_DEL, replica->iofd, &event);
-			if (rc == -1) {
-				return -1;
-			}
+			epoll_ctl(spec->receiver_epfd, EPOLL_CTL_DEL, replica->iofd, &event);
 			close(replica->iofd);
 			close(replica->sender_epfd);
+			break;
 		}
 	}
-	MTX_UNLOCK(&spec->rq_mtx);
-	REPLICA_LOG("%d IOs aborted for replica %d", ios_aborted, replica->id);
+	if (replica != NULL)
+		REPLICA_LOG("%d IOs aborted for replica %d", ios_aborted, replica->id);
+	else
+		MTX_UNLOCK(&spec->rq_mtx);
 	return 0;
 }
 
@@ -494,7 +515,9 @@ handle_read_resp(spec_t *spec, replica_t *replica)
 			rep_cmd->ack_recvd = true;
 			TAILQ_REMOVE(&replica->read_waitq, rep_cmd, rread_cmd_next);
 			MTX_UNLOCK(&replica->r_mtx);
+			MTX_LOCK(&spec->rcommonq_mtx);
 			rcommq_ptr = rep_cmd->rcommq_ptr;
+			MTX_LOCK(&rcommq_ptr->rcommand_mtx);
 			rcommq_ptr->status = 1;
 			rcommq_ptr->data = data;
 			rcommq_ptr->data_len = io_rsp->len;
@@ -503,14 +526,15 @@ handle_read_resp(spec_t *spec, replica_t *replica)
 
 			signal_luworker();
 
-			MTX_LOCK(&spec->rcommonq_mtx);
 			TAILQ_REMOVE(&spec->rcommon_waitq, rcommq_ptr, wait_cmd_next);
 			rcommq_ptr->state = CMD_EXECUTION_DONE;
 			if(rcommq_ptr->completed) {
+				MTX_UNLOCK(&rcommq_ptr->rcommand_mtx);
 				MTX_UNLOCK(&spec->rcommonq_mtx);
-				put_to_mempool(&rcommon_cmd_mempool, rcommq_ptr);
+				clear_rcomm_cmd(rcommq_ptr);
 			} else {
 				rcommq_ptr->completed = true;
+				MTX_UNLOCK(&rcommq_ptr->rcommand_mtx);
 				MTX_UNLOCK(&spec->rcommonq_mtx);
 			}
 			return 0;
@@ -526,27 +550,19 @@ handle_read_resp(spec_t *spec, replica_t *replica)
 
 #define handle_consistency_met() {\
 	rcommq_ptr->status = 1; \
-	MTX_LOCK(&spec->rcommonq_mtx); \
 	TAILQ_REMOVE(&spec->rcommon_waitq, rcommq_ptr, wait_cmd_next); \
-	if (rcommq_ptr->acks_recvd != rcommq_ptr->copies_sent) { \
+	if ((rcommq_ptr->acks_recvd + rcommq_ptr->ios_aborted) != rcommq_ptr->copies_sent) { \
 		rcommq_ptr->state = CMD_ENQUEUED_TO_PENDINGQ; \
 		TAILQ_INSERT_TAIL(&spec->rcommon_pendingq, rcommq_ptr, pending_cmd_next); \
 	} else { \
-		for (i=1; i < rcommq_ptr->iovcnt + 1; i++) { \
-			xfree(rcommq_ptr->iov[i].iov_base); \
-		} \
 		rcommq_ptr->state = CMD_EXECUTION_DONE; \
 		rcommq_ptr->completed = true; \
 	} \
-	MTX_UNLOCK(&spec->rcommonq_mtx); \
+	MTX_UNLOCK(&rcommq_ptr->rcommand_mtx); \
 	signal_luworker(); \
 }
 
 #define handle_all_resp_recvd() { \
-	MTX_LOCK(&spec->rcommonq_mtx); \
-	for (i=1; i < rcommq_ptr->iovcnt + 1; i++) { \
-		xfree(rcommq_ptr->iov[i].iov_base); \
-	} \
 	if(rcommq_ptr->state == CMD_ENQUEUED_TO_PENDINGQ) { \
 		TAILQ_REMOVE(&spec->rcommon_pendingq, rcommq_ptr, pending_cmd_next); \
 	} else if(rcommq_ptr->state == CMD_ENQUEUED_TO_WAITQ) { \
@@ -554,7 +570,8 @@ handle_read_resp(spec_t *spec, replica_t *replica)
 	} \
 	rcommq_ptr->state = CMD_EXECUTION_DONE; \
 	if(rcommq_ptr->completed) { \
-		put_to_mempool(&rcommon_cmd_mempool, rcommq_ptr); \
+		MTX_UNLOCK(&rcommq_ptr->rcommand_mtx); \
+		clear_rcomm_cmd(rcommq_ptr); \
 		rcommq_ptr = NULL; \
 	} else { \
 		rcommq_ptr->completed = true; \
@@ -562,14 +579,14 @@ handle_read_resp(spec_t *spec, replica_t *replica)
 			rcommq_ptr->status = -1; \
 			signal_luworker(); \
 		} \
+		MTX_UNLOCK(&rcommq_ptr->rcommand_mtx); \
 	} \
-	MTX_UNLOCK(&spec->rcommonq_mtx); \
 }
 
 int
 handle_write_resp(spec_t *spec, replica_t *replica)
 {
-	int luworker_id, i;
+	int luworker_id;
 	rcmd_t *rep_cmd = NULL;
 	rcommon_cmd_t *rcommq_ptr;
 	zvol_io_hdr_t *io_rsp = replica->io_resp_hdr;
@@ -594,16 +611,30 @@ handle_write_resp(spec_t *spec, replica_t *replica)
 			if(rep_cmd->ack_recvd == true) {
 				replica->least_recvd++;
 				MTX_UNLOCK(&replica->r_mtx);
+
+				//below lock/unlock sequence is to make sure atomically that
+				//copies_sent is incremented by adding command to all replicas.
+				//this is actually required only in the case of
+				//(rcommq_ptr->acks_recvd + rcommq_ptr->ios_aborted == rcommq_ptr->copies_sent)
+				MTX_LOCK(&spec->rq_mtx);
+				MTX_UNLOCK(&spec->rq_mtx);
+
+				MTX_LOCK(&spec->rcommonq_mtx);
+				MTX_LOCK(&rcommq_ptr->rcommand_mtx);
 				rcommq_ptr->acks_recvd++;
 				luworker_id = rcommq_ptr->luworker_id;
 
-				rcommq_ptr->bitset &= ~(1 << replica->id);
 				if (rcommq_ptr->acks_recvd == spec->consistency_factor) {
+					//above condition will be met only once, so, below condition not required
+					//if (rcommq_ptr->status != 1)
 					handle_consistency_met();
 				} else if (rcommq_ptr->acks_recvd + rcommq_ptr->ios_aborted
 						== rcommq_ptr->copies_sent) {
 					handle_all_resp_recvd();
 				}
+				else
+					MTX_UNLOCK(&rcommq_ptr->rcommand_mtx);
+				MTX_UNLOCK(&spec->rcommonq_mtx);
 				MTX_LOCK(&replica->r_mtx);
 				TAILQ_REMOVE(&replica->waitq, rep_cmd, rwait_cmd_next);
 				put_to_mempool(&rcmd_mempool, rep_cmd);
@@ -652,9 +683,7 @@ replica_receiver(void *arg) {
 		event_count = epoll_wait(epfd, events, MAXEVENTS, -1);
 		for(i=0; i< event_count; i++) {
 			//Remove the replica from queue
-			if ((events[i].events & EPOLLERR) ||
-					(events[i].events & EPOLLHUP) ||
-					(!(events[i].events & EPOLLIN))) {
+			if (!(events[i].events & EPOLLIN)) {
 				remove_replica_from_list(spec, events[i].data.fd);
 				REPLICA_LOG("epoll error\n");
 				continue;
@@ -851,13 +880,6 @@ accept_mgmt_conns(int epfd, int sfd) {
 			REPLICA_LOG("Accepted connection on descriptor %d "
 					"(host=%s, port=%s)\n", mgmt_fd, hbuf, sbuf);
 		}
-		rc = make_socket_non_blocking(mgmt_fd);
-		if (rc == -1) {
-			REPLICA_ERRLOG("make_socket_non_blocking() failed on fd %d, errno:%d.. closing it..", mgmt_fd, errno);
-			close(mgmt_fd);
-			continue;
-		}
-
 		MTX_LOCK(&specq_mtx);
 		TAILQ_FOREACH(spec, &spec_q, spec_next) {
 			data_len = snprintf(buf, BUFSIZE, "%s", spec->lu->volname) + 1;
@@ -871,7 +893,12 @@ accept_mgmt_conns(int epfd, int sfd) {
 			close(mgmt_fd);
 			continue;
 		}
-
+		rc = make_socket_non_blocking(mgmt_fd);
+		if (rc == -1) {
+			REPLICA_ERRLOG("make_socket_non_blocking() failed on fd %d, errno:%d.. closing it..", mgmt_fd, errno);
+			close(mgmt_fd);
+			continue;
+		}
 		event.data.fd = mgmt_fd;
 		event.events = EPOLLIN | EPOLLHUP | EPOLLERR | EPOLLET;
 		rc = epoll_ctl(epfd, EPOLL_CTL_ADD, mgmt_fd, &event);

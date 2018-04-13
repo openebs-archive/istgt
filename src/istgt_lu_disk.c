@@ -89,7 +89,8 @@ size_t rcommon_cmd_mempool_count = RCOMMON_CMD_MEMPOOL_ENTRIES;
 
 #define build_rcomm_cmd \
 	{\
-		rcomm_cmd = get_from_mempool(&rcommon_cmd_mempool);	\
+		rcomm_cmd = get_from_mempool(&rcommon_cmd_mempool);\
+		rc = pthread_mutex_init(&rcomm_cmd->rcommand_mtx, NULL);\
 		rcomm_cmd->total = 0;\
 		rcomm_cmd->copies_sent = 0;\
 		rcomm_cmd->total_len = 0;\
@@ -5551,6 +5552,17 @@ istgt_lu_disk_scsi_reserve(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr 
 }
 
 #ifdef REPLICATION
+
+void
+clear_rcomm_cmd(rcommon_cmd_t *rcomm_cmd)
+{
+	int i;
+	pthread_mutex_destroy(&(rcomm_cmd->rcommand_mtx));
+	for (i=1; i<rcomm_cmd->iovcnt + 1; i++)
+		xfree(rcomm_cmd->iov[i].iov_base);
+	put_to_mempool(&rcommon_cmd_mempool, rcomm_cmd);
+}
+
 int64_t
 replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t nbytes)
 {
@@ -5563,8 +5575,8 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	MTX_LOCK(&spec->rcommonq_mtx);
 	if(spec->ready == false) {
 		REPLICA_LOG("SPEC is not ready\n");
-		put_to_mempool(&rcommon_cmd_mempool, rcomm_cmd);
 		MTX_UNLOCK(&spec->rcommonq_mtx);
+		clear_rcomm_cmd(rcomm_cmd);
 		return -1;
 	}
 	TAILQ_INSERT_TAIL(&spec->rcommon_sendq, rcomm_cmd, send_cmd_next);
@@ -5575,13 +5587,16 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 		pthread_cond_wait(&spec->luworker_rcond[cmd->luworkerindx], &spec->luworker_rmutex[cmd->luworkerindx]);
 	MTX_UNLOCK(&spec->luworker_rmutex[cmd->luworkerindx]);
 	MTX_LOCK(&spec->rcommonq_mtx);
+	MTX_LOCK(&rcomm_cmd->rcommand_mtx);
 	status = rcomm_cmd->status;
 	if(status == -1 )  {
 		ISTGT_LOG("STATUS = -1\n");
 		if(rcomm_cmd->completed) {
-			put_to_mempool(&rcommon_cmd_mempool, rcomm_cmd);
+			MTX_UNLOCK(&rcomm_cmd->rcommand_mtx);
+			clear_rcomm_cmd(rcomm_cmd);
 		} else {
 			rcomm_cmd->completed = true;
+			MTX_UNLOCK(&rcomm_cmd->rcommand_mtx);
 		}
 		cmd->data = NULL;
 		rc = -1;
@@ -5591,11 +5606,13 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	rc = cmd->data_len = rcomm_cmd->data_len;
 	cmd->data = rcomm_cmd->data;
 	if(rcomm_cmd->completed) {
+		MTX_UNLOCK(&rcomm_cmd->rcommand_mtx);
 		MTX_UNLOCK(&spec->rcommonq_mtx);
-		put_to_mempool(&rcommon_cmd_mempool, rcomm_cmd);
+		clear_rcomm_cmd(rcomm_cmd);
 	} else {
-		MTX_UNLOCK(&spec->rcommonq_mtx);
 		rcomm_cmd->completed = true;
+		MTX_UNLOCK(&rcomm_cmd->rcommand_mtx);
+		MTX_UNLOCK(&spec->rcommonq_mtx);
 	}
 	return rc;
 }
@@ -5707,7 +5724,7 @@ istgt_lu_disk_lbwrite(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cm
 	unsigned long nthbitset = 0;
 	int64_t rc = 0;
 	int iovcnt;
-	struct iovec iov[20];
+	struct iovec iov[40];
 	int diskIoPendingL = 0, markedForFree = 0;
 	int markedForReturn = 0;
 	const char *msg = "write";

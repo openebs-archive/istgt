@@ -58,6 +58,7 @@ typedef struct rcommon_cmd_s {
 	TAILQ_ENTRY(rcommon_cmd_s)  wait_cmd_next; /* for rcommon_waitq */
 	TAILQ_ENTRY(rcommon_cmd_s)  pending_cmd_next; /* for rcommon_pendingq */
 	int luworker_id;
+	pthread_mutex_t rcommand_mtx;
 	int acks_recvd;
 	int ios_aborted;
 	int copies_sent;
@@ -73,8 +74,7 @@ typedef struct rcommon_cmd_s {
 	void *data;
 	uint64_t total;
 	int64_t iovcnt;
-	uint64_t bitset;
-	struct iovec iov[21];
+	struct iovec iov[41];
 } rcommon_cmd_t;
 
 typedef struct rcmd_s {
@@ -92,7 +92,7 @@ typedef struct rcmd_s {
 	int64_t iovcnt;
 	uint64_t offset;
 	uint64_t data_len;
-	struct iovec iov[21];
+	struct iovec iov[41];
 } rcmd_t;
 
 typedef enum zvol_op_status_e {
@@ -124,6 +124,7 @@ void accept_mgmt_conns(int, int);
 int send_io_resp(int fd, zvol_io_hdr_t *, void *);
 int initialize_replication_mempool(bool should_fail);
 int destroy_relication_mempool(void);
+void clear_rcomm_cmd(rcommon_cmd_t *);
 
 #define REPLICA_LOG(fmt, ...)  syslog(LOG_NOTICE, 	 "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
 #define REPLICA_NOTICELOG(fmt, ...) syslog(LOG_NOTICE, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
