@@ -9,11 +9,12 @@
 #include <unistd.h>
 #include <sys/epoll.h>
 #include <fcntl.h>
-#include "replication.h"
+#include "istgt_lu.h"
 #include "istgt_integration.h"
 #include "replication_misc.h"
 #include "istgt_crc32c.h"
 #include "istgt_misc.h"
+#include "replication.h"
 #include "ring_mempool.h"
 
 cstor_conn_ops_t cstor_ops = {
@@ -814,6 +815,71 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd, char *replicaip
 	return replica;
 }
 
+void
+ask_replica_status(spec_t *spec, replica_t *repl)
+{
+	replica_t *replica = repl;
+	zvol_op_code_t mgmt_opcode = ZVOL_OPCODE_REPLICA_STATUS;
+	int ret;
+	char *buf = malloc(BUFSIZE);
+	size_t data_len = 0;
+
+	data_len = snprintf(buf, BUFSIZE, "%s", spec->lu->volname) + 1;
+
+	if(replica == NULL) {
+		MTX_LOCK(&spec->rq_mtx);
+		TAILQ_FOREACH(replica, &spec->rq, r_next) {
+			ret = send_mgmtio(replica->mgmt_fd, mgmt_opcode, buf,
+			    data_len);
+			if (ret == -1) {
+				REPLICA_ERRLOG("send mgmtIO for status failed on "
+				    "replica(%d, %s:%d) ..\n", replica->id,
+				    replica->ip, replica->port);
+				continue;
+			}
+		}
+		MTX_UNLOCK(&spec->rq_mtx);
+	} else {
+		ret = send_mgmtio(replica->mgmt_fd, mgmt_opcode, buf,
+		    data_len);
+		if (ret == -1) {
+			REPLICA_ERRLOG("send mgmtIO for status failed on "
+			    "replica(%d, %s:%d) ..\n", replica->id, replica->ip,
+			    replica->port);
+		}
+	}
+
+	free(buf);
+}
+
+static int
+update_replica_status(spec_t *spec, replica_t *replica)
+{
+	replica_state_t last_status;
+	zrepl_status_ack_t *repl_status = (zrepl_status_ack_t *) replica->mgmt_ack_data;
+
+	MTX_LOCK(&replica->r_mtx);
+	last_status = replica->state;
+	replica->state = repl_status->state;
+	MTX_UNLOCK(&replica->r_mtx);
+
+	if(last_status != repl_status->state) {
+		MTX_LOCK(&spec->rq_mtx);
+		if ((replica->state == REPLICA_DEGRADED ||
+			replica->state == REPLICA_ERRORED) && last_status == REPLICA_HELATHY) {
+			spec->degraded_rcount++;
+			spec->healthy_rcount--;
+		} else if (replica->state == REPLICA_HELATHY) {
+			spec->degraded_rcount--;
+			spec->healthy_rcount++;
+		}
+		update_volstate(spec);
+		MTX_UNLOCK(&spec->rq_mtx);
+	}
+	return 0;
+
+}
+
 /*
  * forms data connection to replica, updates replica entry
  */
@@ -1012,13 +1078,25 @@ read_io_resp_data:
 					handle_write_resp(spec, replica);
 					break;
 				case ZVOL_OPCODE_HANDSHAKE:
-					if(resp_hdr->len != sizeof (mgmt_ack_data_t))
+					if(resp_hdr->len != sizeof (mgmt_ack_data_t) && fd != replica->iofd)
 						REPLICA_ERRLOG("mgmt_ack_len %lu not matching with size of mgmt_ack_data..\n",
 						    resp_hdr->len);
 
 					/* dont process handshake on data connection */
 					if (fd != replica->iofd)
 						zvol_handshake(spec, replica);
+					break;
+				case ZVOL_OPCODE_REPLICA_STATUS:
+					if(resp_hdr->len != sizeof (zrepl_status_ack_t) && fd != replica->iofd)
+						REPLICA_ERRLOG("replica_state_t length %lu is not matching with size of repl status data..\n",
+							resp_hdr->len);
+
+					/* replica status must come from mgmt connection */
+					if (fd != replica->iofd)
+						update_replica_status(spec, replica);
+					break;
+				default:
+					REPLICA_NOTICELOG("unsupported opcode(%d) received..\n", resp_hdr->opcode);
 					break;
 			}
 			donecount++;

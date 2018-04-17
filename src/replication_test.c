@@ -61,6 +61,10 @@ send_mgmtack(int fd, zvol_op_code_t opcode, void *buf, char *replicaip, int repl
 	struct iovec iovec[6];
 	build_mgmt_ack_hdr;
 	build_mgmt_ack_data;
+	static long unsigned int index = 0;
+	int iovec_count;
+
+	printf("mgmt hdr:%lu, opcode:%d data:%lu\n", sizeof(mgmt_ack_data_t), opcode, sizeof(zvol_io_hdr_t));
 	iovec[0].iov_base = mgmt_ack_hdr;
 	iovec[0].iov_len = 16;
 
@@ -70,16 +74,28 @@ send_mgmtack(int fd, zvol_op_code_t opcode, void *buf, char *replicaip, int repl
 	iovec[2].iov_base = ((uint8_t *)mgmt_ack_hdr) + 32;
 	iovec[2].iov_len = sizeof (zvol_io_hdr_t) - 32;
 
-	iovec[3].iov_base = mgmt_ack_data;
-	iovec[3].iov_len = 50;
+	if (opcode == ZVOL_OPCODE_REPLICA_STATUS) {
+		zrepl_status_ack_t repl_status;
+		repl_status.state = REPLICA_HELATHY;
+		memcpy(mgmt_ack_data, &repl_status, sizeof(repl_status));
+		mgmt_ack_hdr->len = sizeof(zrepl_status_ack_t);
+		iovec_count = 4;
+		iovec[3].iov_base = mgmt_ack_data;
+		iovec[3].iov_len = sizeof(zrepl_status_ack_t);
+	} else {
 
-	iovec[4].iov_base = ((uint8_t *)mgmt_ack_data) + 50;
-	iovec[4].iov_len = 50;
+		iovec[3].iov_base = mgmt_ack_data;
+		iovec[3].iov_len = 50;
 
-	iovec[5].iov_base = ((uint8_t *)mgmt_ack_data) + 100;
-	iovec[5].iov_len = sizeof (mgmt_ack_data_t) - 100;
+		iovec[4].iov_base = ((uint8_t *)mgmt_ack_data) + 50;
+		iovec[4].iov_len = 50;
 
-	for (start = 0; start < 6; start += 2) {
+		iovec[5].iov_base = ((uint8_t *)mgmt_ack_data) + 100;
+		iovec[5].iov_len = sizeof (mgmt_ack_data_t) - 100;
+		iovec_count = 6;
+	}
+
+	for (start = 0; start < iovec_count; start += 2) {
 		nbytes = iovec[start].iov_len + iovec[start + 1].iov_len;
 		while (nbytes) {
 			rc = writev(fd, &iovec[start], 2);//Review iovec in this line

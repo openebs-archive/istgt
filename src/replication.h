@@ -1,3 +1,6 @@
+#ifndef REPLICA_INITIALIZE
+#define REPLICA_INITIALIZE 1
+
 #include <inttypes.h>
 #include <stdint.h>
 #include <errno.h>
@@ -15,8 +18,6 @@
 #include "istgt_integration.h"
 #include "istgt_lu.h"
 
-#ifndef REPLICA_INITIALIZE
-#define REPLICA_INITIALIZE 1
 #define MAXREPLICA 64
 #define MAXEVENTS 64
 #define BUFSIZE 1024
@@ -29,11 +30,28 @@ typedef enum zvol_op_code_e {
 	ZVOL_OPCODE_HANDSHAKE = 1,
 	ZVOL_OPCODE_READ,
 	ZVOL_OPCODE_WRITE,
-	ZVOL_OPCODE_UNMAP,
 	ZVOL_OPCODE_SYNC,
+	ZVOL_OPCODE_UNMAP,
+	ZVOL_OPCODE_REPLICA_STATUS,
+	ZVOL_OPCODE_PREPARE_FOR_REBUILD,
+	ZVOL_OPCODE_START_REBUILD,
+	ZVOL_OPCODE_REBUILD_STEP,
+	ZVOL_OPCODE_REBUILD_STEP_DONE,
+	ZVOL_OPCODE_REBUILD_COMPLETE,
 	ZVOL_OPCODE_SNAP_CREATE,
 	ZVOL_OPCODE_SNAP_ROLLBACK,
 } zvol_op_code_t;
+
+typedef enum replica_rebuild_status {
+	ZVOL_REBUILDING_INIT,		/* rebuilding initiated on zvol */
+	ZVOL_REBUILDING_IN_PROGRESS,	/* zvol is rebuilding */
+	ZVOL_REBUILDING_DONE,		/* done with rebuilding */
+} replica_rebuild_status_t;
+
+typedef struct zrepl_status_ack {
+	replica_state_t state;
+	replica_rebuild_status_t rebuild_status;
+} zrepl_status_ack_t;
 
 typedef enum zvol_cmd_type_e {
 	CMD_IO = 1,
@@ -125,6 +143,7 @@ int send_io_resp(int fd, zvol_io_hdr_t *, void *);
 int initialize_replication_mempool(bool should_fail);
 int destroy_relication_mempool(void);
 void clear_rcomm_cmd(rcommon_cmd_t *);
+void ask_replica_status(spec_t *spec, replica_t *replica);
 
 #define REPLICA_LOG(fmt, ...)  syslog(LOG_NOTICE, 	 "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
 #define REPLICA_NOTICELOG(fmt, ...) syslog(LOG_NOTICE, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
