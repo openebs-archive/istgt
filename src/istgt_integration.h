@@ -33,8 +33,7 @@ typedef enum replica_state_s {
 /* to read handshake msg data */
 #define READ_IO_RESP_DATA	2
 
-typedef struct zvol_io_hdr_s zvol_io_hdr_t;
-typedef struct mgmt_ack_data_s mgmt_ack_data_t;
+typedef struct mgmt_ack mgmt_ack_data_t;
 
 typedef struct replica_s {
 	TAILQ_ENTRY(replica_s) r_next;
@@ -54,6 +53,8 @@ typedef struct replica_s {
 	int port;
 	char *ip;
 	uint64_t least_recvd;
+	uint64_t pool_guid;
+	uint64_t zvol_guid;
 	int cur_recvd;
 	uint64_t rrio_seq;
 	uint64_t wrio_seq;
@@ -67,6 +68,7 @@ typedef struct replica_s {
 	int mgmt_io_read; //amount of data read in current state
 	zvol_io_hdr_t *mgmt_ack;
 	mgmt_ack_data_t *mgmt_ack_data;
+	uint64_t initial_checkpointed_io_seq;
 } replica_t;
 
 typedef struct cstor_conn_ops {
@@ -88,11 +90,11 @@ int remove_replica_from_list(spec_t *, int);
 void unblock_blocked_cmds(replica_t *);
 
 replica_t *create_replica_entry(spec_t *, int);
-replica_t *update_replica_entry(spec_t *, replica_t *, int, char *, int);
+replica_t *update_replica_entry(spec_t *, replica_t *, int);
 
 replica_t * get_replica(int mgmt_fd, spec_t **);
 void handle_read_data_event(int fd);
 
 void update_volstate(spec_t *);
-void clear_replica_cmd(spec_t *, replica_t *, rcmd_t *);
+void clear_replica_cmd(spec_t *, rcmd_t *);
 #endif

@@ -896,6 +896,7 @@ typedef struct istgt_lu_disk_t {
 	uint8_t percent_count;
 	uint8_t percent_val[32];
 	uint8_t percent_latency[32];
+	uint64_t io_seq;
 
 	/* entry */
 	int (*open)(struct istgt_lu_disk_t *spec, int flags, int mode);

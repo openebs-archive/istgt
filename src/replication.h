@@ -12,6 +12,7 @@
 #include <sys/uio.h>
 #include <syslog.h>
 #include <stdbool.h>
+#include "zrepl_prot.h"
 #include "istgt_integration.h"
 #include "istgt_lu.h"
 
@@ -24,28 +25,10 @@
 #define MAXNAMELEN 256
 
 #define MAX(a,b) (((a)>(b))?(a):(b))
-
-typedef enum zvol_op_code_e {
-	ZVOL_OPCODE_HANDSHAKE = 1,
-	ZVOL_OPCODE_READ,
-	ZVOL_OPCODE_WRITE,
-	ZVOL_OPCODE_UNMAP,
-	ZVOL_OPCODE_SYNC,
-	ZVOL_OPCODE_SNAP_CREATE,
-	ZVOL_OPCODE_SNAP_ROLLBACK,
-} zvol_op_code_t;
-
 typedef enum zvol_cmd_type_e {
 	CMD_IO = 1,
 	CND_MGMT,
 } zvol_cmd_type_t;
-
-typedef struct mgmt_ack_data_s {
-	char volname[MAXNAMELEN];
-	char ip[MAXIPLEN];
-	int port;
-} mgmt_ack_data_t;
-
 typedef enum cmd_state_s {
 	CMD_CREATED = 1,
 	CMD_ENQUEUED_TO_WAITQ,
@@ -94,21 +77,6 @@ typedef struct rcmd_s {
 	uint64_t data_len;
 	struct iovec iov[41];
 } rcmd_t;
-
-typedef enum zvol_op_status_e {
-	ZVOL_OP_STATUS_OK = 1,
-	ZVOL_OP_STATUS_FAILED,
-} zvol_op_status_t;
-
-typedef struct zvol_io_hdr_s {
-	zvol_op_code_t opcode;
-	uint64_t io_seq;
-	uint64_t offset;
-	uint64_t len;
-	rcmd_t *q_ptr;
-	zvol_op_status_t status;
-} zvol_io_hdr_t;
-
 typedef struct replica_s replica_t;
 typedef struct istgt_lu_disk_t spec_t;
 
