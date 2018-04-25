@@ -19,11 +19,11 @@ __thread char  tinfo[20] =  {0};
 #define build_mgmt_ack_hdr {\
 	mgmt_ack_hdr = (zvol_io_hdr_t *)malloc(sizeof(zvol_io_hdr_t));\
 	mgmt_ack_hdr->opcode = opcode;\
-	mgmt_ack_hdr->len = sizeof(mgmt_ack_data_t);\
+	mgmt_ack_hdr->len = sizeof(replica_info_t);\
 }
 
 #define build_mgmt_ack_data {\
-	mgmt_ack_data = (mgmt_ack_data_t *)malloc(sizeof(mgmt_ack_data_t));\
+	mgmt_ack_data = (replica_info_t *)malloc(sizeof(replica_info_t));\
 	strcpy(mgmt_ack_data->ip, replicaip);\
 	strcpy(mgmt_ack_data->volname, buf);\
 	mgmt_ack_data->port = replica_port;\
@@ -54,17 +54,14 @@ test_read_data(int fd, uint8_t *data, uint64_t len) {
 int
 send_mgmtack(int fd, zvol_op_code_t opcode, void *buf, char *replicaip, int replica_port)
 {
-	mgmt_ack_data_t *mgmt_ack_data;
+	replica_info_t *mgmt_ack_data;
 	zvol_io_hdr_t *mgmt_ack_hdr;
 	int i, nbytes = 0;
 	int rc = 0, start;
 	struct iovec iovec[6];
 	build_mgmt_ack_hdr;
-	build_mgmt_ack_data;
-	static long unsigned int index = 0;
 	int iovec_count;
 
-	printf("mgmt hdr:%lu, opcode:%d data:%lu\n", sizeof(mgmt_ack_data_t), opcode, sizeof(zvol_io_hdr_t));
 	iovec[0].iov_base = mgmt_ack_hdr;
 	iovec[0].iov_len = 16;
 
@@ -77,12 +74,12 @@ send_mgmtack(int fd, zvol_op_code_t opcode, void *buf, char *replicaip, int repl
 	if (opcode == ZVOL_OPCODE_REPLICA_STATUS) {
 		zrepl_status_ack_t repl_status;
 		repl_status.state = REPLICA_HELATHY;
-		memcpy(mgmt_ack_data, &repl_status, sizeof(repl_status));
 		mgmt_ack_hdr->len = sizeof(zrepl_status_ack_t);
 		iovec_count = 4;
-		iovec[3].iov_base = mgmt_ack_data;
+		iovec[3].iov_base = &repl_status;
 		iovec[3].iov_len = sizeof(zrepl_status_ack_t);
 	} else {
+		build_mgmt_ack_data;
 
 		iovec[3].iov_base = mgmt_ack_data;
 		iovec[3].iov_len = 50;
@@ -91,7 +88,7 @@ send_mgmtack(int fd, zvol_op_code_t opcode, void *buf, char *replicaip, int repl
 		iovec[4].iov_len = 50;
 
 		iovec[5].iov_base = ((uint8_t *)mgmt_ack_data) + 100;
-		iovec[5].iov_len = sizeof (mgmt_ack_data_t) - 100;
+		iovec[5].iov_len = sizeof (replica_info_t) - 100;
 		iovec_count = 6;
 	}
 

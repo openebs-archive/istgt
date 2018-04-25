@@ -2632,15 +2632,6 @@ void *timerfn(void *ptr __attribute__((__unused__)))
 		while((conn = (CONN *)(istgt_queue_dequeue(&backupconns))) != NULL)
 			istgt_queue_enqueue(&closedconns, conn);
 		sleep(60);
-
-#ifdef REPLICATION
-		spec_t *spec = NULL;
-		MTX_LOCK(&specq_mtx);
-		TAILQ_FOREACH(spec, &spec_q, spec_next) {
-			ask_replica_status(spec, NULL);
-		}
-		MTX_UNLOCK(&specq_mtx);
-#endif
 	}
 	return (void *)NULL;
 }

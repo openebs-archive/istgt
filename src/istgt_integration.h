@@ -23,15 +23,15 @@ typedef enum replica_state_s {
 	REPLICA_ERRORED,
 } replica_state_t;
 
-/* replica state on mgmt thread for mgmt IOs
- * set in mgmt_io_state
+/*
+ * state of commands queued for replica according to send/recieve
  */
-
-/* to read mgmt IO hdr */
-#define READ_IO_RESP_HDR	1
-
-/* to read handshake msg data */
-#define READ_IO_RESP_DATA	2
+typedef enum {
+	READ_IO_RESP_HDR = 1,	/* to read mgmt IO hdr */
+	READ_IO_RESP_DATA = 2,	/* to read handshake msg data */
+	WRITE_IO_SEND_HDR = 3,	/* to write mgmt IO hdr */
+	WRITE_IO_SEND_DATA = 4,	/* to write mgmt IO data */
+} mgmt_cmd_state;
 
 typedef struct zvol_io_hdr_s zvol_io_hdr_t;
 typedef struct mgmt_ack_data_s mgmt_ack_data_t;
@@ -63,10 +63,7 @@ typedef struct replica_s {
 	int io_state;
 	int io_read; //amount of IO data read in current IO state
 	bool removed;
-	int mgmt_io_state;
-	int mgmt_io_read; //amount of data read in current state
-	zvol_io_hdr_t *mgmt_ack;
-	mgmt_ack_data_t *mgmt_ack_data;
+	TAILQ_HEAD(, mgmt_cmd_s) mgmt_cmd_queue;
 } replica_t;
 
 typedef struct cstor_conn_ops {
@@ -91,7 +88,8 @@ replica_t *create_replica_entry(spec_t *, int);
 replica_t *update_replica_entry(spec_t *, replica_t *, int, char *, int);
 
 replica_t * get_replica(int mgmt_fd, spec_t **);
-void handle_read_data_event(int fd);
+void handle_read_data_event(replica_t *);
+int handle_write_data_event(replica_t *replica);
 
 void update_volstate(spec_t *);
 void clear_replica_cmd(spec_t *, replica_t *, rcmd_t *);

@@ -58,11 +58,11 @@ typedef enum zvol_cmd_type_e {
 	CND_MGMT,
 } zvol_cmd_type_t;
 
-typedef struct mgmt_ack_data_s {
+typedef struct replica_info {
 	char volname[MAXNAMELEN];
 	char ip[MAXIPLEN];
 	int port;
-} mgmt_ack_data_t;
+} replica_info_t;
 
 typedef enum cmd_state_s {
 	CMD_CREATED = 1,
@@ -127,6 +127,14 @@ typedef struct zvol_io_hdr_s {
 	zvol_op_status_t status;
 } zvol_io_hdr_t;
 
+typedef struct mgmt_cmd_s {
+	TAILQ_ENTRY(mgmt_cmd_s) mgmt_cmd_next;
+	zvol_io_hdr_t *io_hdr;	// management command header
+	void *data;		// cmd data
+	int mgmt_cmd_state;	// current state of cmd
+	int io_bytes;   // amount of IO data written/read in current command state
+} mgmt_cmd_t;
+
 typedef struct replica_s replica_t;
 typedef struct istgt_lu_disk_t spec_t;
 
@@ -137,7 +145,7 @@ int make_socket_non_blocking(int);
 int send_mgmtack(int, zvol_op_code_t, void *, char *, int);
 int wait_for_fd(int);
 int64_t read_data(int, uint8_t *, uint64_t, int *, int *);
-int zvol_handshake(spec_t *, replica_t *);
+int zvol_handshake(spec_t *, replica_t *, replica_info_t *);
 void accept_mgmt_conns(int, int);
 int send_io_resp(int fd, zvol_io_hdr_t *, void *);
 int initialize_replication_mempool(bool should_fail);
