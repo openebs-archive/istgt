@@ -79,7 +79,7 @@ send_mgmtack(int fd, zvol_op_code_t opcode, void *buf, char *replicaip, int repl
 	iovec[2].iov_len = sizeof (zvol_io_hdr_t) - 32;
 
 	if (opcode == ZVOL_OPCODE_REPLICA_STATUS) {
-		repl_status.state = ZVOL_STATUS_DEGRADED;
+		repl_status.state = ZVOL_STATUS_HEALTHY;
 		mgmt_ack_hdr->len = sizeof(zrepl_status_ack_t);
 		iovec_count = 4;
 		iovec[3].iov_base = &repl_status;
