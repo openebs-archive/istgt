@@ -311,7 +311,7 @@ dequeue_rsendq:
 
 void update_volstate(spec_t *spec)
 {
-	uint64_t min;
+	uint64_t max;
 	replica_t *replica;
 
 	if(((spec->healthy_rcount + spec->degraded_rcount >= spec->consistency_factor) &&
@@ -320,13 +320,13 @@ void update_volstate(spec_t *spec)
 			>= MAX(spec->replication_factor - spec->consistency_factor + 1, spec->consistency_factor))) {
 		if (spec->ready == false)
 		{
-			min = 0;
+			max = 0;
 			TAILQ_FOREACH(replica, &spec->rq, r_next)
-				min = (min < replica->initial_checkpointed_io_seq) ? min :
-				    replica->initial_checkpointed_io_seq;
+				max = (max < replica->initial_checkpointed_io_seq) ?
+				    replica->initial_checkpointed_io_seq : max;
 
-			min = (min == 0) ? min : min + (1<<20);
-			spec->io_seq = min;
+			max = (max == 0) ? 10 : max + (1<<20);
+			spec->io_seq = max;
 		}
 		spec->ready = true;
 		pthread_cond_broadcast(&spec->rq_cond);
@@ -433,6 +433,7 @@ perform_read_write_on_fd(int fd, uint8_t *data, uint64_t len, int *errorno,
 {
 	int64_t rc = -1;
 	uint64_t nbytes = 0;
+	int read_cmd = 0;
 
 	if (fd_closed != NULL)
 		*fd_closed = 0;
@@ -444,6 +445,7 @@ perform_read_write_on_fd(int fd, uint8_t *data, uint64_t len, int *errorno,
 			case READ_IO_RESP_HDR:
 			case READ_IO_RESP_DATA:
 				rc = read(fd, data + nbytes, len - nbytes);
+				read_cmd = 1;
 				break;
 
 			case WRITE_IO_SEND_HDR:
@@ -461,18 +463,25 @@ perform_read_write_on_fd(int fd, uint8_t *data, uint64_t len, int *errorno,
 			if (errorno != NULL)
 				*errorno = errno;
 
-			if (errno == EAGAIN || errno == EWOULDBLOCK ||
-			    errno == EINTR) {
+			if (errno == EINTR) {
+				continue;
+			} else if (errno == EAGAIN || errno == EWOULDBLOCK) {
 				return nbytes;
 			} else {
 				REPLICA_ERRLOG("received err %d on fd %d, closing it..\n", errno, fd);
+				/*
+				 * TODO: cleanup of replica need to be happen
+				 */
 				close(fd);
 				if (fd_closed != NULL)
 					*fd_closed = 1;
 				return -1;
 			}
-		} else if (rc == 0) {
+		} else if (rc == 0 && read_cmd) {
 			REPLICA_ERRLOG("received EOF on fd %d, closing it..\n", fd);
+			/*
+			 * TODO: cleanup of replica need to be happen
+			 */
 			close(fd);
 			if (fd_closed != NULL)
 				*fd_closed = 1;
@@ -786,6 +795,7 @@ create_replica_entry(spec_t *spec, int mgmt_fd)
 	TAILQ_INIT(&(replica->mgmt_cmd_queue));
 	replica->initial_checkpointed_io_seq = 0;
 	replica->mgmt_io_resp_hdr = malloc(sizeof(zvol_io_hdr_t));
+	replica->mgmt_io_resp_data = NULL;
 	MTX_LOCK(&spec->rq_mtx);
 	TAILQ_INSERT_TAIL(&spec->rwaitq, replica, r_waitnext);
 	MTX_UNLOCK(&spec->rq_mtx);
@@ -877,6 +887,9 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	event.events = EPOLLIN | EPOLLET;
 	rc = epoll_ctl(spec->receiver_epfd, EPOLL_CTL_ADD, iofd, &event);
 	if (rc == -1) {
+		/*
+		 * TODO: need to cleanup replica and also update volstate here
+		 */
 		return NULL;
 	}
 
@@ -886,7 +899,9 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	rc = epoll_ctl(replica->sender_epfd, EPOLL_CTL_ADD, replica->iofd, &event);
 	if (rc == -1) {
 		REPLICA_LOG("epoll_ctl_add failed errno:%d\n", errno);
-		MTX_UNLOCK(&replica->r_mtx);
+		/*
+		 * TODO: need to cleanup replica and also update volstate here
+		 */
 		return NULL;
 	}
 
@@ -894,6 +909,9 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 			(void *)replica);
 	if (rc != 0) {
 		ISTGT_ERRLOG("pthread_create(replicator_thread) failed\n");
+		/*
+		 * TODO: need to cleanup replica and also update volstate here
+		 */
 		return NULL;
 	}
 
@@ -967,7 +985,6 @@ send_replica_handshake_query(replica_t *replica, spec_t *spec)
 	TAILQ_INSERT_TAIL(&replica->mgmt_cmd_queue, mgmt_cmd, mgmt_cmd_next);
 	MTX_UNLOCK(&replica->r_mtx);
 
-	handle_write_data_event(replica);
 	return 0;
 }
 
