@@ -17,23 +17,18 @@ typedef ISTGT_QUEUE *cmd_ptr;
 typedef struct istgt_lu_disk_t spec_t;
 typedef struct rcmd_s rcmd_t;
 
-typedef enum replica_state_s {
-	REPLICA_DEGRADED = 1,
-	REPLICA_HELATHY,
-	REPLICA_ERRORED,
-} replica_state_t;
-
-/* replica state on mgmt thread for mgmt IOs
- * set in mgmt_io_state
+/*
+ * state of commands queued for replica according to send/recieve
  */
-
-/* to read mgmt IO hdr */
-#define READ_IO_RESP_HDR	1
-
-/* to read handshake msg data */
-#define READ_IO_RESP_DATA	2
+typedef enum {
+	READ_IO_RESP_HDR = 1,	/* to read mgmt IO hdr */
+	READ_IO_RESP_DATA = 2,	/* to read handshake msg data */
+	WRITE_IO_SEND_HDR = 3,	/* to write mgmt IO hdr */
+	WRITE_IO_SEND_DATA = 4,	/* to write mgmt IO data */
+} mgmt_cmd_state;
 
 typedef struct mgmt_ack mgmt_ack_data_t;
+typedef enum zvol_status replica_state_t;
 
 typedef struct replica_s {
 	TAILQ_ENTRY(replica_s) r_next;
@@ -59,15 +54,14 @@ typedef struct replica_s {
 	uint64_t rrio_seq;
 	uint64_t wrio_seq;
 
-	zvol_io_hdr_t *io_resp_hdr;
-	void *io_resp_data;
-	int io_state;
-	int io_read; //amount of IO data read in current IO state
-	bool removed;
-	int mgmt_io_state;
-	int mgmt_io_read; //amount of data read in current state
-	zvol_io_hdr_t *mgmt_ack;
-	mgmt_ack_data_t *mgmt_ack_data;
+	zvol_io_hdr_t *io_resp_hdr;	// header recieved on data connection
+	void *io_resp_data;		// data recieved on data connection
+	int io_state;			// state of command on data connection
+	int io_read;			// amount of IO data read in current IO state for data connection
+	bool removed;			// If replica is removed from spec queue or not
+	zvol_io_hdr_t *mgmt_io_resp_hdr;// header recieved on management connection
+	void *mgmt_io_resp_data;	// data recieved on management connection
+	TAILQ_HEAD(, mgmt_cmd_s) mgmt_cmd_queue;	// command queue for management connection
 	uint64_t initial_checkpointed_io_seq;
 } replica_t;
 
@@ -93,7 +87,8 @@ replica_t *create_replica_entry(spec_t *, int);
 replica_t *update_replica_entry(spec_t *, replica_t *, int);
 
 replica_t * get_replica(int mgmt_fd, spec_t **);
-void handle_read_data_event(int fd);
+void handle_read_data_event(replica_t *);
+int handle_write_data_event(replica_t *replica);
 
 void update_volstate(spec_t *);
 void clear_replica_cmd(spec_t *, rcmd_t *);

@@ -26,7 +26,7 @@ __thread char  tinfo[20] =  {0};
 }
 
 #define build_mgmt_ack_data {\
-	mgmt_ack_data = (mgmt_ack_data_t *)malloc(sizeof(mgmt_ack_data_t));\
+	mgmt_ack_data = (mgmt_ack_t *)malloc(sizeof(mgmt_ack_t));\
 	strcpy(mgmt_ack_data->ip, replicaip);\
 	strcpy(mgmt_ack_data->volname, buf);\
 	mgmt_ack_data->port = replica_port;\
@@ -59,13 +59,16 @@ test_read_data(int fd, uint8_t *data, uint64_t len) {
 int
 send_mgmtack(int fd, zvol_op_code_t opcode, void *buf, char *replicaip, int replica_port)
 {
-	mgmt_ack_data_t *mgmt_ack_data;
-	zvol_io_hdr_t *mgmt_ack_hdr;
+	zvol_io_hdr_t *mgmt_ack_hdr = NULL;
 	int i, nbytes = 0;
 	int rc = 0, start;
 	struct iovec iovec[6];
 	build_mgmt_ack_hdr;
-	build_mgmt_ack_data;
+	int iovec_count;
+	zrepl_status_ack_t repl_status;
+	mgmt_ack_t *mgmt_ack_data = NULL;
+	int ret = -1;
+
 	iovec[0].iov_base = mgmt_ack_hdr;
 	iovec[0].iov_len = 16;
 
@@ -75,21 +78,32 @@ send_mgmtack(int fd, zvol_op_code_t opcode, void *buf, char *replicaip, int repl
 	iovec[2].iov_base = ((uint8_t *)mgmt_ack_hdr) + 32;
 	iovec[2].iov_len = sizeof (zvol_io_hdr_t) - 32;
 
-	iovec[3].iov_base = mgmt_ack_data;
-	iovec[3].iov_len = 50;
+	if (opcode == ZVOL_OPCODE_REPLICA_STATUS) {
+		repl_status.state = ZVOL_STATUS_HEALTHY;
+		mgmt_ack_hdr->len = sizeof(zrepl_status_ack_t);
+		iovec_count = 4;
+		iovec[3].iov_base = &repl_status;
+		iovec[3].iov_len = sizeof(zrepl_status_ack_t);
+	} else {
+		build_mgmt_ack_data;
 
-	iovec[4].iov_base = ((uint8_t *)mgmt_ack_data) + 50;
-	iovec[4].iov_len = 50;
+		iovec[3].iov_base = mgmt_ack_data;
+		iovec[3].iov_len = 50;
 
-	iovec[5].iov_base = ((uint8_t *)mgmt_ack_data) + 100;
-	iovec[5].iov_len = sizeof (mgmt_ack_data_t) - 100;
+		iovec[4].iov_base = ((uint8_t *)mgmt_ack_data) + 50;
+		iovec[4].iov_len = 50;
 
-	for (start = 0; start < 6; start += 2) {
+		iovec[5].iov_base = ((uint8_t *)mgmt_ack_data) + 100;
+		iovec[5].iov_len = sizeof (mgmt_ack_t) - 100;
+		iovec_count = 6;
+	}
+
+	for (start = 0; start < iovec_count; start += 2) {
 		nbytes = iovec[start].iov_len + iovec[start + 1].iov_len;
 		while (nbytes) {
 			rc = writev(fd, &iovec[start], 2);//Review iovec in this line
 			if (rc < 0) {
-				return -1;
+				goto out;
 			}
 			nbytes -= rc;
 			if (nbytes == 0)
@@ -108,7 +122,15 @@ send_mgmtack(int fd, zvol_op_code_t opcode, void *buf, char *replicaip, int repl
 			}
 		}
 	}
-	return 0;
+	ret = 0;
+out:
+	if (mgmt_ack_hdr)
+		free(mgmt_ack_hdr);
+
+	if (mgmt_ack_data)
+		free(mgmt_ack_data);
+
+	return ret;
 }
 
 
@@ -391,7 +413,10 @@ execute_io:
 						}
 					}
 					send_io_resp(iofd, io_hdr, data);
-					free(data);
+					if (data) {
+						free(data);
+						data = NULL;
+					}
 				}
 			}
 		}

@@ -1,3 +1,6 @@
+#ifndef REPLICA_INITIALIZE
+#define REPLICA_INITIALIZE 1
+
 #include <inttypes.h>
 #include <stdint.h>
 #include <errno.h>
@@ -16,8 +19,6 @@
 #include "istgt_integration.h"
 #include "istgt_lu.h"
 
-#ifndef REPLICA_INITIALIZE
-#define REPLICA_INITIALIZE 1
 #define MAXREPLICA 64
 #define MAXEVENTS 64
 #define BUFSIZE 1024
@@ -80,6 +81,14 @@ typedef struct rcmd_s {
 typedef struct replica_s replica_t;
 typedef struct istgt_lu_disk_t spec_t;
 
+typedef struct mgmt_cmd_s {
+	TAILQ_ENTRY(mgmt_cmd_s) mgmt_cmd_next;
+	zvol_io_hdr_t *io_hdr;	// management command header
+	void *data;		// cmd data
+	int mgmt_cmd_state;	// current state of cmd
+	int io_bytes;   // amount of IO data written/read in current command state
+} mgmt_cmd_t;
+
 void *init_replication(void *);
 int sendio(int, int, rcommon_cmd_t *, rcmd_t *);
 int send_mgmtio(int, zvol_op_code_t, void *, uint64_t);
@@ -93,6 +102,7 @@ int send_io_resp(int fd, zvol_io_hdr_t *, void *);
 int initialize_replication_mempool(bool should_fail);
 int destroy_relication_mempool(void);
 void clear_rcomm_cmd(rcommon_cmd_t *);
+void ask_replica_status(spec_t *spec, replica_t *replica);
 
 #define REPLICA_LOG(fmt, ...)  syslog(LOG_NOTICE, 	 "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
 #define REPLICA_NOTICELOG(fmt, ...) syslog(LOG_NOTICE, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)

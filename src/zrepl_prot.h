@@ -55,6 +55,7 @@ enum zvol_op_code {
 	ZVOL_OPCODE_SYNC,
 	ZVOL_OPCODE_SNAP_CREATE,
 	ZVOL_OPCODE_SNAP_ROLLBACK,
+	ZVOL_OPCODE_REPLICA_STATUS,
 } __attribute__((packed));
 
 typedef enum zvol_op_code zvol_op_code_t;
@@ -103,6 +104,32 @@ struct mgmt_ack {
 
 typedef struct mgmt_ack mgmt_ack_t;
 
+/*
+ * zvol rebuild related state
+ */
+enum zvol_rebuild_status {
+	ZVOL_REBUILDING_INIT,		/* rebuilding initiated on zvol */
+	ZVOL_REBUILDING_IN_PROGRESS,	/* zvol is rebuilding */
+	ZVOL_REBUILDING_DONE		/* done with rebuilding */
+} __attribute__((packed));
+
+typedef enum zvol_rebuild_status zvol_rebuild_status_t;
+/*
+ * zvol status
+ */
+enum zvol_status {
+	ZVOL_STATUS_HEALTHY,		/* zvol has latest data */
+	ZVOL_STATUS_DEGRADED		/* zvol is missing some data */
+} __attribute__((packed));
+
+typedef enum zvol_status zvol_status_t;
+
+struct zrepl_status_ack {
+	zvol_status_t state;
+	zvol_rebuild_status_t rebuild_status;
+} __attribute__((packed));
+
+typedef struct zrepl_status_ack zrepl_status_ack_t;
 /*
  * Describes chunk of data following this header.
  *
