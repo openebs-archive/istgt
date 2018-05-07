@@ -157,17 +157,16 @@ dequeue_common_sendq:
 		MTX_UNLOCK(&spec->rcommonq_mtx);
 
 		//Enqueue to individual replica cmd queues and send on the respective fds
-		send_multiple_read = false;
 		if(cmd->opcode == ZVOL_OPCODE_READ)
 			cmd_read = true;
 		else
 			cmd_read = false;
 		MTX_LOCK(&spec->rq_mtx);
 		if(spec->healthy_rcount == 0) {
-			send_multiple_read = true;
+			send_multiple_read = cmd->send_multiple_read = true;
 			healthy_untried = 0;
 		} else {
-			send_multiple_read = false;
+			send_multiple_read = cmd->send_multiple_read = false;
 			healthy_untried = spec->healthy_rcount;
 		}
 
@@ -585,6 +584,19 @@ get_read_resp_data(rcommon_cmd_t *rcommq_ptr, uint64_t blocklen)
 	return read_data;
 }
 
+#define handle_read_healthy() { \
+	dataptr = get_read_resp_data(rcommq_ptr, spec->blocklen); \
+	TAILQ_REMOVE(&spec->rcommon_waitq, rcommq_ptr, wait_cmd_next); \
+	rcommq_ptr->state = CMD_EXECUTION_DONE; \
+	while(data_read = TAILQ_FIRST(&rcommq_ptr->data_read_ptr)) { \
+		free(data_read->io_resp_data_ptr_cpy); \
+		TAILQ_REMOVE(&rcommq_ptr->data_read_ptr, data_read, data_next); \
+		free(data_read); \
+	} \
+	rcommq_ptr->data = dataptr; \
+	signal_luworker(); \
+}
+
 #define handle_read_consistency_met() { \
 	dataptr = get_read_resp_data(rcommq_ptr, spec->blocklen); \
 	TAILQ_REMOVE(&spec->rcommon_waitq, rcommq_ptr, wait_cmd_next); \
@@ -667,7 +679,9 @@ handle_read_resp(spec_t *spec, replica_t *replica)
 
 			TAILQ_INSERT_TAIL(&rcommq_ptr->data_read_ptr, data_read, data_next);
 			luworker_id = rcommq_ptr->luworker_id;
-			if (rcommq_ptr->acks_recvd == MAX(spec->replica_count - spec->consistency_factor + 1,
+			if(!rcommq_ptr->send_multiple_read) {
+				handle_read_healthy();
+			} else if (rcommq_ptr->acks_recvd == MAX(spec->replica_count - spec->consistency_factor + 1,
 								spec->consistency_factor)) {
 				handle_read_consistency_met();
 				MTX_UNLOCK(&spec->rcommonq_mtx);

@@ -55,6 +55,7 @@ typedef struct rcommon_cmd_s {
 	int acks_recvd;
 	int ios_aborted;
 	int copies_sent;
+	bool send_multiple_read;
 	zvol_op_code_t opcode;
 	uint64_t io_seq;
 	uint64_t lun_id;
