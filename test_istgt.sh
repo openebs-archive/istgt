@@ -11,6 +11,9 @@ device_name=""
 CONTROLLER_IP="127.0.0.1"
 CONTROLLER_PORT="6060"
 
+VOL_SIZE="1073741824"
+BLOCKLEN="512"
+
 login_to_volume() {
 	sudo $ISCSIADM -m discovery -t st -p $1
 	sudo $ISCSIADM -m node -l
@@ -90,7 +93,8 @@ write_and_verify_data(){
 setup_test_env() {
 	sudo rm -f /tmp/test_vol*
 	sudo mkdir -p /mnt/store
-	sudo truncate -s 20G /tmp/test_vol1 /tmp/test_vol2 /tmp/test_vol3
+	sudo truncate -s 1G /tmp/test_vol1 /tmp/test_vol2 /tmp/test_vol3
+	sudo truncate -s 10M /tmp/hash_file1 /tmp/hash_file2 /tmp/hash_file3
 	logout_of_volume
 
 	start_istgt
@@ -113,11 +117,11 @@ run_data_integrity_test() {
 
 	setup_test_env
 
-	sudo $REPLICATION_TEST "$CONTROLLER_IP" "$CONTROLLER_PORT" "$replica1_ip" "$replica1_port" "/tmp/test_vol1" &
+	sudo $REPLICATION_TEST "$CONTROLLER_IP" "$CONTROLLER_PORT" "$replica1_ip" "$replica1_port" "/tmp/test_vol1" "/tmp/hash_file1" "$VOL_SIZE" "$BLOCKLEN" "1" &
 	replica1_pid=$!
-	sudo $REPLICATION_TEST "$CONTROLLER_IP" "$CONTROLLER_PORT" "$replica2_ip" "$replica2_port" "/tmp/test_vol2" &
+	sudo $REPLICATION_TEST "$CONTROLLER_IP" "$CONTROLLER_PORT" "$replica2_ip" "$replica2_port" "/tmp/test_vol2" "/tmp/hash_file2" "$VOL_SIZE" "$BLOCKLEN" "2" &
 	replica2_pid=$!
-	sudo $REPLICATION_TEST "$CONTROLLER_IP" "$CONTROLLER_PORT" "$replica3_ip" "$replica3_port" "/tmp/test_vol3" &
+	sudo $REPLICATION_TEST "$CONTROLLER_IP" "$CONTROLLER_PORT" "$replica3_ip" "$replica3_port" "/tmp/test_vol3" "/tmp/hash_file3" "$VOL_SIZE" "$BLOCKLEN" "3" &
 	replica3_pid=$!
 
 	sleep 15
@@ -127,7 +131,7 @@ run_data_integrity_test() {
 	sleep 5
 	write_and_verify_data
 
-	sudo $REPLICATION_TEST "$CONTROLLER_IP" "$CONTROLLER_PORT" "$replica1_ip" "$replica1_port" "/tmp/test_vol1" &
+	sudo $REPLICATION_TEST "$CONTROLLER_IP" "$CONTROLLER_PORT" "$replica1_ip" "$replica1_port" "/tmp/test_vol1" "$VOL_SIZE" "$BLOCKLEN" "1" &
 	replica1_pid=$!
 	sleep 5
 	write_and_verify_data

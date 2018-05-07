@@ -30,6 +30,7 @@ typedef enum zvol_cmd_type_e {
 	CMD_IO = 1,
 	CND_MGMT,
 } zvol_cmd_type_t;
+
 typedef enum cmd_state_s {
 	CMD_CREATED = 1,
 	CMD_ENQUEUED_TO_WAITQ,
@@ -37,10 +38,18 @@ typedef enum cmd_state_s {
 	CMD_EXECUTION_DONE,
 } cmd_state_t;
 
+typedef struct data_read_s {
+	TAILQ_ENTRY(data_read_s) data_next;
+	uint8_t *io_resp_data;
+	uint8_t *io_resp_data_ptr_cpy;
+	uint64_t bytes_consumed;
+} data_read_t;
+
 typedef struct rcommon_cmd_s {
 	TAILQ_ENTRY(rcommon_cmd_s)  send_cmd_next; /* for rcommon_sendq */
 	TAILQ_ENTRY(rcommon_cmd_s)  wait_cmd_next; /* for rcommon_waitq */
 	TAILQ_ENTRY(rcommon_cmd_s)  pending_cmd_next; /* for rcommon_pendingq */
+	TAILQ_HEAD(, data_read_s) data_read_ptr;
 	int luworker_id;
 	pthread_mutex_t rcommand_mtx;
 	int acks_recvd;
