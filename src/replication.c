@@ -1052,25 +1052,24 @@ update_replica_status(spec_t *spec, replica_t *replica)
 
 	repl_status = (zrepl_status_ack_t *)replica->mgmt_io_resp_data;
 
+	MTX_LOCK(&spec->rq_mtx);
 	MTX_LOCK(&replica->r_mtx);
 	last_status = replica->state;
 	replica->state = (replica_state_t) repl_status->state;
 	MTX_UNLOCK(&replica->r_mtx);
 
 	if(last_status != repl_status->state) {
-		MTX_LOCK(&spec->rq_mtx);
-		if (replica->state == ZVOL_STATUS_DEGRADED) {
+		if (repl_status->state == ZVOL_STATUS_DEGRADED) {
 			spec->degraded_rcount++;
 			spec->healthy_rcount--;
-		} else if (replica->state == ZVOL_STATUS_HEALTHY) {
+		} else if (repl_status->state == ZVOL_STATUS_HEALTHY) {
 			spec->degraded_rcount--;
 			spec->healthy_rcount++;
 		}
 		update_volstate(spec);
-		MTX_UNLOCK(&spec->rq_mtx);
 	}
+	MTX_UNLOCK(&spec->rq_mtx);
 	return 0;
-
 }
 
 /*
@@ -1498,13 +1497,18 @@ init_replication(void *arg __attribute__((__unused__))) {
 					close(replica->mgmt_fd);
 					remove_replica_from_list(replica->spec, replica->iofd);
 				}
-			} else if (events[i].data.fd == sfd) {
-				//Accept management connections from replicas and add the replicas to replica queue
-				accept_mgmt_conns(epfd, sfd);
-			} else if (events[i].events & EPOLLIN) {
-				handle_read_data_event((replica_t *)events[i].data.ptr);
-			} else if (events[i].events & EPOLLOUT) {
-				handle_write_data_event((replica_t *)events[i].data.ptr);
+			} else {
+				if (events[i].data.fd == sfd) {
+					//Accept management connections from replicas and add the replicas to replica queue
+					accept_mgmt_conns(epfd, sfd);
+				} else {
+					if (events[i].events & EPOLLIN) {
+						handle_read_data_event((replica_t *)events[i].data.ptr);
+					}
+					if (events[i].events & EPOLLOUT) {
+						handle_write_data_event((replica_t *)events[i].data.ptr);
+					}
+				}
 			}
 		}
 
