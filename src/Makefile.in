@@ -39,11 +39,14 @@ source   = istgt.c istgt_iscsi.c istgt_iscsi_param.c \
 	istgt_lu.c istgt_cmd_table.c istgt_ser_table.c istgt_lu_disk.c istgt_lu_disk_xcopy.c istgt_lu_disk_vbox.c \
 	istgt_lu_ctl.c \
 	istgt_log.c istgt_conf.c istgt_sock.c istgt_misc.c \
-	istgt_queue.c istgt_crc32c.c istgt_md5.c
+	istgt_queue.c istgt_crc32c.c istgt_md5.c replication.c replication_misc.c \
+	ring_mempool.c rte_ring.c
 header   = istgt_ver.h istgt.h istgt_iscsi.h istgt_iscsi_xcopy.h istgt_iscsi_param.h \
 	istgt_scsi.h istgt_proto.h istgt_lu.h \
 	istgt_log.h istgt_conf.h istgt_sock.h \
-	istgt_misc.h istgt_queue.h istgt_crc32c.h istgt_md5.h
+	istgt_misc.h istgt_queue.h istgt_crc32c.h istgt_md5.h replication.h  istgt_integration.h \
+	rte_atomic_64.h  rte_atomic_generic.h  rte_atomic.h  rte_common.h  \
+	rte_memory.h  rte_pause.h  rte_ring.h rte_mempool.h
 document = 
 sample   = 
 
@@ -52,8 +55,15 @@ ctl_source = istgtcontrol.c istgt_conf.c istgt_log.c istgt_sock.c istgt_misc.c \
 ctl_header = istgt_ver.h istgt_conf.h istgt_log.h istgt_sock.h istgt_misc.h \
 	istgt_md5.h
 
+replication_test_source   = replication_test.c replication_misc.c
+replication_test_header   = replication.h istgt_integration.h
+
+mempool_test_source = rte_ring.c mempool_test.c ring_mempool.c
+
 ISTGT    = $(source:.c=.o)
 ISTGTCONTROL = $(ctl_source:.c=.o)
+REPLICATION_TEST = $(replication_test_source:.c=.o)
+MEMPOOL_TEST = $(mempool_test_source:.c=.o)
 
 PACKAGE_NAME = @PACKAGE_NAME@
 PACKAGE_STRING = @PACKAGE_STRING@
@@ -93,7 +103,21 @@ istgtcontrol: $(ISTGTCONTROL)
 	objcopy --only-keep-debug ${@}.full ${@}.debug
 	objcopy --strip-debug --add-gnu-debuglink=${@}.debug ${@}.full ${@}
 
-all: stamp-depend config.h $(SUBPROGRAM) istgtcontrol istgt
+replication_test: $(REPLICATION_TEST)
+	$(CC) $(LDFLAGS) -o ${@}.full $(REPLICATION_TEST) $(LIBS)
+	objcopy --only-keep-debug ${@}.full ${@}.debug
+	objcopy --strip-debug --add-gnu-debuglink=${@}.debug ${@}.full ${@}
+
+mempool_test: $(MEMPOOL_TEST)
+	$(CC) $(LDFLAGS) -o ${@}.full $(MEMPOOL_TEST) $(LIBS)
+	objcopy --only-keep-debug ${@}.full ${@}.debug
+	objcopy --strip-debug --add-gnu-debuglink=${@}.debug ${@}.full ${@}
+
+build_image:
+	sh ./package.sh
+
+all: stamp-depend config.h $(SUBPROGRAM) istgtcontrol istgt replication_test mempool_test build_image
+dev: stamp-depend config.h $(SUBPROGRAM) istgtcontrol istgt replication_test mempool_test
 
 install: install-dirs
 	$(INSTALL) -m 0755 istgt $(DESTDIR)$(bindir)
@@ -124,6 +148,8 @@ clean:
 	-rm -f istgt istgtcontrol
 	-rm -f istgt.debug istgtcontrol.debug
 	-rm -f istgt.full istgtcontrol.full
+	-rm -f mempool_test
+	-rm -f replication_test replication_test.debug replication_test.full
 
 distclean: clean
 	-rm -f stamp-depend .depend

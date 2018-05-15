@@ -703,6 +703,7 @@ enable_debug
 enable_symlink_device
 with_logfacility
 with_logpriority
+with_replication
 with_vbox
 with_vboxlib
 '
@@ -3389,7 +3390,13 @@ case $host_os in *\ *) host_os=`echo "$host_os" | sed 's/ /-/g'`;; esac
 
 case "$host_os" in
 *linux*)
-	LIBS="-lkqueue  $LIBS"
+# Check whether --with-replication was given.
+if test "${with_replication+set}" = set; then :
+ cat >>confdefs.h <<_ACEOF
+#define REPLICATION
+_ACEOF
+fi
+
 	tmp="/usr/src/virtualbox/*/include"
 	if test -d "`echo $tmp`"; then
 	    vboxinc=$tmp
