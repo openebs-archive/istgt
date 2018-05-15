@@ -137,7 +137,7 @@ out:
 int
 send_io_resp(int fd, zvol_io_hdr_t *io_hdr, void *buf)
 {
-	struct iovec iovec[2];
+	struct iovec iovec[3];
 	struct zvol_io_rw_hdr io_rw_hdr;
 	int iovcnt, i, nbytes = 0;
 	int rc = 0;
