@@ -43,6 +43,7 @@ typedef struct replica_s {
 	spec_t *spec;
 	int id;
 	int iofd;
+	int epfd;
 	int mgmt_fd;
 	int sender_epfd;
 	int port;
@@ -83,7 +84,7 @@ int update_replica_list(int, spec_t *, int);
 int remove_replica_from_list(spec_t *, int);
 void unblock_blocked_cmds(replica_t *);
 
-replica_t *create_replica_entry(spec_t *, int);
+replica_t *create_replica_entry(spec_t *, int, int);
 replica_t *update_replica_entry(spec_t *, replica_t *, int);
 
 replica_t * get_replica(int mgmt_fd, spec_t **);
