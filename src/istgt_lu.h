@@ -28,6 +28,7 @@
 #ifndef ISTGT_LU_H
 #define ISTGT_LU_H
 
+#include <linux/types.h>
 #include <pthread.h>
 #include <time.h>
 #ifdef HAVE_UUID_H
@@ -819,11 +820,11 @@ typedef struct istgt_lu_disk_t {
 	TAILQ_HEAD(, replica_s) rq; //Queue of replicas connected to this spec(volume)
 	TAILQ_HEAD(, replica_s) rwaitq; //Queue of replicas completed handshake, and yet to have data connection to this spec(volume)
 	int replica_count;
-	int replication_factor;
+	int32_t __attribute__((__aligned__(4))) replication_factor;
 	int consistency_factor;
-	int healthy_rcount;
-	int degraded_rcount;
-	bool ready;
+	int32_t __attribute__((__aligned__(4))) healthy_rcount;
+	int32_t __attribute__((__aligned__(4))) degraded_rcount;
+	int32_t __attribute__((__aligned__(4))) ready;
 	int receiver_epfd;
 	/*Common for both the above queues,
 	Since same cmd is part of both the queues*/
@@ -834,7 +835,6 @@ typedef struct istgt_lu_disk_t {
 	pthread_mutex_t luworker_rmutex[ISTGT_MAX_NUM_LUWORKERS];
 	pthread_cond_t luworker_rcond[ISTGT_MAX_NUM_LUWORKERS];
 #endif
-
 	/*Queue containing all the tasks. Instead of going to separate 
 	queues (Cmd Queue, blocked queue, maint_cmd_que, maint_blocked_queue, 
 	inflight)to check for blockage, we will check it in just this queue.*/
