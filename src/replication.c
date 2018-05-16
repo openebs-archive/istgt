@@ -141,6 +141,7 @@ replicator(void *arg) {
 	bool cmd_blocked = false;
 	rcommon_cmd_t *pending_cmd;
 	rcmd_t *pending_rcmd;
+	int block_read;
 
 	while(1) {
 		MTX_LOCK(&spec->rcommonq_mtx);
@@ -159,8 +160,9 @@ dequeue_common_sendq:
 
 		//Enqueue to individual replica cmd queues and send on the respective fds
 		read_cmd_sent = false;
+		block_read = 0;
 		MTX_LOCK(&spec->rq_mtx);
-
+again:
 		TAILQ_FOREACH(replica, &spec->rq, r_next) {
 			if(replica == NULL) {
 				REPLICA_LOG("Replica not present");
@@ -186,17 +188,27 @@ dequeue_common_sendq:
 
 				if(cmd_blocked == false) {
 					TAILQ_INSERT_TAIL(&replica->sendq, rcmd, rsend_cmd_next);
-					if(rcmd->opcode == ZVOL_OPCODE_READ) {
+					if(rcmd->opcode == ZVOL_OPCODE_READ)
 						read_cmd_sent = true;
-					}
 					pthread_cond_signal(&replica->r_cond);
 				}
-				else
-					TAILQ_INSERT_TAIL(&replica->blockedq, rcmd, rblocked_cmd_next);
+				else {
+					if((rcmd->opcode == ZVOL_OPCODE_WRITE) || (block_read == 1)) {
+						TAILQ_INSERT_TAIL(&replica->blockedq, rcmd, rblocked_cmd_next);
+						if(rcmd->opcode == ZVOL_OPCODE_READ)
+							read_cmd_sent = true;
+					}
+				}
 			}
 			MTX_UNLOCK(&replica->r_mtx);
-			if((rcmd->opcode == ZVOL_OPCODE_READ) && read_cmd_sent) {
+			if((rcmd->opcode == ZVOL_OPCODE_READ) && read_cmd_sent)
 				break;
+		}
+		if(rcmd->opcode == ZVOL_OPCODE_READ) {
+			if (read_cmd_sent == false) {
+				block_read = 1;
+				cmd->copies_sent = 0;
+				goto again;
 			}
 		}
 		MTX_UNLOCK(&spec->rq_mtx);
@@ -966,6 +978,7 @@ cleanup_replica(replica_t *replica)
 
 	MTX_UNLOCK(&replica->r_mtx);
 
+	REPLICA_ERRLOG("freeing r_cond of replica %p\n", replica);
 	pthread_mutex_destroy(&replica->r_mtx);
 	pthread_cond_destroy(&replica->r_cond);
 	free(replica);
@@ -1638,6 +1651,7 @@ handle_write_data_event(replica_t *replica)
 			MTX_LOCK(&replica->spec->rq_mtx);
 			TAILQ_REMOVE(&replica->spec->rwaitq, replica, r_waitnext);
 			MTX_UNLOCK(&replica->spec->rq_mtx);
+			REPLICA_ERRLOG("freeing1 r_cond of replica %p\n", replica);
 			pthread_mutex_destroy(&replica->r_mtx);
 			pthread_cond_destroy(&replica->r_cond);
 			free(replica);
