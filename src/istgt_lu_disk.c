@@ -5774,6 +5774,10 @@ freeiovcnt:
 		ISTGT_ERRLOG("c#%d LU%d: readonly unit\n", conn->id, spec->lu->num);
 		goto freeiovcnt;
 	}
+	while (spec->lu->quiesce) {
+		ISTGT_ERRLOG("c#%d LU%d: quiescing write IOs\n", conn->id, spec->lu->num);
+		sleep(1);
+	}
 	if(spec->wzero) {
 		nbits = nbytes << 3;
 		nthbitset = find_first_bit(lu_cmd);

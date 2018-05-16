@@ -309,6 +309,7 @@ typedef struct istgt_lu_t {
 	int type;
 	int online;
 	int readonly;
+	int quiesce;
 	int blocklen;
 	int recordsize;
 	int rshift;

@@ -2482,7 +2482,7 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 	}
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "ReadOnly %s\n",
 			lu->readonly ? "Yes" : "No");
-
+	lu->quiesce = 0;
 	for (i = 0; i < MAX_LU_LUN; i++) {
 		snprintf(buf, sizeof buf, "LUN%d", i);
 		val = istgt_get_val(sp, buf);

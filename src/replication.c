@@ -1137,7 +1137,7 @@ pause_and_timed_wait_for_ongoing_ios(spec_t *spec, int sec)
 	struct timespec last, now, diff;
 	bool ret = false;
 
-	spec->ready = false;
+	spec->lu->quiesce = 1;
 
 	clock_gettime(CLOCK_MONOTONIC, &last);
 	timesdiff(last, now, diff);
@@ -1154,6 +1154,10 @@ pause_and_timed_wait_for_ongoing_ios(spec_t *spec, int sec)
 		MTX_LOCK(&spec->rq_mtx);
 		timesdiff(last, now, diff);
 	}
+
+	if (ret == false)
+		spec->lu->quiesce = 0;
+
 	return ret;
 }
 
@@ -1230,6 +1234,7 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 			r = true;
 	}
 	MTX_UNLOCK(&rcomm_mgmt->mtx);
+	spec->lu->quiesce = 0;
 	update_volstate(spec);
 	if (r == false)
 		TAILQ_FOREACH(replica, &spec->rq, r_next)
