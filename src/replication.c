@@ -141,7 +141,6 @@ replicator(void *arg) {
 	bool cmd_blocked = false;
 	rcommon_cmd_t *pending_cmd;
 	rcmd_t *pending_rcmd;
-	int block_read;
 
 	while(1) {
 		MTX_LOCK(&spec->rcommonq_mtx);
@@ -160,9 +159,7 @@ dequeue_common_sendq:
 
 		//Enqueue to individual replica cmd queues and send on the respective fds
 		read_cmd_sent = false;
-		block_read = 0;
 		MTX_LOCK(&spec->rq_mtx);
-again:
 		TAILQ_FOREACH(replica, &spec->rq, r_next) {
 			if(replica == NULL) {
 				REPLICA_LOG("Replica not present");
@@ -178,9 +175,11 @@ again:
 			}
 			cmd->copies_sent++;
 
-			if (!TAILQ_EMPTY(&replica->blockedq))
+			if (!TAILQ_EMPTY(&replica->blockedq)) {
 				TAILQ_INSERT_TAIL(&replica->blockedq, rcmd, rblocked_cmd_next);
-			else {
+				if(rcmd->opcode == ZVOL_OPCODE_READ)
+					read_cmd_sent = true;
+			} else {
 				cmd_blocked = false;
 				CHECK_FOR_BLOCKAGE_IN_Q((&replica->sendq), rsend_cmd_next)
 				CHECK_FOR_BLOCKAGE_IN_Q((&replica->waitq), rwait_cmd_next)
@@ -193,23 +192,13 @@ again:
 					pthread_cond_signal(&replica->r_cond);
 				}
 				else {
-					if((rcmd->opcode == ZVOL_OPCODE_WRITE) || (block_read == 1)) {
-						TAILQ_INSERT_TAIL(&replica->blockedq, rcmd, rblocked_cmd_next);
-						if(rcmd->opcode == ZVOL_OPCODE_READ)
-							read_cmd_sent = true;
-					}
+					if(rcmd->opcode == ZVOL_OPCODE_READ)
+						read_cmd_sent = true;
 				}
 			}
 			MTX_UNLOCK(&replica->r_mtx);
 			if((rcmd->opcode == ZVOL_OPCODE_READ) && read_cmd_sent)
 				break;
-		}
-		if(rcmd->opcode == ZVOL_OPCODE_READ) {
-			if (read_cmd_sent == false) {
-				block_read = 1;
-				cmd->copies_sent = 0;
-				goto again;
-			}
 		}
 		MTX_UNLOCK(&spec->rq_mtx);
 	}
