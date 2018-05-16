@@ -88,6 +88,9 @@ int istgt_lu_access(CONN_Ptr conn, ISTGT_LU_Ptr lu, const char *iqn, const char 
 int istgt_lu_visible(ISTGT_Ptr istgt, ISTGT_LU_Ptr lu, const char *iqn, int pg_tag);
 int istgt_lu_sendtargets(CONN_Ptr conn, const char *iiqn, const char *iaddr, const char *tiqn, uint8_t *data, int alloc_len, int data_len);
 ISTGT_LU_Ptr istgt_lu_find_target(ISTGT_Ptr istgt, const char *target_name);
+ISTGT_LU_Ptr istgt_lu_find_target_by_volname(ISTGT_Ptr istgt, const char *target_name);
+int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int, int);
+int istgt_lu_destroy_snapshot(spec_t *spec, char *snapname);
 int istgt_lu_add_nexus(ISTGT_LU_Ptr lu, char *initiator_port);
 int istgt_lu_remove_nexus(ISTGT_LU_Ptr lu, char *initiator_port);
 uint16_t istgt_lu_allocate_tsih(ISTGT_LU_Ptr lu, const char *initiator_port, int tag);

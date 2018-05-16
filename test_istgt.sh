@@ -3,6 +3,7 @@
 DIR=$PWD
 SETUP_ISTGT=$DIR/src/setup_istgt.sh
 REPLICATION_TEST=$DIR/src/replication_test
+ISTGTCONTROL=$DIR/src/istgtcontrol
 MEMPOOL_TEST=$DIR/src/mempool_test
 ISCSIADM=iscsiadm
 ISTGT_PID=-1
@@ -59,6 +60,29 @@ run_mempool_test()
 	return 0
 }
 
+run_snap_commands()
+{
+	for (( i = 1; i <= 5; i++ )) do
+		sudo $ISTGTCONTROL snapcreate vol1 snapname1 0
+		if [ $? -ne 1 ]; then
+			echo "istgtcontrol snapcreate should fail"
+			exit 1
+		fi
+	done
+	for (( j = 1; j <= 4; j++ )) do
+		for (( i = 1; i <= 10; i++ )) do
+			sudo $ISTGTCONTROL snapcreate vol1 snapname1 1 $j
+		done
+	done
+	for (( i = 1; i <= 5; i++ )) do
+		sudo $ISTGTCONTROL snapdestroy vol1 snapname1
+		if [ $? -ne 0 ]; then
+			echo "istgtcontrol snapdestroy failure"
+			exit 1
+		fi
+	done
+}
+
 write_and_verify_data(){
 	login_to_volume "$CONTROLLER_IP:3260"
 	sleep 5
@@ -112,25 +136,38 @@ run_data_integrity_test() {
 	local replica3_ip="127.0.0.1"
 
 	setup_test_env
+	run_snap_commands
 
 	sudo $REPLICATION_TEST "$CONTROLLER_IP" "$CONTROLLER_PORT" "$replica1_ip" "$replica1_port" "/tmp/test_vol1" &
 	replica1_pid=$!
+	run_snap_commands
+
 	sudo $REPLICATION_TEST "$CONTROLLER_IP" "$CONTROLLER_PORT" "$replica2_ip" "$replica2_port" "/tmp/test_vol2" &
 	replica2_pid=$!
+	run_snap_commands
+
 	sudo $REPLICATION_TEST "$CONTROLLER_IP" "$CONTROLLER_PORT" "$replica3_ip" "$replica3_port" "/tmp/test_vol3" &
 	replica3_pid=$!
-
 	sleep 15
 	write_and_verify_data
+	run_snap_commands
 
 	sudo kill -9 $replica1_pid
 	sleep 5
 	write_and_verify_data
 
+	#sleep is required for more than 60 seconds, as status messages are sent every 60 seconds
+	sleep 65
+	run_snap_commands
+
 	sudo $REPLICATION_TEST "$CONTROLLER_IP" "$CONTROLLER_PORT" "$replica1_ip" "$replica1_port" "/tmp/test_vol1" &
 	replica1_pid=$!
 	sleep 5
 	write_and_verify_data
+	run_snap_commands
+
+	sleep 65
+	run_snap_commands
 
 	sudo kill -9 $replica1_pid $replica2_pid $replica3_pid
 	cleanup_test_env

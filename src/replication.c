@@ -15,6 +15,7 @@
 #include "replication_misc.h"
 #include "istgt_crc32c.h"
 #include "istgt_misc.h"
+#include "istgt_proto.h"
 #include "ring_mempool.h"
 
 cstor_conn_ops_t cstor_ops = {
@@ -190,6 +191,8 @@ dequeue_common_sendq:
 					}
 					pthread_cond_signal(&replica->r_cond);
 				}
+				else
+					TAILQ_INSERT_TAIL(&replica->blockedq, rcmd, rblocked_cmd_next);
 			}
 			MTX_UNLOCK(&replica->r_mtx);
 			if((rcmd->opcode == ZVOL_OPCODE_READ) && read_cmd_sent) {
@@ -393,12 +396,16 @@ remove_replica_from_list(spec_t *spec, int iofd)
 	struct epoll_event event;
 	MTX_LOCK(&spec->rq_mtx);
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
+		MTX_LOCK(&replica->r_mtx);
 		if(iofd == replica->iofd) {
 			TAILQ_REMOVE(&spec->rq, replica, r_next);
 			spec->replica_count--;
+			if (replica->state == ZVOL_STATUS_HEALTHY)
+				spec->healthy_rcount--;
+			else if (replica->state == ZVOL_STATUS_DEGRADED)
+				spec->degraded_rcount--;
 			update_volstate(spec);
 			REPLICA_LOG("REMOVE REPLICA FROM LIST\n");
-			MTX_LOCK(&replica->r_mtx);
 			MTX_UNLOCK(&spec->rq_mtx);
 
 			EMPTY_Q_OF_REPLICA((&replica->waitq), rwait_cmd_next)
@@ -409,10 +416,11 @@ remove_replica_from_list(spec_t *spec, int iofd)
 			replica->removed = true;
 			pthread_cond_signal(&replica->r_cond);
 			epoll_ctl(spec->receiver_epfd, EPOLL_CTL_DEL, replica->iofd, &event);
-			cleanup_replica(replica);
 			MTX_UNLOCK(&replica->r_mtx);
+			cleanup_replica(replica);
 			break;
 		}
+		MTX_UNLOCK(&replica->r_mtx);
 	}
 	if (replica != NULL)
 		REPLICA_LOG("%d IOs aborted for replica %d", ios_aborted, replica->id);
@@ -993,6 +1001,8 @@ send_replica_handshake_query(replica_t *replica, spec_t *spec)
 	return 0;
 }
 
+void handle_snap_create_resp(replica_t *replica, mgmt_cmd_t *mgmt_cmd);
+
 void
 handle_snap_create_resp(replica_t *replica, mgmt_cmd_t *mgmt_cmd)
 {
@@ -1039,7 +1049,8 @@ send_replica_snapshot(spec_t *spec, replica_t *replica, char *snapname, zvol_op_
 	//TODO: Add it as the second IO, rather than tailing
 	TAILQ_INSERT_TAIL(&replica->mgmt_cmd_queue, mgmt_cmd, mgmt_cmd_next);
 	MTX_UNLOCK(&replica->r_mtx);
-	rcomm_mgmt->cmds_sent++;
+	if (rcomm_mgmt != NULL)
+		rcomm_mgmt->cmds_sent++;
 
 	handle_write_data_event(replica);
 	return 0;
@@ -1144,8 +1155,22 @@ pause_and_timed_wait_for_ongoing_ios(spec_t *spec, int sec)
 	return ret;
 }
 
-int
-take_snapshot(spec_t *spec, char *snapname)
+int istgt_lu_destroy_snapshot(spec_t *spec, char *snapname)
+{
+	replica_t *replica;
+	TAILQ_FOREACH(replica, &spec->rq, r_next)
+		send_replica_snapshot(spec, replica, snapname, ZVOL_OPCODE_SNAP_DESTROY, NULL);
+	return true;
+}
+
+/*
+ * This API will create snapshot with given name on the spec.
+ * It will wait for io_wait_time seconds to complete ongoing IOs.
+ * Overall, this API will wait for wait_time seconds to get response
+ * for snapshot command (this includes io_wait_time).
+ * In case of any failures, snapshot destroy command will be sent to all replicas.
+ */
+int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int wait_time)
 {
 	bool r;
 	replica_t *replica;
@@ -1161,13 +1186,15 @@ take_snapshot(spec_t *spec, char *snapname)
 		return false;
 	}
 
-	r = pause_and_timed_wait_for_ongoing_ios(spec, 10);
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	r = pause_and_timed_wait_for_ongoing_ios(spec, io_wait_time);
 	if (r == false) {
 		update_volstate(spec);
 		MTX_UNLOCK(&spec->rq_mtx);
 		return false;
 	}
 
+	clock_gettime(CLOCK_MONOTONIC, &now);
 	rcomm_mgmt = (struct rcommon_mgmt_cmd *)malloc(sizeof (struct rcommon_mgmt_cmd));
 	pthread_mutex_init(&rcomm_mgmt->mtx, NULL);
 	rcomm_mgmt->cmds_sent = 0;
@@ -1179,10 +1206,11 @@ take_snapshot(spec_t *spec, char *snapname)
 	TAILQ_FOREACH(replica, &spec->rq, r_next)
 		send_replica_snapshot(spec, replica, snapname, ZVOL_OPCODE_SNAP_CREATE, rcomm_mgmt);
 
+	clock_gettime(CLOCK_MONOTONIC, &now);
 	r = false;
 	timesdiff(last, now, diff);
 	MTX_LOCK(&rcomm_mgmt->mtx);
-	while (diff.tv_sec < 30) {
+	while (diff.tv_sec < wait_time) {
 		if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed))
 			break;
 		MTX_UNLOCK(&rcomm_mgmt->mtx);
@@ -1192,6 +1220,7 @@ take_snapshot(spec_t *spec, char *snapname)
 		MTX_LOCK(&rcomm_mgmt->mtx);
 		timesdiff(last, now, diff);
 	}
+	clock_gettime(CLOCK_MONOTONIC, &now);
 	rcomm_mgmt->done = 1;
 	if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed)) {
 		free_rcomm_mgmt = 1;
@@ -1307,7 +1336,8 @@ zvol_handshake(spec_t *spec, replica_t *replica)
  * sends handshake IO to start handshake on accepted (mgmt) connection
  */
 void
-accept_mgmt_conns(int epfd, int sfd) {
+accept_mgmt_conns(int epfd, int sfd)
+{
 	struct epoll_event event;
 	int rc, rcount=0;
 	spec_t *spec;
@@ -1416,7 +1446,18 @@ write_io_data(replica_t *replica, io_event_t *wevent)
 	uint64_t reqlen, count;
 	int errorno = 0, fd_closed = 0;
 	int donecount = 0;
-	(void)replica;
+	pthread_t slf = pthread_self();
+
+	/*
+	 * locking is required here, as write_io_data sets the state after sending the request on wire.
+	 * If response is received before setting the next state, handle_read_data_event will fail.
+	 * This can happen if handle_write_data_event is called from thread other than init_replication,
+	 * which happens with snapshot usecase.
+	 * If the writing and reading are done from same thread, this lock can be removed.
+	 */
+
+	if (slf != replication_thread)
+		MTX_LOCK(&replica->r_mtx);
 
 	switch(*state) {
 		case WRITE_IO_SEND_HDR:
@@ -1432,6 +1473,7 @@ write_io_data(replica_t *replica, io_event_t *wevent)
 		case WRITE_IO_SEND_DATA:
 			reqlen = write_hdr->len - (*write_count);
 			if (reqlen != 0) {
+
 				count = perform_read_write_on_fd(fd,
 				    ((uint8_t *)(*data)) + (*write_count),
 				    reqlen, &errorno, &fd_closed, *state);
@@ -1445,6 +1487,8 @@ write_io_data(replica_t *replica, io_event_t *wevent)
 			break;
 	}
 
+	if (slf != replication_thread)
+		MTX_UNLOCK(&replica->r_mtx);
 	return donecount;
 }
 
@@ -1537,6 +1581,11 @@ read_io_resp_hdr:
 						handle_snap_create_resp(replica, mgmt_cmd);
 					break;
 
+				case ZVOL_OPCODE_SNAP_DESTROY:
+					if ((*resp_data) != NULL)
+						REPLICA_ERRLOG("resp_data should be NULL for snap delete\n");
+					break;
+
 				default:
 					REPLICA_NOTICELOG("unsupported opcode(%d) received..\n", resp_hdr->opcode);
 					break;
@@ -1570,7 +1619,6 @@ handle_write_data_event(replica_t *replica)
 			REPLICA_ERRLOG("write IO is in wait state for resp on mgmt connection..");
 		return rc;
 	}
-
 	MTX_UNLOCK(&replica->r_mtx);
 
 	wevent.fd = replica->mgmt_fd;
@@ -1580,6 +1628,7 @@ handle_write_data_event(replica_t *replica)
 	wevent.byte_count = &(mgmt_cmd->io_bytes);
 
 	rc = write_io_data(replica, &wevent);
+
 	if(rc < 0) {
 		/* This is for case where error happened while sending handshake.
 		 * This happens only on epoll thread, so, there won't be any races
@@ -1723,13 +1772,12 @@ init_replication(void *arg __attribute__((__unused__))) {
 
 		// send replica_status query to degraded replicas at interval of 60 seconds
 		timesdiff(last, now, diff);
-		if (diff.tv_sec >= 60) {
+		if (diff.tv_sec >= 30) {
 			spec_t *spec = NULL;
 			snprintf(snapname, 40, "%lu\n", now.tv_sec);
 			MTX_LOCK(&specq_mtx);
 			TAILQ_FOREACH(spec, &spec_q, spec_next) {
 				ask_replica_status_all(spec);
-				take_snapshot(spec, snapname);
 			}
 			MTX_UNLOCK(&specq_mtx);
 			clock_gettime(CLOCK_MONOTONIC, &last);

@@ -5,6 +5,7 @@
 #include "istgt_sock.h"
 #include <stdbool.h>
 
+extern pthread_t timerthread, replication_thread;
 typedef int (*cstor_listen)(const char *, int, int);
 typedef int (*cstor_connect)(const char *, int);
 typedef void (*cstor_read)(void *, void *, void *, void *, uint64_t);
