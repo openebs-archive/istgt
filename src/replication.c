@@ -1029,18 +1029,17 @@ send_replica_snapshot(spec_t *spec, replica_t *replica, char *snapname, zvol_op_
 {
 	zvol_io_hdr_t *rmgmtio = NULL;
 	size_t data_len;
-	struct snap_req_data *data;
+	char *data;
 	zvol_op_code_t mgmt_opcode = opcode;
 	mgmt_cmd_t *mgmt_cmd;
 
 	mgmt_cmd = malloc(sizeof(mgmt_cmd_t));
 	mgmt_cmd->rcomm_mgmt = rcomm_mgmt;
-	data_len = sizeof (struct snap_req_data);
+	data_len = strlen(spec->lu->volname) + strlen(snapname) + 2;
 	build_replica_mgmt_hdr();
 
-	data = (struct snap_req_data *)malloc(data_len);
-	snprintf((char *)data->volname, MAX_NAME_LEN, "%s", spec->lu->volname);
-	snprintf((char *)data->snapname, MAX_NAME_LEN, "%s", snapname);
+	data = (char *)malloc(data_len);
+	snprintf(data, data_len, "%s@%s", spec->lu->volname, snapname);
 
 	mgmt_cmd->io_hdr = rmgmtio;
 	mgmt_cmd->io_bytes = 0;

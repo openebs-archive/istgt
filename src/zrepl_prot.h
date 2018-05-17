@@ -114,10 +114,6 @@ struct mgmt_ack {
 
 typedef struct mgmt_ack mgmt_ack_t;
 
-struct snap_req_data {
-	char volname[MAX_NAME_LEN];
-	char snapname[MAX_NAME_LEN];
-} __attribute__((packed));
 /*
  * zvol rebuild related state
  */
