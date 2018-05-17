@@ -1131,11 +1131,24 @@ is_volume_healthy(spec_t *spec)
         }                                                \
 }
 
+#define IS_WRITE_IO_IN_Q(queue, next) { \
+	if (write_io_found == false) { \
+		TAILQ_FOREACH(cmd, queue, next) { \
+			if (cmd->opcode == ZVOL_OPCODE_WRITE) { \
+				write_io_found = true; \
+				break; \
+			} \
+		} \
+	} \
+}
+
 static bool
 pause_and_timed_wait_for_ongoing_ios(spec_t *spec, int sec)
 {
 	struct timespec last, now, diff;
 	bool ret = false;
+	rcommon_cmd_t *cmd;
+	bool write_io_found = false;
 
 	spec->lu->quiesce = 1;
 
@@ -1143,8 +1156,11 @@ pause_and_timed_wait_for_ongoing_ios(spec_t *spec, int sec)
 	timesdiff(last, now, diff);
 
 	while ((diff.tv_sec < sec) && (is_volume_healthy(spec) == true)) {
-		if (TAILQ_EMPTY(&spec->rcommon_sendq) && TAILQ_EMPTY(&spec->rcommon_waitq)
-		    && TAILQ_EMPTY(&spec->rcommon_pendingq))
+		write_io_found = false;
+		IS_WRITE_IO_IN_Q(&spec->rcommon_sendq, send_cmd_next);
+		IS_WRITE_IO_IN_Q(&spec->rcommon_waitq, wait_cmd_next);
+		IS_WRITE_IO_IN_Q(&spec->rcommon_pendingq, pending_cmd_next);
+		if (write_io_found == false)
 		{
 			ret = true;
 			break;
