@@ -76,8 +76,7 @@
 
 #include <sys/time.h>
 
-
-
+pthread_t timerthread, replication_thread;
 
 #if !defined(__GNUC__)
 #undef __attribute__
@@ -2654,7 +2653,6 @@ main(int argc, char **argv)
 	sigset_t signew, sigold;
 	int retry = 10;
 	#endif
-	pthread_t timerthread, replication_thread;
 	int detach = 1;
 	int swmode;
 	int ch;

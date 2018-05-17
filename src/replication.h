@@ -81,8 +81,17 @@ typedef struct rcmd_s {
 typedef struct replica_s replica_t;
 typedef struct istgt_lu_disk_t spec_t;
 
+typedef struct rcommon_mgmt_cmd {
+	int cmds_sent;
+	int cmds_succeeded;
+	int cmds_failed;
+	int done;
+	pthread_mutex_t mtx;
+} rcommon_mgmt_cmd_t;
+
 typedef struct mgmt_cmd_s {
 	TAILQ_ENTRY(mgmt_cmd_s) mgmt_cmd_next;
+	rcommon_mgmt_cmd_t *rcomm_mgmt;
 	zvol_io_hdr_t *io_hdr;	// management command header
 	void *data;		// cmd data
 	int mgmt_cmd_state;	// current state of cmd

@@ -309,6 +309,7 @@ typedef struct istgt_lu_t {
 	int type;
 	int online;
 	int readonly;
+	int quiesce;
 	int blocklen;
 	int recordsize;
 	int rshift;
@@ -819,11 +820,11 @@ typedef struct istgt_lu_disk_t {
 	TAILQ_HEAD(, replica_s) rq; //Queue of replicas connected to this spec(volume)
 	TAILQ_HEAD(, replica_s) rwaitq; //Queue of replicas completed handshake, and yet to have data connection to this spec(volume)
 	int replica_count;
-	int replication_factor;
+	int32_t replication_factor;
 	int consistency_factor;
-	int healthy_rcount;
-	int degraded_rcount;
-	bool ready;
+	int32_t healthy_rcount;
+	int32_t degraded_rcount;
+	int32_t ready;
 	int receiver_epfd;
 	/*Common for both the above queues,
 	Since same cmd is part of both the queues*/
@@ -834,7 +835,6 @@ typedef struct istgt_lu_disk_t {
 	pthread_mutex_t luworker_rmutex[ISTGT_MAX_NUM_LUWORKERS];
 	pthread_cond_t luworker_rcond[ISTGT_MAX_NUM_LUWORKERS];
 #endif
-
 	/*Queue containing all the tasks. Instead of going to separate 
 	queues (Cmd Queue, blocked queue, maint_cmd_que, maint_blocked_queue, 
 	inflight)to check for blockage, we will check it in just this queue.*/

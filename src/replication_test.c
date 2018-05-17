@@ -78,7 +78,16 @@ send_mgmtack(int fd, zvol_op_code_t opcode, void *buf, char *replicaip, int repl
 	iovec[2].iov_base = ((uint8_t *)mgmt_ack_hdr) + 32;
 	iovec[2].iov_len = sizeof (zvol_io_hdr_t) - 32;
 
-	if (opcode == ZVOL_OPCODE_REPLICA_STATUS) {
+	if (opcode == ZVOL_OPCODE_SNAP_DESTROY) {
+		iovec_count = 3;
+		mgmt_ack_hdr->status = (random() % 2) ? ZVOL_OP_STATUS_FAILED : ZVOL_OP_STATUS_OK;
+		mgmt_ack_hdr->len = 0;
+	} else if (opcode == ZVOL_OPCODE_SNAP_CREATE) {
+		iovec_count = 3;
+		sleep(random()%3 + 1);
+		mgmt_ack_hdr->status = (random() % 5 == 0) ? ZVOL_OP_STATUS_FAILED : ZVOL_OP_STATUS_OK;
+		mgmt_ack_hdr->len = 0;
+	} else if (opcode == ZVOL_OPCODE_REPLICA_STATUS) {
 		repl_status.state = ZVOL_STATUS_HEALTHY;
 		mgmt_ack_hdr->len = sizeof(zrepl_status_ack_t);
 		iovec_count = 4;
@@ -98,10 +107,10 @@ send_mgmtack(int fd, zvol_op_code_t opcode, void *buf, char *replicaip, int repl
 		iovec_count = 6;
 	}
 
-	for (start = 0; start < iovec_count; start += 2) {
-		nbytes = iovec[start].iov_len + iovec[start + 1].iov_len;
+	for (start = 0; start < iovec_count; start += 1) {
+		nbytes = iovec[start].iov_len;
 		while (nbytes) {
-			rc = writev(fd, &iovec[start], 2);//Review iovec in this line
+			rc = writev(fd, &iovec[start], 1);
 			if (rc < 0) {
 				goto out;
 			}
@@ -109,7 +118,7 @@ send_mgmtack(int fd, zvol_op_code_t opcode, void *buf, char *replicaip, int repl
 			if (nbytes == 0)
 				break;
 			/* adjust iovec length */
-			for (i = start; i < start + 2; i++) {
+			for (i = start; i < start + 1; i++) {
 				if (iovec[i].iov_len != 0 && iovec[i].iov_len > (size_t)rc) {
 					iovec[i].iov_base
 						= (void *) (((uintptr_t)iovec[i].iov_base) + rc);
@@ -221,7 +230,10 @@ main(int argc, char **argv)
 	uint64_t recv_len = 0;
 	uint64_t total_len = 0;
 	uint64_t io_hdr_len = sizeof(zvol_io_hdr_t);
+	struct timespec now;
 	
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	srandom(now.tv_sec);
 
 	epfd = epoll_create1(0);
 	

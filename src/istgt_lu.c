@@ -542,6 +542,27 @@ istgt_lu_sendtargets(CONN_Ptr conn, const char *iiqn, const char *iaddr, const c
 }
 
 ISTGT_LU_Ptr
+istgt_lu_find_target_by_volname(ISTGT_Ptr istgt, const char *volname)
+{
+	ISTGT_LU_Ptr lu;
+	int i;
+
+	if (istgt == NULL || volname == NULL)
+		return NULL;
+	for (i = 0; i < MAX_LOGICAL_UNIT; i++) {
+		lu = istgt->logical_unit[i];
+		if (lu == NULL)
+			continue;
+		if (strcasecmp(volname, lu->volname) == 0) {
+			return lu;
+		}
+	}
+	ISTGT_WARNLOG("can't find target %s\n",
+	    volname);
+	return NULL;
+} 
+
+ISTGT_LU_Ptr
 istgt_lu_find_target(ISTGT_Ptr istgt, const char *target_name)
 {
 	ISTGT_LU_Ptr lu;
@@ -2461,7 +2482,7 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 	}
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "ReadOnly %s\n",
 			lu->readonly ? "Yes" : "No");
-
+	lu->quiesce = 0;
 	for (i = 0; i < MAX_LU_LUN; i++) {
 		snprintf(buf, sizeof buf, "LUN%d", i);
 		val = istgt_get_val(sp, buf);
