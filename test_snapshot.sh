@@ -1,8 +1,8 @@
 #!/bin/bash
 
-ISTGTCONTROL=$DIR/src/istgtcontrol
+ISTGTCONTROL=$PWD/src/istgtcontrol
 
-# if $1 is 0, istgtcontrol command should fail
+# if $1 is 0, snapcreate command should fail in all cases
 run_snap_commands()
 {
 	echo "run_snap_commands: "$1
