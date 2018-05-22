@@ -4,6 +4,7 @@
 #include "istgt_lu.h"
 #include "istgt_sock.h"
 #include <stdbool.h>
+#include "ring_mempool.h"
 
 typedef int (*cstor_listen)(const char *, int, int);
 typedef int (*cstor_connect)(const char *, int);
@@ -33,6 +34,8 @@ typedef enum zvol_status replica_state_t;
 typedef struct replica_s {
 	TAILQ_ENTRY(replica_s) r_next;
 	TAILQ_ENTRY(replica_s) r_waitnext;
+	rte_smempool_t cmdq;	/* list of IOs queued from spec to replica */
+	TAILQ_HEAD(, rcmd_s) readyq;	/* list of IOs (non-blocking IOs) ready to sent to replica */
 	TAILQ_HEAD(, rcmd_s) sendq;
 	TAILQ_HEAD(, rcmd_s) waitq;
 	TAILQ_HEAD(, rcmd_s) blockedq;
@@ -45,6 +48,7 @@ typedef struct replica_s {
 	int iofd;
 	int mgmt_fd;
 	int sender_epfd;
+	int io_efd;	/* epoll fd for managing data connection */
 	int port;
 	char *ip;
 	uint64_t least_recvd;
@@ -53,6 +57,14 @@ typedef struct replica_s {
 	int cur_recvd;
 	uint64_t rrio_seq;
 	uint64_t wrio_seq;
+
+	void *ongoing_io_buf;	// data received from replica
+	uint64_t ongoing_io_len;	// number of bytes received from replica
+	rcmd_t *ongoing_io;		// cmd for which we are receiving response
+	int mgmt_eventfd;
+	int epollfd;
+	int data_eventfd;
+	int eventfd;	/* eventfd for cmd notification from spec */
 
 	zvol_io_hdr_t *io_resp_hdr;	// header recieved on data connection
 	void *io_resp_data;		// data recieved on data connection
@@ -76,6 +88,7 @@ int initialize_volume(spec_t *);
 void *replicator(void *);
 void *replica_sender(void *);
 void *replica_receiver(void *);
+void *cleanup_deadlist(void *);
 int initialize_replication(void);
 int handle_write_resp(spec_t *, replica_t *);
 int handle_read_resp(spec_t *, replica_t *);

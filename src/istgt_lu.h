@@ -37,6 +37,8 @@
 #include "istgt_queue.h"
 
 #include "replication.h"
+#include "ring_mempool.h"
+
 #ifdef __linux__
 #include <x86_64-linux-gnu/sys/queue.h>
 #endif
@@ -816,9 +818,11 @@ typedef struct istgt_lu_disk_t {
 	TAILQ_HEAD(, rcommon_cmd_s) rcommon_wait_readq; //Contains IOs waiting for acks from replicas
 	TAILQ_HEAD(, rcommon_cmd_s) rcommon_waitq; //Contains IOs waiting for acks from atleast n(consistency level) replicas
 	TAILQ_HEAD(, rcommon_cmd_s) rcommon_pendingq; //Contains IOs waiting for acks from remaining replicas
+	rte_smempool_t rcommon_deadlist;	// Contains completed IOs
 	TAILQ_HEAD(, replica_s) rq; //Queue of replicas connected to this spec(volume)
 	TAILQ_HEAD(, replica_s) rwaitq; //Queue of replicas completed handshake, and yet to have data connection to this spec(volume)
 	int replica_count;
+	uint64_t replica_index_list;
 	int replication_factor;
 	int consistency_factor;
 	int healthy_rcount;
@@ -961,7 +965,12 @@ int istgt_lu_disk_print_reservation(ISTGT_LU_Ptr lu, int lun);
 int istgt_lu_disk_close_raw(ISTGT_LU_DISK *spec);
 int istgt_lu_disk_get_reservation(ISTGT_LU_DISK *spec);
 
-#define likely(x)      __builtin_expect(!!(x), 1)                                            
-#define unlikely(x)    __builtin_expect(!!(x), 0) 
+#ifndef likely
+#define likely(x)      __builtin_expect(!!(x), 1)
+#endif
+
+#ifndef unlikely
+#define unlikely(x)    __builtin_expect(!!(x), 0)
+#endif
 
 #endif /* ISTGT_LU_H */

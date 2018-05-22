@@ -37,16 +37,33 @@ typedef enum cmd_state_s {
 	CMD_EXECUTION_DONE,
 } cmd_state_t;
 
+typedef struct resp_data {
+	void *data;
+	uint64_t len;
+} resp_data_t;
+
+struct replica_rcomm_resp {
+	zvol_io_hdr_t io_resp_hdr;
+	uint8_t *data_ptr;
+	uint64_t data_len;
+	int status;
+} __attribute__((packed));
+
+typedef struct replica_rcomm_resp replica_rcomm_resp_t;
+
 typedef struct rcommon_cmd_s {
+	TAILQ_ENTRY(rcommon_cmd_s)  ready_cmd_next; /* for rcommon_sendq */
 	TAILQ_ENTRY(rcommon_cmd_s)  send_cmd_next; /* for rcommon_sendq */
 	TAILQ_ENTRY(rcommon_cmd_s)  wait_cmd_next; /* for rcommon_waitq */
 	TAILQ_ENTRY(rcommon_cmd_s)  pending_cmd_next; /* for rcommon_pendingq */
+	TAILQ_ENTRY(rcommon_cmd_s)  dead_cmd_next; /* for rcommon_pendingq */
 	int luworker_id;
 	pthread_mutex_t rcommand_mtx;
 	int acks_recvd;
 	int ios_aborted;
 	int copies_sent;
 	zvol_op_code_t opcode;
+	int healthy_count;	/* number of healthy replica when cmd queued */
 	uint64_t io_seq;
 	uint64_t lun_id;
 	uint64_t offset;
@@ -56,12 +73,17 @@ typedef struct rcommon_cmd_s {
 	bool completed;
 	cmd_state_t state;
 	void *data;
+	pthread_mutex_t *mutex;
+	pthread_cond_t *cond_var;
+	replica_rcomm_resp_t resp_list[MAXREPLICA];   /* array of response received from replica */
 	uint64_t total;
 	int64_t iovcnt;
 	struct iovec iov[41];
 } rcommon_cmd_t;
 
 typedef struct rcmd_s {
+	TAILQ_ENTRY(rcmd_s)  next;
+	TAILQ_ENTRY(rcmd_s)  rcmd_cmd_next; /* for rcommon_sendq */
 	TAILQ_ENTRY(rcmd_s)  rsend_cmd_next; /* for replica sendq */
 	TAILQ_ENTRY(rcmd_s)  rwait_cmd_next; /* for replica waitq */
 	TAILQ_ENTRY(rcmd_s)  rblocked_cmd_next; /* for replica blockedq */
@@ -72,7 +94,9 @@ typedef struct rcmd_s {
 	uint64_t wrio_seq;
 	void *rcommq_ptr;
 	bool ack_recvd;
+	int healthy_count;	/* number of healthy replica when cmd queued */
 	int status;
+	int idx;		/* index for rcommon_cmd in resp_list */
 	int64_t iovcnt;
 	uint64_t offset;
 	uint64_t data_len;
@@ -80,6 +104,15 @@ typedef struct rcmd_s {
 } rcmd_t;
 typedef struct replica_s replica_t;
 typedef struct istgt_lu_disk_t spec_t;
+
+typedef struct io_data_chunk {
+	TAILQ_ENTRY(io_data_chunk) io_data_chunk_next;
+	uint64_t io_num;
+	uint8_t *data;
+	uint64_t len;
+} io_data_chunk_t;
+
+TAILQ_HEAD(io_data_chunk_list_t, io_data_chunk);
 
 typedef struct mgmt_cmd_s {
 	TAILQ_ENTRY(mgmt_cmd_s) mgmt_cmd_next;
@@ -103,6 +136,8 @@ int initialize_replication_mempool(bool should_fail);
 int destroy_relication_mempool(void);
 void clear_rcomm_cmd(rcommon_cmd_t *);
 void ask_replica_status(spec_t *spec, replica_t *replica);
+void get_all_read_resp_data_chunk(void *, struct io_data_chunk_list_t *);
+uint8_t *process_chunk_read_resp(struct io_data_chunk_list_t  *io_chunk_list, uint64_t len);
 
 #define REPLICA_LOG(fmt, ...)  syslog(LOG_NOTICE, 	 "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
 #define REPLICA_NOTICELOG(fmt, ...) syslog(LOG_NOTICE, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
