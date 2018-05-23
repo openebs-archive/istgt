@@ -46,8 +46,8 @@ struct replica_rcomm_resp {
 	zvol_io_hdr_t io_resp_hdr;
 	uint8_t *data_ptr;
 	uint64_t data_len;
-	int status;
-} __attribute__((packed));
+	uint64_t status;
+} __attribute__((packed));// || aligned(1)));
 
 typedef struct replica_rcomm_resp replica_rcomm_resp_t;
 
@@ -93,6 +93,7 @@ typedef struct rcmd_s {
 	uint64_t rrio_seq;
 	uint64_t wrio_seq;
 	void *rcommq_ptr;
+	uint8_t *iov_data;	/* for header to be sent to replica */
 	bool ack_recvd;
 	int healthy_count;	/* number of healthy replica when cmd queued */
 	int status;
@@ -136,7 +137,7 @@ int initialize_replication_mempool(bool should_fail);
 int destroy_relication_mempool(void);
 void clear_rcomm_cmd(rcommon_cmd_t *);
 void ask_replica_status(spec_t *spec, replica_t *replica);
-void get_all_read_resp_data_chunk(void *, struct io_data_chunk_list_t *);
+void get_all_read_resp_data_chunk(replica_rcomm_resp_t *, struct io_data_chunk_list_t *);
 uint8_t *process_chunk_read_resp(struct io_data_chunk_list_t  *io_chunk_list, uint64_t len);
 
 #define REPLICA_LOG(fmt, ...)  syslog(LOG_NOTICE, 	 "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)

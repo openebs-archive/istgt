@@ -92,50 +92,55 @@ extern clockid_t clockid;
 rte_smempool_t rcommon_cmd_mempool;
 size_t rcommon_cmd_mempool_count = RCOMMON_CMD_MEMPOOL_ENTRIES;
 
-#define build_rcomm_cmd \
-	{\
-		rcomm_cmd = get_from_mempool(&rcommon_cmd_mempool);\
+#define build_rcomm_cmd 						\
+	do {								\
+		rcomm_cmd = get_from_mempool(&rcommon_cmd_mempool);	\
 		rc = pthread_mutex_init(&rcomm_cmd->rcommand_mtx, NULL);\
-		rcomm_cmd->total = 0;\
-		rcomm_cmd->copies_sent = 0;\
-		rcomm_cmd->total_len = 0;\
-		rcomm_cmd->offset = offset;\
-		rcomm_cmd->data_len = nbytes;\
-		rcomm_cmd->state = CMD_CREATED;\
-		rcomm_cmd->luworker_id = cmd->luworkerindx;\
-		rcomm_cmd->mutex = &spec->luworker_rmutex[cmd->luworkerindx];	\
-		rcomm_cmd->cond_var = &spec->luworker_rcond[cmd->luworkerindx];	\
-		pthread_mutex_init(rcomm_cmd->mutex, NULL);	\
-		pthread_cond_init(rcomm_cmd->cond_var, NULL);	\
+		rcomm_cmd->total = 0;					\
+		rcomm_cmd->copies_sent = 0;				\
+		rcomm_cmd->total_len = 0;				\
+		rcomm_cmd->offset = offset;				\
+		rcomm_cmd->data_len = nbytes;				\
+		rcomm_cmd->state = CMD_CREATED;				\
+		rcomm_cmd->luworker_id = cmd->luworkerindx;		\
+		rcomm_cmd->mutex = 					\
+		    &spec->luworker_rmutex[cmd->luworkerindx];		\
+		rcomm_cmd->cond_var = 					\
+		    &spec->luworker_rcond[cmd->luworkerindx];		\
 		rcomm_cmd->healthy_count = spec->healthy_rcount;	\
-		rcomm_cmd->acks_recvd = 0;\
-		rcomm_cmd->status = 0;\
-		rcomm_cmd->completed = false; \
-		switch(cmd->cdb0) {\
-			case SBC_WRITE_6:  \
-			case SBC_WRITE_10: \
-			case SBC_WRITE_12: \
-			case SBC_WRITE_16: \
-				cmd_write = true; \
-				break; \
-			default: \
-				break;\
-		}\
-		if(cmd_write) {\
-			rcomm_cmd->opcode = ZVOL_OPCODE_WRITE;\
-			rcomm_cmd->iovcnt = cmd->iobufindx+1;\
-		} else {\
-			rcomm_cmd->opcode = ZVOL_OPCODE_READ;\
-			rcomm_cmd->iovcnt = 0;\
-		}\
-		if(cmd_write) {\
-			for (i=1; i < iovcnt + 1; i++) {\
-				rcomm_cmd->iov[i].iov_base = cmd->iobuf[i-1].iov_base;\
-				rcomm_cmd->iov[i].iov_len = cmd->iobuf[i-1].iov_len;\
-			}\
-			rcomm_cmd->total_len += cmd->iobufsize;\
-		}\
-	}
+		rcomm_cmd->acks_recvd = 0;				\
+		rcomm_cmd->status = 0;					\
+		rcomm_cmd->completed = false;				\
+		rcomm_cmd->io_seq = ++spec->io_seq;			\
+		rcomm_cmd->acks_recvd = 0;				\
+		rcomm_cmd->state = CMD_ENQUEUED_TO_WAITQ;		\
+		switch (cmd->cdb0) {					\
+			case SBC_WRITE_6:				\
+			case SBC_WRITE_10:				\
+			case SBC_WRITE_12:				\
+			case SBC_WRITE_16:				\
+				cmd_write = true;			\
+				break;					\
+			default:					\
+				break;					\
+		}							\
+		if (cmd_write) {						\
+			rcomm_cmd->opcode = ZVOL_OPCODE_WRITE;		\
+			rcomm_cmd->iovcnt = cmd->iobufindx+1;		\
+		} else {						\
+			rcomm_cmd->opcode = ZVOL_OPCODE_READ;		\
+			rcomm_cmd->iovcnt = 0;				\
+		}							\
+		if (cmd_write) {						\
+			for (i=1; i < iovcnt + 1; i++) {		\
+				rcomm_cmd->iov[i].iov_base =		\
+				    cmd->iobuf[i-1].iov_base;		\
+				rcomm_cmd->iov[i].iov_len =		\
+				    cmd->iobuf[i-1].iov_len;		\
+			}						\
+			rcomm_cmd->total_len += cmd->iobufsize;		\
+		}							\
+	} while (0)
 
 //#define ISTGT_TRACE_DISK
 
@@ -5563,45 +5568,54 @@ istgt_lu_disk_scsi_reserve(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr 
 
 #ifdef REPLICATION
 extern rte_smempool_t rcmd_mempool;
+
 #define build_rcmd() 							\
-{									\
-	uint8_t *ldata = malloc(sizeof(zvol_io_hdr_t) + sizeof(struct zvol_io_rw_hdr));	\
-	zvol_io_hdr_t *rio = (zvol_io_hdr_t *)(&(ldata[0]));		\
-	struct zvol_io_rw_hdr *rio_rw_hdr = (struct zvol_io_rw_hdr *)(&(ldata[sizeof(zvol_io_hdr_t)]));	\
-	rcmd = get_from_mempool(&rcmd_mempool);				\
-	memset(rcmd, 0, sizeof(*rcmd));					\
-	rcmd->opcode = rcomm_cmd->opcode;				\
-	rcmd->offset = rcomm_cmd->offset;				\
-	rcmd->data_len = rcomm_cmd->data_len;				\
-	rcmd->io_seq = rcomm_cmd->io_seq;				\
-	rcmd->ack_recvd = false;					\
-	rcmd->idx = rcomm_cmd->copies_sent;			\
-	rcmd->healthy_count = spec->healthy_rcount;			\
-	rcmd->rcommq_ptr = rcomm_cmd;					\
-	rcmd->status = 0;						\
-	rcmd->iovcnt = rcomm_cmd->iovcnt;				\
-	for (i=1; i < rcomm_cmd->iovcnt + 1; i++) {			\
-		rcmd->iov[i].iov_base = rcomm_cmd->iov[i].iov_base;	\
-		rcmd->iov[i].iov_len = rcomm_cmd->iov[i].iov_len;	\
-	}								\
-        rio->opcode = rcmd->opcode;\
-        rio->version = REPLICA_VERSION;\
-        rio->io_seq = rcmd->io_seq;\
-        rio->offset = rcmd->offset;\
-        if (rcmd->opcode == ZVOL_OPCODE_WRITE) {\
-                rio->len = rcmd->data_len + sizeof(struct zvol_io_rw_hdr);\
-                rio->checkpointed_io_seq = 0;\
-        } else\
-                rio->len = rcmd->data_len;\
-        rio_rw_hdr->io_num = rcmd->io_seq;\
-        rio_rw_hdr->len = rcmd->data_len;\
-	rcmd->iov[0].iov_base = rio;		\
-        if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE)				\
-                rcmd->iov[0].iov_len = sizeof(zvol_io_hdr_t) + sizeof(struct zvol_io_rw_hdr);	\
-        else									\
-                rcmd->iov[0].iov_len = sizeof(zvol_io_hdr_t);			\
-	rcmd->iovcnt++;								\
-}
+	do {								\
+		uint8_t *ldata = malloc(sizeof(zvol_io_hdr_t) + 	\
+		    sizeof(struct zvol_io_rw_hdr));			\
+		zvol_io_hdr_t *rio = (zvol_io_hdr_t *)ldata;		\
+		struct zvol_io_rw_hdr *rio_rw_hdr =			\
+		    (struct zvol_io_rw_hdr *)(ldata +			\
+		    sizeof(zvol_io_hdr_t));				\
+		rcmd = get_from_mempool(&rcmd_mempool);			\
+		memset(rcmd, 0, sizeof(*rcmd));				\
+		rcmd->opcode = rcomm_cmd->opcode;			\
+		rcmd->offset = rcomm_cmd->offset;			\
+		rcmd->data_len = rcomm_cmd->data_len;			\
+		rcmd->io_seq = rcomm_cmd->io_seq;			\
+		rcmd->ack_recvd = false;				\
+		rcmd->idx = rcomm_cmd->copies_sent - 1;			\
+		rcmd->healthy_count = spec->healthy_rcount;		\
+		rcmd->rcommq_ptr = rcomm_cmd;				\
+		rcmd->status = 0;					\
+		rcmd->iovcnt = rcomm_cmd->iovcnt;			\
+		for (i=1; i < rcomm_cmd->iovcnt + 1; i++) {		\
+			rcmd->iov[i].iov_base = 			\
+			     rcomm_cmd->iov[i].iov_base;		\
+			rcmd->iov[i].iov_len = 				\
+			    rcomm_cmd->iov[i].iov_len;			\
+		}							\
+		rio->opcode = rcmd->opcode;				\
+		rio->version = REPLICA_VERSION;				\
+		rio->io_seq = rcmd->io_seq;				\
+		rio->offset = rcmd->offset;				\
+		if (rcmd->opcode == ZVOL_OPCODE_WRITE) {		\
+			rio->len = rcmd->data_len +			\
+			    sizeof(struct zvol_io_rw_hdr);		\
+			rio->checkpointed_io_seq = 0;			\
+		} else							\
+			rio->len = rcmd->data_len;			\
+		rcmd->iov_data = ldata;					\
+		rio_rw_hdr->io_num = rcmd->io_seq;			\
+		rio_rw_hdr->len = rcmd->data_len;			\
+		rcmd->iov[0].iov_base = rio;				\
+		if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE)		\
+			rcmd->iov[0].iov_len = sizeof(zvol_io_hdr_t) +	\
+			    sizeof(struct zvol_io_rw_hdr);		\
+		else							\
+			rcmd->iov[0].iov_len = sizeof(zvol_io_hdr_t);	\
+		rcmd->iovcnt++;						\
+	} while (0);							\
 
 void
 clear_rcomm_cmd(rcommon_cmd_t *rcomm_cmd)
@@ -5613,9 +5627,8 @@ clear_rcomm_cmd(rcommon_cmd_t *rcomm_cmd)
 	put_to_mempool(&rcommon_cmd_mempool, rcomm_cmd);
 }
 
-extern uint8_t *get_read_resp_data(void *data, uint64_t *datalen);
-extern void get_all_read_resp_data_chunk(void *data, struct io_data_chunk_list_t *io_data_chunk);
-extern uint8_t * process_chunk_read_resp(struct io_data_chunk_list_t  *io_chunk_list, uint64_t len);
+//extern void get_all_read_resp_data_chunk(void *data, struct io_data_chunk_list_t *io_data_chunk);
+//extern uint8_t * process_chunk_read_resp(struct io_data_chunk_list_t  *io_chunk_list, uint64_t len);
 
 static uint8_t *
 handle_read_consistency(rcommon_cmd_t *rcomm_cmd)
@@ -5630,18 +5643,11 @@ handle_read_consistency(rcommon_cmd_t *rcomm_cmd)
 
 	for (i = 0; i < rcomm_cmd->copies_sent; i++) {
 		if (rcomm_cmd->resp_list[i].status == 1) {
-//			if (!read_all) {
-//				dataptr = get_read_resp_data(&rcomm_cmd->resp_list[i], &datalen);
-//				break;
-//			} else {
-				get_all_read_resp_data_chunk(&rcomm_cmd->resp_list[i], &io_data_chunk_list);
-//			}
+			get_all_read_resp_data_chunk(&rcomm_cmd->resp_list[i], &io_data_chunk_list);
 		}
 	}
 
-//	if (read_all) {
-		dataptr = process_chunk_read_resp(&io_data_chunk_list, rcomm_cmd->data_len);
-//	}
+	dataptr = process_chunk_read_resp(&io_data_chunk_list, rcomm_cmd->data_len);
 
 	return dataptr;
 }
@@ -5664,6 +5670,8 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 	if (rcomm_cmd->opcode == ZVOL_OPCODE_READ) {
 		if ((rcomm_cmd->copies_sent != (success + failure))) {
 			rc = 0;
+		} else if ((rcomm_cmd->copies_sent == failure)) {
+			rc = -1;
 		} else {
 			data = handle_read_consistency(rcomm_cmd);
 			cmd->data = data;
@@ -5675,6 +5683,7 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 			// we are good to go ahead
 			rc = 1;
 			rcomm_cmd->status = 5;
+			cmd->data_len = rcomm_cmd->data_len;
 		} else if ((success + failure) == rcomm_cmd->copies_sent) {
 			rc = -1;
 			rcomm_cmd->status = -1;
@@ -5695,32 +5704,23 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	rcmd_t *rcmd = NULL;
 	int iovcnt = cmd->iobufindx + 1;
 	bool cmd_sent = false;
+	struct timespec abstime;
+	time_t now;
 
-	build_rcomm_cmd;
-
-	cmd->data = NULL;
-
+	MTX_LOCK(&spec->rq_mtx);
 	if(spec->ready == false) {
 		REPLICA_LOG("SPEC is not ready\n");
-		MTX_UNLOCK(&spec->rcommonq_mtx);
-		clear_rcomm_cmd(rcomm_cmd);
+		MTX_UNLOCK(&spec->rq_mtx);
 		return -1;
 	}
 
-	REPLICA_ERRLOG("SPEC is ready\n");
-
-	// this can be moved to build_rcomm_cmd
-	rcomm_cmd->io_seq = ++spec->io_seq;
-	rcomm_cmd->acks_recvd = 0;
-	rcomm_cmd->state = CMD_ENQUEUED_TO_WAITQ;
+	build_rcomm_cmd;
 
 	TAILQ_INSERT_TAIL(&spec->rcommon_sendq, rcomm_cmd, send_cmd_next);
 
-	MTX_LOCK(&spec->rq_mtx);
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
 		if(replica == NULL) {
 			REPLICA_LOG("Replica not present");
-			MTX_UNLOCK(&spec->rcommonq_mtx);
 			MTX_UNLOCK(&spec->rq_mtx);
 			exit(EXIT_FAILURE);
 		}
@@ -5742,15 +5742,14 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 				cmd_sent = true;
 		}
 
+		rcomm_cmd->copies_sent++;
 		build_rcmd();
 		put_to_mempool(&replica->cmdq, rcmd);
-		rcomm_cmd->copies_sent++;
 		eventfd_write(replica->data_eventfd, 1);
 
 		if (cmd_sent)
 			break;
 	}
-	REPLICA_ERRLOG("SENT TO REPLICA %d\n", rcomm_cmd->copies_sent);
 	MTX_UNLOCK(&spec->rq_mtx);
 
 	// now wait for command to complete
@@ -5762,12 +5761,18 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 				rc = -1;
 			else
 				rc = cmd->data_len = rcomm_cmd->data_len;
+			if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE)
+				REPLICA_ERRLOG("got resp %p\n", rcomm_cmd);
 			put_to_mempool(&spec->rcommon_deadlist, rcomm_cmd);
-			REPLICA_ERRLOG("got resp %d\n", rc);
 			MTX_UNLOCK(&spec->luworker_rmutex[cmd->luworkerindx]);
 			break;
 		}
-		pthread_cond_wait(&spec->luworker_rcond[cmd->luworkerindx], &spec->luworker_rmutex[cmd->luworkerindx]); //timedwait
+		now = time(NULL);
+		abstime.tv_sec = now + 1;
+		abstime.tv_nsec = 0;
+
+		pthread_cond_timedwait(&spec->luworker_rcond[cmd->luworkerindx], &spec->luworker_rmutex[cmd->luworkerindx],
+			&abstime); //timedwait
 		MTX_UNLOCK(&spec->luworker_rmutex[cmd->luworkerindx]);
 	}
 

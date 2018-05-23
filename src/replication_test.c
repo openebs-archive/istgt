@@ -11,6 +11,8 @@
 #include "istgt_integration.h"
 #include "replication_misc.h"
 
+int if_healthy = 1;
+
 cstor_conn_ops_t cstor_ops = {
 	.conn_listen = replication_listen,
 	.conn_connect = replication_connect,
@@ -79,7 +81,10 @@ send_mgmtack(int fd, zvol_op_code_t opcode, void *buf, char *replicaip, int repl
 	iovec[2].iov_len = sizeof (zvol_io_hdr_t) - 32;
 
 	if (opcode == ZVOL_OPCODE_REPLICA_STATUS) {
-		repl_status.state = ZVOL_STATUS_HEALTHY;
+		if (if_healthy)
+			repl_status.state = ZVOL_STATUS_HEALTHY;
+		else
+			repl_status.state = ZVOL_STATUS_DEGRADED;
 		mgmt_ack_hdr->len = sizeof(zrepl_status_ack_t);
 		iovec_count = 4;
 		iovec[3].iov_base = &repl_status;
@@ -202,8 +207,11 @@ main(int argc, char **argv)
 	int sleeptime = 0;
 	struct zvol_io_rw_hdr *io_rw_hdr;
 
-	if (argv[6] != NULL)
-		sleeptime = atoi(argv[6]);
+	if (argv[6] != NULL) {
+		printf("got 6th arg.. not setting healthy\n");
+		if_healthy = 0;
+//		sleeptime = atoi(argv[6]);
+	}
 	int iofd, mgmtfd, sfd, rc, epfd, event_count, i;
 	int64_t count;
 	struct epoll_event event, *events;
