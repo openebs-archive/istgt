@@ -115,6 +115,7 @@ size_t rcommon_cmd_mempool_count = RCOMMON_CMD_MEMPOOL_ENTRIES;
 			rcomm_cmd->opcode = ZVOL_OPCODE_WRITE;\
 			rcomm_cmd->iovcnt = cmd->iobufindx+1;\
 		} else {\
+			TAILQ_INIT(&rcomm_cmd->data_read_ptr);\
 			rcomm_cmd->opcode = ZVOL_OPCODE_READ;\
 			rcomm_cmd->iovcnt = 0;\
 		}\
