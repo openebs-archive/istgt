@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <sys/epoll.h>
 #include <fcntl.h>
+#include <errno.h>
 #include <sys/prctl.h>
 #include <sys/eventfd.h>
 #include "zrepl_prot.h"
@@ -187,7 +188,10 @@ dequeue_common_sendq:
 
 				if(cmd_blocked == false) {
 					TAILQ_INSERT_TAIL(&replica->sendq, rcmd, rsend_cmd_next);
-				} else {
+					if(rcmd->opcode == ZVOL_OPCODE_READ) {
+						read_cmd_sent = true;
+					}
+					pthread_cond_signal(&replica->r_cond);
 				}
 			}
 			MTX_UNLOCK(&replica->r_mtx);
@@ -379,7 +383,7 @@ void update_volstate(spec_t *spec)
 			spec->io_seq = max;
 		}
 		spec->ready = true;
-//		pthread_cond_broadcast(&spec->rq_cond); TODO
+		pthread_cond_broadcast(&spec->rq_cond); //TODO
 	} else {
 		spec->ready = false;
 	}
@@ -459,7 +463,7 @@ remove_replica_from_list(spec_t *spec, int iofd) {
 			pthread_cond_signal(&replica->r_cond);
 			epoll_ctl(spec->receiver_epfd, EPOLL_CTL_DEL, replica->iofd, &event);
 			MTX_UNLOCK(&replica->r_mtx);
-			cleanup_replica(replica);
+//TODO	check if needed		cleanup_replica(replica);
 			break;
 		}
 	}
@@ -478,17 +482,11 @@ remove_replica_from_list(spec_t *spec, int iofd) {
  * returns number of bytes read/written
  */
 static int64_t
-perform_read_write_on_fd(int fd, uint8_t *data, uint64_t len, int *errorno,
-    int *fd_closed, int state)
+perform_read_write_on_fd(int fd, uint8_t *data, uint64_t len, int state)
 {
 	int64_t rc = -1;
 	uint64_t nbytes = 0;
 	int read_cmd = 0;
-
-	if (fd_closed != NULL)
-		*fd_closed = 0;
-	if (errorno != NULL)
-		*errorno = 0;
 
 	while(1) {
 		switch (state) {
@@ -510,32 +508,17 @@ perform_read_write_on_fd(int fd, uint8_t *data, uint64_t len, int *errorno,
 		}
 
 		if(rc < 0) {
-			if (errorno != NULL)
-				*errorno = errno;
-
 			if (errno == EINTR) {
 				continue;
 			} else if (errno == EAGAIN || errno == EWOULDBLOCK) {
 				return nbytes;
 			} else {
 				REPLICA_ERRLOG("received err %d on fd %d, closing it..\n", errno, fd);
-				/*
-				 * TODO: cleanup of replica need to be happen
-				 */
-				close(fd);
-				if (fd_closed != NULL)
-					*fd_closed = 1;
 				return -1;
 			}
 		} else if (rc == 0 && read_cmd) {
 			REPLICA_ERRLOG("received EOF on fd %d, closing it..\n", fd);
-			/*
-			 * TODO: cleanup of replica need to be happen
-			 */
-			close(fd);
-			if (fd_closed != NULL)
-				*fd_closed = 1;
-			break;
+			return -1;
 		}
 
 		nbytes += rc;
@@ -686,10 +669,9 @@ handle_read_resp(spec_t *spec, replica_t *replica)
 	rcmd_t *rep_cmd = NULL;
 	rcommon_cmd_t *rcommq_ptr = NULL;
 	zvol_io_hdr_t *io_rsp_hdr = replica->io_resp_hdr;
-//	void *data = replica->io_resp_data;
+	void *data = replica->io_resp_data;
 	uint64_t datalen = 0;
 	uint8_t *dataptr = NULL;
-	resp_data_t *resp_entry;
 
 	MTX_LOCK(&replica->r_mtx);
 	//Find IO in read queue, signal luworker, and dequeue
@@ -697,7 +679,6 @@ handle_read_resp(spec_t *spec, replica_t *replica)
 		if(io_rsp_hdr->io_seq == rep_cmd->io_seq) {
 			io_found = true;
 			rep_cmd->ack_recvd = true;
-
 			TAILQ_REMOVE(&replica->read_waitq, rep_cmd, rread_cmd_next);
 			MTX_UNLOCK(&replica->r_mtx);
 
@@ -715,9 +696,9 @@ handle_read_resp(spec_t *spec, replica_t *replica)
 //				rcommq_ptr->resp_status[replica->id] = ZVOL_OP_STATUS_FAILED;
 			}
 
-			resp_entry = calloc(1, sizeof(resp_entry));
-			resp_entry->data = dataptr;
-			resp_entry->len = datalen;
+//			resp_entry = calloc(1, sizeof(resp_entry));
+//			resp_entry->data = dataptr;
+//			resp_entry->len = datalen;
 //			rcommq_ptr->resp_list[replica->id] = resp_entry;
 
 			luworker_id = rcommq_ptr->luworker_id;
@@ -938,7 +919,7 @@ replica_receiver(void *arg)
 
 /* creates replica entry and adds to spec's rwaitq list after creating mgmt connection */
 replica_t *
-create_replica_entry(spec_t *spec, int mgmt_fd)
+create_replica_entry(spec_t *spec, int epfd, int mgmt_fd)
 {
 	replica_t *replica = NULL;
 	int rc;
@@ -947,6 +928,7 @@ create_replica_entry(spec_t *spec, int mgmt_fd)
 	if (!replica)
 		return NULL;
 
+	replica->epfd = epfd;
 	replica->mgmt_fd = mgmt_fd;
 	TAILQ_INIT(&(replica->mgmt_cmd_queue));
 	replica->initial_checkpointed_io_seq = 0;
@@ -956,6 +938,8 @@ create_replica_entry(spec_t *spec, int mgmt_fd)
 	TAILQ_INSERT_TAIL(&spec->rwaitq, replica, r_waitnext);
 	MTX_UNLOCK(&spec->rq_mtx);
 
+	replica->mgmt_eventfd2 = -1;
+	replica->iofd = -1;
 	replica->spec = spec;
 
 	rc = pthread_mutex_init(&replica->r_mtx, NULL); //check
@@ -971,7 +955,7 @@ create_replica_entry(spec_t *spec, int mgmt_fd)
 	return replica;
 }
 
-extern void *replica_thread(void *);
+void *replica_thread(void *);
 /*
  * updates replica entry with IP/port
  * removes from spec's rwaitq, adds to rq after data connection
@@ -979,14 +963,16 @@ extern void *replica_thread(void *);
  * Note: Locks in update_replica_entry are avoided since update_replica_entry is being
  *	 executed once only during handshake with replica.
  */
-replica_t *
+int
 update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 {
 	int rc;
 	zvol_io_hdr_t *rio;
 	pthread_t r_thread;
-	zvol_io_hdr_t *ack_hdr, io_hdr;
-	mgmt_ack_t *ack_data, handshake_resp;
+	zvol_io_hdr_t *ack_hdr;
+	mgmt_ack_t *ack_data;
+	mgmt_ack_t handshake_resp;
+	int i;
 
 	ack_hdr = replica->mgmt_io_resp_hdr;	
 	ack_data = (mgmt_ack_t *)replica->mgmt_io_resp_data;
@@ -997,6 +983,9 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	TAILQ_INIT(&replica->blockedq);
 	TAILQ_INIT(&replica->readyq);
 
+	replica->ongoing_io = NULL;
+	replica->ongoing_io_len = 0;
+	replica->ongoing_io_buf = NULL;
 	replica->iofd = iofd;
 	replica->ip = malloc(strlen(ack_data->ip)+1);
 	strcpy(replica->ip, ack_data->ip);
@@ -1007,9 +996,6 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	replica->pool_guid = ack_data->pool_guid;
 	replica->zvol_guid = ack_data->zvol_guid;
 
-	replica->ongoing_io = NULL;
-	replica->ongoing_io_len = 0;
-	replica->ongoing_io_buf = NULL;
 	replica->least_recvd = 0;
 	replica->wrio_seq = 0;
 	replica->rrio_seq = 0;
@@ -1024,14 +1010,12 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	rio->opcode = ZVOL_OPCODE_HANDSHAKE;
 	rio->io_seq = 0;
 	rio->offset = 0;
-	rio->len    = strlen(spec->lu->volname);
+	rio->len = strlen(spec->lu->volname);
 	rio->version = REPLICA_VERSION;
-	write(replica->iofd, rio, sizeof(zvol_io_hdr_t));
+
+	rc = write(replica->iofd, rio, sizeof(zvol_io_hdr_t));
 	write(replica->iofd, spec->lu->volname, strlen(spec->lu->volname));
-	rc = read(replica->iofd, &io_hdr, sizeof(io_hdr));
-	REPLICA_ERRLOG("read1 %d\n", rc);
-	//rc = read(replica->iofd, &handshake_resp, sizeof(handshake_resp));
-	//REPLICA_ERRLOG("read2 %d\n", rc);
+	read(replica->iofd, &handshake_resp, sizeof (handshake_resp));
 	free(rio);
 
 	if(init_mempool(&replica->cmdq, rcmd_mempool_count, sizeof (rcmd_t), 0,
@@ -1043,10 +1027,69 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	rc = make_socket_non_blocking(iofd);
 	if (rc == -1) {
 		REPLICA_ERRLOG("make_socket_non_blocking() failed errno:%d\n", errno);
-		exit(EXIT_FAILURE);
+		replica->iofd = -1;
+		close(iofd);
+		return -1;
 	}
 
 	rc = pthread_create(&r_thread, NULL, &replica_thread,
+			(void *)replica);
+	if (rc != 0) {
+		ISTGT_ERRLOG("pthread_create(r_thread) failed\n");
+		replica->iofd = -1;
+		close(iofd);
+		return -1;
+	}
+
+	for (i = 0; (i < 10) && (replica->mgmt_eventfd2 == -1); i++)
+		sleep(1);
+
+	if (replica->mgmt_eventfd2 == -1) {
+		ISTGT_ERRLOG("unable to set mgmteventfd2 for more than 10 seconds for replica %s %d..\n", replica->ip, replica->port);
+		MTX_LOCK(&replica->r_mtx);
+		replica->iofd = -1;
+		MTX_UNLOCK(&replica->r_mtx);
+		close(iofd);
+		return -1;
+	}
+
+	MTX_LOCK(&spec->rq_mtx);
+
+	spec->replica_count++;
+	spec->degraded_rcount++;
+	TAILQ_REMOVE(&spec->rwaitq, replica, r_waitnext);
+	TAILQ_INSERT_TAIL(&spec->rq, replica, r_next);
+	if(spec->replica_count == 1)
+		pthread_cond_signal(&spec->rq_cond);
+	update_volstate(spec);
+
+	MTX_UNLOCK(&spec->rq_mtx);
+
+
+#if 0
+	event.data.fd = replica->iofd;
+	event.events = EPOLLIN | EPOLLET;
+	rc = epoll_ctl(spec->receiver_epfd, EPOLL_CTL_ADD, iofd, &event);
+	if (rc == -1) {
+		/*
+		 * TODO: need to cleanup replica and also update volstate here
+		 */
+		return NULL;
+	}
+
+	replica->sender_epfd = epoll_create1(0);
+	event.data.fd = replica->iofd;
+	event.events = EPOLLOUT;
+	rc = epoll_ctl(replica->sender_epfd, EPOLL_CTL_ADD, replica->iofd, &event);
+	if (rc == -1) {
+		REPLICA_LOG("epoll_ctl_add failed errno:%d\n", errno);
+		/*
+		 * TODO: need to cleanup replica and also update volstate here
+		 */
+		return NULL;
+	}
+
+	rc = pthread_create(&replica_sender_thread, NULL, &replica_sender,
 			(void *)replica);
 	if (rc != 0) {
 		ISTGT_ERRLOG("pthread_create(replicator_thread) failed\n");
@@ -1055,18 +1098,8 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 		 */
 		return NULL;
 	}
-
-	MTX_LOCK(&spec->rq_mtx);
-
-	spec->replica_count++;
-	TAILQ_REMOVE(&spec->rwaitq, replica, r_waitnext);
-	spec->degraded_rcount++;
-	TAILQ_INSERT_TAIL(&spec->rq, replica, r_next);
-	update_volstate(spec);
-
-	MTX_UNLOCK(&spec->rq_mtx);
-
-	return replica;
+#endif
+	return 0;
 }
 
 static void
@@ -1125,7 +1158,7 @@ send_replica_handshake_query(replica_t *replica, spec_t *spec)
 	build_replica_mgmt_hdr();
 
 	data = (uint8_t *)malloc(data_len);
-	snprintf((char *)data, BUFSIZE, "%s", spec->lu->volname);
+	snprintf((char *)data, data_len, "%s", spec->lu->volname);
 
 	mgmt_cmd->io_hdr = rmgmtio;
 	mgmt_cmd->io_bytes = 0;
@@ -1153,7 +1186,7 @@ send_replica_status_query(replica_t *replica, spec_t *spec)
 	build_replica_mgmt_hdr();
 
 	data = (uint8_t *)malloc(data_len);
-	snprintf((char *)data, BUFSIZE, "%s", spec->lu->volname);
+	snprintf((char *)data, data_len, "%s", spec->lu->volname);
 
 	mgmt_cmd->io_hdr = rmgmtio;
 	mgmt_cmd->io_bytes = 0;
@@ -1164,8 +1197,7 @@ send_replica_status_query(replica_t *replica, spec_t *spec)
 	TAILQ_INSERT_TAIL(&replica->mgmt_cmd_queue, mgmt_cmd, mgmt_cmd_next);
 	MTX_UNLOCK(&replica->r_mtx);
 
-	handle_write_data_event(replica);
-	return 0;
+	return handle_write_data_event(replica);
 }
 
 
@@ -1187,9 +1219,12 @@ ask_replica_status_all(spec_t *spec)
 		ret = send_replica_status_query(replica, spec);
 		if (ret == -1) {
 			REPLICA_ERRLOG("send mgmtIO for status failed on "
-			    "replica(%d, %s:%d) ..\n", replica->id,
+			    "replica(%d, %s:%d) .. stopped sendign status "
+			    "in this iteration\n", replica->id,
 			    replica->ip, replica->port);
-			continue;
+			MTX_UNLOCK(&spec->rq_mtx);
+			handle_mgmt_conn_error(replica);
+			return;
 		}
 	}
 	MTX_UNLOCK(&spec->rq_mtx);
@@ -1238,24 +1273,29 @@ zvol_handshake(spec_t *spec, replica_t *replica)
 
 	if (ack_hdr->status != ZVOL_OP_STATUS_OK) {
 		REPLICA_ERRLOG("mgmt_ack status is not ok..\n");
-		exit(EXIT_FAILURE);
+		return -1;
 	}
 
 	if(strcmp(ack_data->volname, spec->lu->volname) != 0) {
 		REPLICA_ERRLOG("volname %s not matching with spec %s volname\n",
 		    ack_data->volname, spec->lu->volname);
-		exit(EXIT_FAILURE);
+		return -1;
 	}
 
 	if((iofd = cstor_ops.conn_connect(ack_data->ip, ack_data->port)) < 0) {
 		REPLICA_ERRLOG("conn_connect() failed errno:%d\n", errno);
-		exit(EXIT_FAILURE);
+		return -1;
 	}
 
-	update_replica_entry(spec, replica, iofd);
+	rc = update_replica_entry(spec, replica, iofd);
 
-	return 0;
+	return rc;
 }
+
+typedef struct mgmt_event {
+	int fd;
+	replica_t *r_ptr;
+} mgmt_event_t;
 
 /*
  * accepts (mgmt) connections on which handshake and other management IOs are sent
@@ -1269,6 +1309,10 @@ accept_mgmt_conns(int epfd, int sfd) {
 	int mgmtfd[MAXREPLICA];
 	char *buf = malloc(BUFSIZE);
 	int mgmt_fd;
+	mgmt_event_t *mevent1, *mevent2;
+
+	mevent1 = (mgmt_event_t *)malloc(sizeof(mgmt_event_t));
+	mevent2 = (mgmt_event_t *)malloc(sizeof(mgmt_event_t));
 
 	while (1) {
 		struct sockaddr saddr;
@@ -1316,14 +1360,34 @@ accept_mgmt_conns(int epfd, int sfd) {
 		 * 	 should be handled in update_replica_entry func according to
 		 * 	 volume name provided by replica.
 		 */
- 		replica = create_replica_entry(spec, mgmt_fd);
+		replica = create_replica_entry(spec, epfd, mgmt_fd);
 		if (!replica) {
 			REPLICA_ERRLOG("Failed to create replica for fd %dclosing it..", mgmt_fd);
 			close(mgmt_fd);
 			continue;
 		}
 
-		event.data.ptr = replica;
+		replica->mgmt_eventfd1 = eventfd(0, EFD_NONBLOCK);
+		if (replica->mgmt_eventfd1 < 0) {
+			perror("r_mgmt_eventfd1");
+			return NULL;
+		}
+
+		mevent1->fd = replica->mgmt_eventfd1;
+		mevent1->r_ptr = replica;
+		event.data.ptr = mevent1;
+		event.events = EPOLLIN;
+		rc = epoll_ctl(epfd, EPOLL_CTL_ADD, replica->mgmt_eventfd1, &event);
+		if(rc == -1) {
+			REPLICA_ERRLOG("epoll_ctl() failed on fd %d, errno:%d.. closing it..", mgmt_fd, errno);
+			cleanup_replica(replica);
+			close(mgmt_fd);
+			continue;
+		}
+
+		mevent2->fd = mgmt_fd;
+		mevent2->r_ptr = replica;
+		event.data.ptr = mevent2;
 		event.events = EPOLLIN | EPOLLHUP | EPOLLERR | EPOLLET | EPOLLOUT | EPOLLRDHUP;
 		rc = epoll_ctl(epfd, EPOLL_CTL_ADD, mgmt_fd, &event);
 		if(rc == -1) {
@@ -1332,7 +1396,9 @@ accept_mgmt_conns(int epfd, int sfd) {
 			close(mgmt_fd);
 			continue;
 		}
+
 		send_replica_handshake_query(replica, spec);
+
 	}
 	free(buf);
 }
@@ -1341,10 +1407,12 @@ accept_mgmt_conns(int epfd, int sfd) {
  * breaks if fd is closed or drained recv buf of fd
  * updates amount of data read to continue next time
  */
-#define CHECK_AND_ADD_BREAK_IF_PARTIAL(fd_closed, io_read, count, reqlen) \
+#define CHECK_AND_ADD_BREAK_IF_PARTIAL(io_read, count, reqlen, donecount) \
 { \
-	if (fd_closed == 1) \
+	if (count == -1) { \
+		donecount = -1; \
 		break; \
+	} \
 	if (count != reqlen) { \
 		(io_read) += count; \
 		break; \
@@ -1367,7 +1435,6 @@ write_io_data(replica_t *replica, io_event_t *wevent)
 	void **data = wevent->io_data;
 	int *write_count = wevent->byte_count;
 	uint64_t reqlen, count;
-	int errorno = 0, fd_closed = 0;
 	int donecount = 0;
 	(void)replica;
 
@@ -1375,9 +1442,8 @@ write_io_data(replica_t *replica, io_event_t *wevent)
 		case WRITE_IO_SEND_HDR:
 			reqlen = sizeof (zvol_io_hdr_t) - (*write_count);
 			count = perform_read_write_on_fd(fd,
-			    ((uint8_t *)write_hdr) + (*write_count), reqlen,
-			    &errorno, &fd_closed, *state);
-			CHECK_AND_ADD_BREAK_IF_PARTIAL(fd_closed, (*write_count), count, reqlen);
+			    ((uint8_t *)write_hdr) + (*write_count), reqlen, *state);
+			CHECK_AND_ADD_BREAK_IF_PARTIAL((*write_count), count, reqlen, donecount);
 
 			*write_count = 0;
 			*state = WRITE_IO_SEND_DATA;
@@ -1386,9 +1452,8 @@ write_io_data(replica_t *replica, io_event_t *wevent)
 			reqlen = write_hdr->len - (*write_count);
 			if (reqlen != 0) {
 				count = perform_read_write_on_fd(fd,
-				    ((uint8_t *)(*data)) + (*write_count),
-				    reqlen, &errorno, &fd_closed, *state);
-				CHECK_AND_ADD_BREAK_IF_PARTIAL(fd_closed, (*write_count), count, reqlen);
+				    ((uint8_t *)(*data)) + (*write_count), reqlen, *state);
+				CHECK_AND_ADD_BREAK_IF_PARTIAL((*write_count), count, reqlen, donecount);
 			}
 			free(*data);
 			*data = NULL;
@@ -1425,9 +1490,8 @@ read_io_resp(spec_t *spec, replica_t *replica, io_event_t *revent)
 read_io_resp_hdr:
 			reqlen = sizeof (zvol_io_hdr_t) - (*read_count);
 			count = perform_read_write_on_fd(fd,
-			    ((uint8_t *)resp_hdr) + (*read_count), reqlen,
-			    &errorno, &fd_closed, *state);
-			CHECK_AND_ADD_BREAK_IF_PARTIAL(fd_closed, (*read_count), count, reqlen);
+			    ((uint8_t *)resp_hdr) + (*read_count), reqlen, *state);
+			CHECK_AND_ADD_BREAK_IF_PARTIAL((*read_count), count, reqlen, donecount);
 
 			*read_count = 0;
 			if (resp_hdr->opcode == ZVOL_OPCODE_WRITE)
@@ -1441,9 +1505,8 @@ read_io_resp_hdr:
 			reqlen = resp_hdr->len - (*read_count);
 			if (reqlen != 0) {
 				count = perform_read_write_on_fd(fd,
-				    ((uint8_t *)(*resp_data)) + (*read_count),
-				    reqlen, &errorno, &fd_closed, *state);
-				CHECK_AND_ADD_BREAK_IF_PARTIAL(fd_closed, (*read_count), count, reqlen);
+				    ((uint8_t *)(*resp_data)) + (*read_count), reqlen, *state);
+				CHECK_AND_ADD_BREAK_IF_PARTIAL((*read_count), count, reqlen, donecount);
 			}
 
 			*read_count = 0;
@@ -1467,8 +1530,10 @@ read_io_resp_hdr:
 
 					/* dont process handshake on data connection */
 					if (fd != replica->iofd)
-						zvol_handshake(spec, replica);
+						rc = zvol_handshake(spec, replica);
 					free(*resp_data);
+					if (rc == -1)
+						donecount = -1;
 					break;
 
 				case ZVOL_OPCODE_REPLICA_STATUS:
@@ -1515,7 +1580,7 @@ handle_write_data_event(replica_t *replica)
 		mgmt_cmd->mgmt_cmd_state != WRITE_IO_SEND_DATA)) {
 		MTX_UNLOCK(&replica->r_mtx);
 		REPLICA_ERRLOG("write IO is in wait state on mgmt connection..");
-		return rc;
+		return rc; //TODO if returned 0
 	}
 
 	MTX_UNLOCK(&replica->r_mtx);
@@ -1530,14 +1595,153 @@ handle_write_data_event(replica_t *replica)
 	return rc;
 }
 
+void
+handle_mgmt_cmd(replica_t *r, mgmt_cmd_t *mgmt_cmd)
+{
+	r->mgmt_io_resp_hdr->status = ZVOL_OP_STATUS_FAILED;
+	switch (mgmt_cmd->io_hdr->opcode)
+	{
+		case ZVOL_OPCODE_HANDSHAKE:
+			break;
+		case ZVOL_OPCODE_REPLICA_STATUS:
+			break;
+	}
+	free(mgmt_cmd->io_hdr);
+	free(mgmt_cmd->data);
+	free(mgmt_cmd);
+}
+
+void
+respond_with_error_for_all_outstanding_mgmt_ios(replica_t *r)
+{
+	mgmt_cmd_t *mgmt_cmd, *next_cmd;
+
+	MTX_LOCK(&r->r_mtx);
+	mgmt_cmd = TAILQ_FIRST(&r->mgmt_cmd_queue);
+	while (mgmt_cmd != NULL) {
+		next_cmd = TAILQ_NEXT(mgmt_cmd, mgmt_cmd_next);
+		TAILQ_REMOVE(&r->mgmt_cmd_queue, mgmt_cmd, mgmt_cmd_next);
+		handle_mgmt_cmd(r, mgmt_cmd);
+		mgmt_cmd = next_cmd;
+	}
+	MTX_UNLOCK(&r->r_mtx);
+}
+
+void
+inform_data_conn(replica_t *r)
+{
+	uint64_t num = 1;
+	r->disconnect_conn = 1;
+	write(r->mgmt_eventfd2, &num, sizeof (num));
+}
+
+void
+free_replica(replica_t *r)
+{
+	/* TOOD: when to remove from rwaitq of spec */
+	pthread_mutex_destroy(&r->r_mtx);
+	pthread_cond_destroy(&r->r_cond);
+
+	free(r->io_resp_hdr);
+	free(r);
+}
+
+void close_fd(int epollfd, int fd)
+{
+	if (epoll_ctl(epollfd, EPOLL_CTL_DEL, fd, NULL) == -1) {
+		perror("epoll_ctl");
+		return;
+	}
+	close(fd);
+}
+
+void close_mgmt_eventfd2(replica_t *r)
+{
+	int mgmt_fd = r->mgmt_fd;
+	if (epoll_ctl(r->epollfd, EPOLL_CTL_DEL, r->mgmt_fd, NULL) == -1) {
+		perror("epoll_ctl");
+		return;
+	}
+	r->mgmt_fd = -1;
+	close(mgmt_fd);
+}
+
+
+void
+handle_mgmt_conn_error(replica_t *r)
+{
+	int epollfd = r->epfd;
+	int mgmtfd, mgmt_eventfd1;
+
+	MTX_LOCK(&r->r_mtx);
+
+	r->conn_closed++;
+	if (r->conn_closed != 2) {
+		//ASSERT(r->conn_closed == 1);
+		/* case where error happened while sending HANDSHAKE or sending is successful but error from zvol_handshake */
+		if ((r->iofd == -1) || (r->mgmt_eventfd2 == -1)) {
+			TAILQ_REMOVE(&r->spec->rwaitq, r, r_waitnext); //TODO rwait_next);
+			r->conn_closed++;
+		} else {
+			inform_data_conn(r);
+		}
+	} else {
+		pthread_cond_signal(&r->r_cond);
+	}
+
+	mgmtfd = r->mgmt_fd;
+	r->mgmt_fd = -1;
+	MTX_UNLOCK(&r->r_mtx);
+
+	close_fd(epollfd, mgmtfd);
+
+	MTX_LOCK(&r->r_mtx);
+	if (r->conn_closed != 2) {
+		//ASSERT(r->conn_closed == 1);
+		pthread_cond_wait(&r->r_cond, &r->r_mtx);
+	}
+	MTX_UNLOCK(&r->r_mtx);
+
+	/* this need to be called after replica is removed from spec list
+	 * data_conn thread should have removed from spec list as conn_closed is 2 */
+	respond_with_error_for_all_outstanding_mgmt_ios(r);
+
+	mgmt_eventfd1 = r->mgmt_eventfd1;
+	r->mgmt_eventfd1 = -1;
+	close(mgmt_eventfd1);
+
+	if (r->mgmt_eventfd2 != -1)
+		free_replica(r);
+}
+
+int
+handle_mgmt_event_fd(replica_t *replica)
+{
+	int rc = 0;
+
+	do_drainfd(replica->mgmt_eventfd1);
+
+	MTX_LOCK(&replica->r_mtx);
+	if (replica->disconnect_conn == 1) {
+		MTX_UNLOCK(&replica->r_mtx);
+		handle_mgmt_conn_error(replica);
+		return rc;
+	}
+	MTX_UNLOCK(&replica->r_mtx);
+
+	rc = handle_write_data_event(replica);
+	return rc;
+}
+
 /*
  * reads data on management fd
  */
-void
+int
 handle_read_data_event(replica_t *replica)
 {
 	io_event_t revent;
 	mgmt_cmd_t *mgmt_cmd;
+	int rc = 0;
 
 	MTX_LOCK(&replica->r_mtx);
 	mgmt_cmd = TAILQ_FIRST(&replica->mgmt_cmd_queue);
@@ -1549,14 +1753,13 @@ handle_read_data_event(replica_t *replica)
 		 * Though we didn't send any IO query on management connection,
 		 * We have a read event on management connection. Thats an error as
 		 * management connection is not working in stateful manner. So we
-		 * will print error message and exit.. no cleanup needed here
+		 * will print error message and does cleanup
 		 */
 		REPLICA_ERRLOG("unexpected read IO on mgmt connection..");
-		exit(1);
+		return (-1);
 	}
 
 	MTX_UNLOCK(&replica->r_mtx);
-	int count = 0;
 
 	revent.fd = replica->mgmt_fd;
 	revent.state = &(mgmt_cmd->mgmt_cmd_state);
@@ -1564,17 +1767,18 @@ handle_read_data_event(replica_t *replica)
 	revent.io_data = (void **)(&(replica->mgmt_io_resp_data));
 	revent.byte_count = &(mgmt_cmd->io_bytes);
 
-	count = read_io_resp(replica->spec, replica, &revent);
-	if (count) {
-		if (count > 1)
+	rc = read_io_resp(replica->spec, replica, &revent);
+	if (rc > 0) {
+		if (rc > 1)
 			REPLICA_NOTICELOG("read performed on management connection for more"
-			    " than on IOs..");
+			    " than one IOs..");
 
 		MTX_LOCK(&replica->r_mtx);
 		clear_mgmt_cmd(replica, mgmt_cmd);
 		MTX_UNLOCK(&replica->r_mtx);
-		handle_write_data_event(replica);
+		rc = handle_write_data_event(replica);
 	}
+	return (rc);
 }
 
 /* MACRO from istgt_lu_disk.c */
@@ -1600,11 +1804,10 @@ init_replication(void *arg __attribute__((__unused__))) {
 	struct epoll_event event, *events;
 	int rc, sfd, event_count, i;
 	int64_t epfd;
-	replica_t *replica;
+	replica_t *replica, *r;
 	int timeout;
 	struct timespec last, now, diff;
-
-	prctl(PR_SET_NAME, "mgmt_thread", 0, 0, 0);
+	mgmt_event_t *mevent;
 
 	//Create a listener for management connections from replica
 	const char* externalIP = getenv("externalIP");
@@ -1621,7 +1824,7 @@ init_replication(void *arg __attribute__((__unused__))) {
 		exit(EXIT_FAILURE);
 	}
 	events = calloc(MAXEVENTS, sizeof(event));
-	timeout = 1 * 1000;	// 60 seconds
+	timeout = 60 * 1000;	// 60 seconds
 	clock_gettime(CLOCK_MONOTONIC, &last);
 
 	while (1) {
@@ -1654,19 +1857,32 @@ init_replication(void *arg __attribute__((__unused__))) {
 					//Accept management connections from replicas and add the replicas to replica queue
 					accept_mgmt_conns(epfd, sfd);
 				} else {
+					mevent = events[i].data.ptr;
+					r = mevent->r_ptr;
+
+					rc = 0;
 					if (events[i].events & EPOLLIN) {
-						handle_read_data_event((replica_t *)events[i].data.ptr);
+						if (mevent->fd == r->mgmt_fd)
+							rc = handle_read_data_event(r);
+						else
+							rc = handle_mgmt_event_fd(r);
 					}
-					if (events[i].events & EPOLLOUT) {
-						handle_write_data_event((replica_t *)events[i].data.ptr);
-					}
+					if (rc == -1)
+						handle_mgmt_conn_error(r);
+
+					rc = 0;
+					if (events[i].events & EPOLLOUT)
+						//ASSERT(mevent->fd == r->mgmt_fd);
+						rc = handle_write_data_event(r);
+					if (rc == -1)
+						handle_mgmt_conn_error(r);
 				}
 			}
 		}
 
 		// send replica_status query to degraded replicas at interval of 60 seconds
 		timesdiff(last, now, diff);
-		if (diff.tv_sec >= 1) {
+		if (diff.tv_sec >= 60) {
 			spec_t *spec = NULL;
 			MTX_LOCK(&specq_mtx);
 			TAILQ_FOREACH(spec, &spec_q, spec_next) {
@@ -1770,7 +1986,7 @@ initialize_replication() {
 int
 initialize_volume(spec_t *spec) {
 	int rc;
-	pthread_t deadlist_cleanup_thread, replica_receiver_thread;
+	pthread_t deadlist_cleanup_thread, replicator_thread, replica_receiver_thread;
 
 	spec->io_seq = 0;
 	TAILQ_INIT(&spec->rcommon_sendq);
@@ -1786,7 +2002,6 @@ initialize_volume(spec_t *spec) {
 	}
 
 	spec->replica_count = 0;
-	spec->replica_index_list = 0;
 	spec->replication_factor = spec->lu->replication_factor;
 	spec->consistency_factor = spec->lu->consistency_factor;
 	spec->healthy_rcount = 0;

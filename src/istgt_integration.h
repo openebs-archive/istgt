@@ -62,9 +62,14 @@ typedef struct replica_s {
 	uint64_t ongoing_io_len;	// number of bytes received from replica
 	rcmd_t *ongoing_io;		// cmd for which we are receiving response
 	int mgmt_eventfd;
+	int mgmt_eventfd1;
+	int mgmt_eventfd2;
+	int disconnect_conn;
+	int conn_closed;
 	int epollfd;
 	int data_eventfd;
 	int eventfd;	/* eventfd for cmd notification from spec */
+	int epfd;
 
 	zvol_io_hdr_t *io_resp_hdr;	// header recieved on data connection
 	void *io_resp_data;		// data recieved on data connection
@@ -96,11 +101,11 @@ int update_replica_list(int, spec_t *, int);
 int remove_replica_from_list(spec_t *, int);
 void unblock_blocked_cmds(replica_t *);
 
-replica_t *create_replica_entry(spec_t *, int);
-replica_t *update_replica_entry(spec_t *, replica_t *, int);
+replica_t *create_replica_entry(spec_t *, int, int);
+int update_replica_entry(spec_t *, replica_t *, int);
 
 replica_t * get_replica(int mgmt_fd, spec_t **);
-void handle_read_data_event(replica_t *);
+int handle_read_data_event(replica_t *);
 int handle_write_data_event(replica_t *replica);
 
 void update_volstate(spec_t *);
