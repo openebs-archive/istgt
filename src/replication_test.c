@@ -59,7 +59,7 @@ test_read_data(int fd, uint8_t *data, uint64_t len) {
 	}
 	return nbytes;
 }
-
+zvol_status_t replica_state = ZVOL_STATUS_DEGRADED;
 int
 send_mgmtack(int fd, zvol_op_code_t opcode, void *buf, char *replicaip, int replica_port)
 {
@@ -83,6 +83,7 @@ send_mgmtack(int fd, zvol_op_code_t opcode, void *buf, char *replicaip, int repl
 	iovec[2].iov_len = sizeof (zvol_io_hdr_t) - 32;
 
 	if (opcode == ZVOL_OPCODE_REPLICA_STATUS) {
+		replica_state = ZVOL_STATUS_HEALTHY;
 		repl_status.state = ZVOL_STATUS_HEALTHY;
 		mgmt_ack_hdr->len = sizeof(zrepl_status_ack_t);
 		iovec_count = 4;
@@ -137,53 +138,93 @@ out:
 	return ret;
 }
 #include <stdlib.h>
+
+#define create_degraded_read_resp(count) \
+{ \
+	bytes_written = 0; \
+	data_len = 0; \
+	offset = io_hdr->offset; \
+	iovec_size = 3; \
+	iovec_indx = 0; \
+	nbytes = io_hdr->len; \
+	iovec = (struct iovec *)malloc(iovec_size *sizeof(struct iovec)); \
+	new_hdr = true; \
+	while(nbytes) { \
+		switch(count % 4) { \
+			case 0: \
+			case 1: \
+				if(bytes_written == blocklen) \
+					new_hdr = true; \
+			case 2: \
+				if(nbytes == blocklen) \
+					new_hdr = true; \
+			case 3: \
+				if(bytes_written == blocklen || nbytes == blocklen) \
+					new_hdr = true; \
+		} \
+		if(hash_buf[offset%blocklen] != io_num || new_hdr) { \
+			io_num = hash_buf[offset%blocklen]; \
+			data_len += sizeof(struct zvol_io_rw_hdr) + blocklen; \
+			if(iovec_indx + 3 >= iovec_size) { \
+				iovec_size *= 2; \
+				iovec = (struct iovec *)realloc((void *)iovec, iovec_size*sizeof(struct iovec)); \
+			} \
+			iovec[++iovec_indx].iov_base = io_rw_hdr = (struct zvol_io_rw_hdr *)malloc(sizeof(struct zvol_io_rw_hdr)); \
+			iovec[iovec_indx].iov_len = sizeof(struct zvol_io_rw_hdr); \
+			iovec[++iovec_indx].iov_base = (uint8_t *)buf + bytes_written; \
+			iovec[iovec_indx].iov_len = blocklen; \
+			io_rw_hdr->io_num = (io_num == 0) ? 1 : io_num; \
+			io_rw_hdr->len = blocklen; \
+		} else { \
+			data_len += blocklen; \
+			iovec[iovec_indx].iov_len += blocklen; \
+			io_rw_hdr->len += blocklen; \
+		} \
+		nbytes -= blocklen; \
+		offset += blocklen; \
+		bytes_written += blocklen; \
+		new_hdr = false; \
+	} \
+	io_hdr->len = data_len; \
+	iovec[0].iov_base = io_hdr; \
+	iovec[0].iov_len = sizeof(zvol_io_hdr_t); \
+	iovcnt = iovec_indx + 1; \
+	nbytes = data_len + sizeof(zvol_io_hdr_t); \
+}
+
+#define create_healthy_read_resp() \
+{ \
+	iovec_size = 2; \
+	iovec = (struct iovec *)malloc(iovec_size *sizeof(struct iovec)); \
+	iovec[0].iov_base = io_hdr; \
+	iovec[0].iov_len = sizeof(zvol_io_hdr_t); \
+	iovec[1].iov_base = buf; \
+	iovec[1].iov_len = io_hdr->len; \
+	iovcnt = iovec_indx + 1; \
+	nbytes =  iovec[0].iov_len + iovec[1].iov_len; \
+}
+
 int
 send_io_resp(int fd, zvol_io_hdr_t *io_hdr, void *buf)
 {
+	static int count = 0;
 	struct iovec *iovec = NULL;
 	struct zvol_io_rw_hdr *io_rw_hdr;
 	int64_t iovcnt, i, nbytes = 0;
 	int rc = 0;
 	uint64_t bytes_written;
-	int64_t io_num = -1;
+	uint64_t io_num = 0;
 	uint64_t data_len = 0, iovec_size, iovec_indx, offset = 0;
+	bool new_hdr;
 	io_hdr->status = ZVOL_OP_STATUS_OK;
 	if(io_hdr->opcode == ZVOL_OPCODE_READ) {
-		bytes_written = 0;
-		data_len = 0;
-		offset = io_hdr->offset;
-		iovec_size = 3;
-		iovec_indx = 0;
-		nbytes = io_hdr->len;
-		iovec = (struct iovec *)malloc(iovec_size *sizeof(struct iovec));
-		while(nbytes) {
-			if((int64_t)hash_buf[offset%blocklen] != io_num) {
-				io_num = hash_buf[offset%blocklen];
-				data_len += sizeof(struct zvol_io_rw_hdr) + blocklen;
-				if(iovec_indx + 3 >= iovec_size) {
-					iovec_size *= 2;
-					iovec = (struct iovec *)realloc((void *)iovec, iovec_size*sizeof(struct iovec));
-				}
-				iovec[++iovec_indx].iov_base = io_rw_hdr = (struct zvol_io_rw_hdr *)malloc(sizeof(struct zvol_io_rw_hdr));
-				iovec[iovec_indx].iov_len = sizeof(struct zvol_io_rw_hdr);
-				iovec[++iovec_indx].iov_base = (uint8_t *)buf + bytes_written;
-				iovec[iovec_indx].iov_len = blocklen;
-				io_rw_hdr->io_num = io_num;
-				io_rw_hdr->len = blocklen;
-			} else {
-				data_len += blocklen;
-				iovec[iovec_indx].iov_len += blocklen;
-				io_rw_hdr->len += blocklen;
-			}
-			nbytes -= blocklen;
-			offset += blocklen;
-			bytes_written += blocklen;
+		if(replica_state == ZVOL_STATUS_DEGRADED) {
+			io_hdr->flags = ZVOL_STATUS_DEGRADED;
+			create_degraded_read_resp(count);
+			count++;
+		} else {
+			create_healthy_read_resp();
 		}
-		io_hdr->len = data_len;
-		iovec[0].iov_base = io_hdr;
-		iovec[0].iov_len = sizeof(zvol_io_hdr_t);
-		iovcnt = iovec_indx + 1;
-		nbytes = data_len + sizeof(zvol_io_hdr_t);
 	} else if(io_hdr->opcode == ZVOL_OPCODE_WRITE) {
 		iovcnt = 1;
 		iovec = (struct iovec *)malloc(iovcnt *sizeof(struct iovec));

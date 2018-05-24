@@ -137,7 +137,6 @@ replicator(void *arg) {
 	bool cmd_blocked = false;
 	rcommon_cmd_t *pending_cmd;
 	rcmd_t *pending_rcmd;
-	int healthy_untried = 0;
 	bool cmd_read = false;
 	bool send_multiple_read = false;
 
@@ -163,13 +162,11 @@ dequeue_common_sendq:
 			cmd_read = false;
 		MTX_LOCK(&spec->rq_mtx);
 		if(spec->healthy_rcount == 0) {
-			send_multiple_read = cmd->send_multiple_read = true;
-			healthy_untried = 0;
+			send_multiple_read = true;
 		} else {
-			send_multiple_read = cmd->send_multiple_read = false;
-			healthy_untried = spec->healthy_rcount;
+			send_multiple_read = false;
 		}
-
+enqueue_to_replica_queues:
 		TAILQ_FOREACH(replica, &spec->rq, r_next) {
 			if(replica == NULL) {
 				REPLICA_LOG("Replica not present");
@@ -200,19 +197,19 @@ dequeue_common_sendq:
 				if(cmd_blocked == false) {
 					TAILQ_INSERT_TAIL(&replica->sendq, rcmd, rsend_cmd_next);
 					pthread_cond_signal(&replica->r_cond);
-					if(cmd_read && !send_multiple_read) {
-						MTX_UNLOCK(&replica->r_mtx);
-						break;
-					}
 				} else {
-					if(cmd_read && (--healthy_untried > 0)) {
-						MTX_UNLOCK(&replica->r_mtx);
-						continue;
-					}
 					TAILQ_INSERT_TAIL(&replica->blockedq, rcmd, rblocked_cmd_next);
+				}
+				if(cmd_read && !send_multiple_read) {
+					MTX_UNLOCK(&replica->r_mtx);
+					break;
 				}
 			}
 			MTX_UNLOCK(&replica->r_mtx);
+		}
+		if(cmd_read && !send_multiple_read && !cmd->copies_sent) {
+			send_multiple_read = true;
+			goto enqueue_to_replica_queues;
 		}
 		MTX_UNLOCK(&spec->rq_mtx);
 	}
@@ -557,14 +554,14 @@ uint8_t *get_read_resp_data(rcommon_cmd_t *, uint64_t);
 uint8_t *
 get_read_resp_data(rcommon_cmd_t *rcommq_ptr, uint64_t blocklen)
 {
-	int64_t io_num;
+	uint64_t io_num;
 	int64_t nbytes = 0;
 	uint8_t *tmp_data = NULL;
 	data_read_t *dataptr = NULL;
 	struct zvol_io_rw_hdr *io_hdr = NULL;
-	uint8_t *read_data = (uint8_t *)malloc(rcommq_ptr->data_len);
+	uint8_t *read_data = (uint8_t *)xmalloc(rcommq_ptr->data_len);
 	while(nbytes < rcommq_ptr->data_len) {
-		io_num = -1;
+		io_num = 0;
 		TAILQ_FOREACH(dataptr, &rcommq_ptr->data_read_ptr, data_next) {
 			io_hdr = (struct zvol_io_rw_hdr *)dataptr->io_resp_data;
 			if((int64_t)io_hdr->io_num > io_num) {
@@ -574,7 +571,7 @@ get_read_resp_data(rcommon_cmd_t *rcommq_ptr, uint64_t blocklen)
 			dataptr->bytes_consumed += blocklen;
 			io_hdr->len -= blocklen;
 			if(!io_hdr->len) {
-				dataptr->io_resp_data += sizeof(struct zvol_io_rw_hdr);
+				dataptr->io_resp_data += sizeof(struct zvol_io_rw_hdr) + dataptr->bytes_consumed;
 				dataptr->bytes_consumed = 0;
 			}
 		}
@@ -584,49 +581,7 @@ get_read_resp_data(rcommon_cmd_t *rcommq_ptr, uint64_t blocklen)
 	return read_data;
 }
 
-#define handle_read_healthy() { \
-	dataptr = get_read_resp_data(rcommq_ptr, spec->blocklen); \
-	TAILQ_REMOVE(&spec->rcommon_waitq, rcommq_ptr, wait_cmd_next); \
-	rcommq_ptr->state = CMD_EXECUTION_DONE; \
-	while(data_read = TAILQ_FIRST(&rcommq_ptr->data_read_ptr)) { \
-		free(data_read->io_resp_data_ptr_cpy); \
-		TAILQ_REMOVE(&rcommq_ptr->data_read_ptr, data_read, data_next); \
-		free(data_read); \
-	} \
-	rcommq_ptr->data = dataptr; \
-	signal_luworker(); \
-}
-
-#define handle_read_consistency_met() { \
-	dataptr = get_read_resp_data(rcommq_ptr, spec->blocklen); \
-	TAILQ_REMOVE(&spec->rcommon_waitq, rcommq_ptr, wait_cmd_next); \
-	if ((rcommq_ptr->acks_recvd + rcommq_ptr->ios_aborted) != rcommq_ptr->copies_sent) { \
-		rcommq_ptr->state = CMD_ENQUEUED_TO_PENDINGQ; \
-		TAILQ_INSERT_TAIL(&spec->rcommon_pendingq, rcommq_ptr, pending_cmd_next); \
-	} else { \
-		rcommq_ptr->state = CMD_EXECUTION_DONE; \
-		while(data_read = TAILQ_FIRST(&rcommq_ptr->data_read_ptr)) { \
-			free(data_read->io_resp_data_ptr_cpy); \
-			TAILQ_REMOVE(&rcommq_ptr->data_read_ptr, data_read, data_next); \
-			free(data_read); \
-		} \
-	} \
-	rcommq_ptr->data = dataptr; \
-	signal_luworker(); \
-}
-
-#define handle_read_all_resp_recvd() { \
-	if(rcommq_ptr->state == CMD_ENQUEUED_TO_PENDINGQ) { \
-		TAILQ_REMOVE(&spec->rcommon_pendingq, rcommq_ptr, pending_cmd_next); \
-	} else if(rcommq_ptr->state == CMD_ENQUEUED_TO_WAITQ) { \
-		TAILQ_REMOVE(&spec->rcommon_waitq, rcommq_ptr, wait_cmd_next); \
-	} \
-	rcommq_ptr->state = CMD_EXECUTION_DONE; \
-	while(data_read = TAILQ_FIRST(&rcommq_ptr->data_read_ptr)) { \
-		free(data_read->io_resp_data_ptr_cpy); \
-		TAILQ_REMOVE(&rcommq_ptr->data_read_ptr, data_read, data_next); \
-		free(data_read); \
-	} \
+#define cleanup_cmd() { \
 	if(rcommq_ptr->completed) { \
 		MTX_UNLOCK(&spec->rcommonq_mtx); \
 		MTX_UNLOCK(&rcommq_ptr->rcommand_mtx); \
@@ -634,14 +589,18 @@ get_read_resp_data(rcommon_cmd_t *rcommq_ptr, uint64_t blocklen)
 		rcommq_ptr = NULL; \
 	} else { \
 		rcommq_ptr->completed = true; \
-		if (rcommq_ptr->acks_recvd < spec->consistency_factor) { \
-			rcommq_ptr->status = -1; \
-			signal_luworker(); \
-		} \
 		MTX_UNLOCK(&spec->rcommonq_mtx); \
 		MTX_UNLOCK(&rcommq_ptr->rcommand_mtx); \
 	} \
 }
+
+#define cleanup_read_resp() { \
+	while(data_read = TAILQ_FIRST(&rcommq_ptr->data_read_ptr)) { \
+		free(data_read->io_resp_data_ptr_cpy); \
+		TAILQ_REMOVE(&rcommq_ptr->data_read_ptr, data_read, data_next); \
+		free(data_read); \
+	} \
+} \
 
 int
 handle_read_resp(spec_t *spec, replica_t *replica)
@@ -653,6 +612,7 @@ handle_read_resp(spec_t *spec, replica_t *replica)
 	zvol_io_hdr_t *io_rsp_hdr = replica->io_resp_hdr;
 	uint64_t datalen = 0;
 	uint8_t *dataptr = NULL;
+	bool all_resp_recvd, state_rebuild = false;
 	data_read_t *data_read = (data_read_t *)malloc(sizeof(data_read_t));
 	MTX_LOCK(&replica->r_mtx);
 	//Find IO in read queue, signal luworker, and dequeue
@@ -674,25 +634,55 @@ handle_read_resp(spec_t *spec, replica_t *replica)
 			} else {
 				rcommq_ptr->ios_aborted++;
 			}
+			if(rcommq_ptr->acks_recvd + rcommq_ptr->ios_aborted == rcommq_ptr->copies_sent) {
+				all_resp_recvd = true;
+			} else {
+				all_resp_recvd = false;
+			}
+			if(rcommq_ptr->state == CMD_EXECUTION_DONE) {
+				if(all_resp_recvd == true) {
+					cleanup_cmd();
+				} else {
+					MTX_UNLOCK(&rcommq_ptr->rcommand_mtx);
+					MTX_UNLOCK(&spec->rcommonq_mtx);
+				}
+				free(replica->io_resp_data);
+				break;
+			}
 			data_read->io_resp_data = data_read->io_resp_data_ptr_cpy = replica->io_resp_data;
 			data_read->bytes_consumed = 0;
-
-			TAILQ_INSERT_TAIL(&rcommq_ptr->data_read_ptr, data_read, data_next);
 			luworker_id = rcommq_ptr->luworker_id;
-			if(!rcommq_ptr->send_multiple_read) {
-				handle_read_healthy();
+			if(io_rsp_hdr->flags != ZVOL_STATUS_DEGRADED) {
+				state_rebuild = false;
+				dataptr = replica->io_resp_data;
+			} else {
+				state_rebuild = true;
+				TAILQ_INSERT_TAIL(&rcommq_ptr->data_read_ptr, data_read, data_next);
+			};
+			if(!state_rebuild) {
+				rcommq_ptr->data = dataptr;
+				signal_luworker();
+				rcommq_ptr->state = CMD_EXECUTION_DONE;
+				MTX_UNLOCK(&rcommq_ptr->rcommand_mtx);
+				MTX_UNLOCK(&spec->rcommonq_mtx);
+				cleanup_read_resp();
 			} else if (rcommq_ptr->acks_recvd == MAX(spec->replica_count - spec->consistency_factor + 1,
 								spec->consistency_factor)) {
-				handle_read_consistency_met();
-				MTX_UNLOCK(&spec->rcommonq_mtx);
-				MTX_UNLOCK(&rcommq_ptr->rcommand_mtx);
-			} else if (rcommq_ptr->acks_recvd + rcommq_ptr->ios_aborted
-					== rcommq_ptr->copies_sent) {
-				handle_read_all_resp_recvd();
+				TAILQ_REMOVE(&spec->rcommon_waitq, rcommq_ptr, wait_cmd_next);
+				dataptr = get_read_resp_data(rcommq_ptr, spec->blocklen);
+				rcommq_ptr->state = CMD_EXECUTION_DONE;
+				rcommq_ptr->data = dataptr;
+				signal_luworker();
+				if(all_resp_recvd == false) {
+					MTX_UNLOCK(&rcommq_ptr->rcommand_mtx);
+					MTX_UNLOCK(&spec->rcommonq_mtx);
+				} else {
+					cleanup_cmd();
+				}
+				cleanup_read_resp();
 			} else {
 				MTX_UNLOCK(&rcommq_ptr->rcommand_mtx);
 				MTX_UNLOCK(&spec->rcommonq_mtx);
-				return 0;
 			}
 			break;
 		}
