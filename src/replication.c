@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include </usr/include/assert.h>
 #include <sys/uio.h>
 #include <netdb.h>
 #include <unistd.h>
@@ -827,6 +828,7 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 {
 	int rc;
 	zvol_io_hdr_t *rio;
+	zvol_op_open_data_t *payload;
 	pthread_t replica_sender_thread;
 	struct epoll_event event;
 	zvol_io_hdr_t *ack_hdr;
@@ -873,15 +875,23 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 
 	MTX_UNLOCK(&spec->rq_mtx);
 
-	rio = (zvol_io_hdr_t *)malloc(sizeof(zvol_io_hdr_t));
-	rio->opcode = ZVOL_OPCODE_HANDSHAKE;
+	rio = (zvol_io_hdr_t *) malloc(sizeof (zvol_io_hdr_t));
+	payload = (zvol_op_open_data_t *) malloc(sizeof (zvol_op_open_data_t));
+	rio->opcode = ZVOL_OPCODE_OPEN;
 	rio->io_seq = 0;
 	rio->offset = 0;
-	rio->len    = strlen(spec->lu->volname);
+	rio->len    = sizeof(zvol_op_open_data_t);
 	rio->version = REPLICA_VERSION;
+	
+	payload = (zvol_op_open_data_t *) malloc(sizeof (zvol_op_open_data_t));
+	payload->timeout = (10 *60);
+	payload->tgt_block_size = spec->lu->blocklen;
+	strncpy(payload->volname, spec->lu->volname, sizeof (payload->volname));
+	
 	write(replica->iofd, rio, sizeof(zvol_io_hdr_t));
-	write(replica->iofd, spec->lu->volname, strlen(spec->lu->volname));
+	write(replica->iofd, payload, sizeof (*payload));
 	free(rio);
+	free(payload);
 
 	event.data.fd = replica->iofd;
 	event.events = EPOLLIN | EPOLLET;
@@ -1314,6 +1324,15 @@ read_io_resp_hdr:
 					handle_write_resp(spec, replica);
 					break;
 
+				case ZVOL_OPCODE_OPEN:
+					assert(resp_hdr->len == 0);
+					if (resp_hdr->status != ZVOL_OP_STATUS_OK)
+						REPLICA_ERRLOG("ZVOL_OPCODE_OPEN response is not OK..\n");
+
+					/* Do we have memory allocation here. I think No */
+					assert((*resp_data) == NULL);
+					break;
+			
 				case ZVOL_OPCODE_HANDSHAKE:
 					if(resp_hdr->len != sizeof (mgmt_ack_t))
 						REPLICA_ERRLOG("mgmt_ack_len %lu not matching with size of mgmt_ack_data..\n",
