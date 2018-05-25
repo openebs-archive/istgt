@@ -188,6 +188,7 @@ send_io_resp(int fd, zvol_io_hdr_t *io_hdr, void *buf)
 	return 0;
 
 }
+
 int
 main(int argc, char **argv)
 {
@@ -201,6 +202,8 @@ main(int argc, char **argv)
 	char *test_vol = argv[5];
 	int sleeptime = 0;
 	struct zvol_io_rw_hdr *io_rw_hdr;
+	zvol_op_open_data_t *open_ptr;
+
 
 	if (argv[6] != NULL)
 		sleeptime = atoi(argv[6]);
@@ -314,7 +317,7 @@ main(int argc, char **argv)
 					REPLICA_ERRLOG("epoll_ctl() failed, errno:%d", errno);
 					exit(EXIT_FAILURE);
 				}
-			} else if(events[i].data.fd == iofd) {
+			} else if (events[i].data.fd == iofd) {
 				while(1) {
 					if(read_rem_data) {
 						count = test_read_data(events[i].data.fd, (uint8_t *)data + recv_len, total_len - recv_len);
@@ -354,9 +357,11 @@ main(int argc, char **argv)
 						}
 						read_rem_hdr = false;
 					}
-
-					if(io_hdr->opcode == ZVOL_OPCODE_WRITE || io_hdr->opcode == ZVOL_OPCODE_HANDSHAKE) {
-						if(io_hdr->len) {
+					REPLICA_LOG("Opcode is: %d\n", io_hdr->opcode);
+					if (io_hdr->opcode == ZVOL_OPCODE_WRITE ||
+					    io_hdr->opcode == ZVOL_OPCODE_HANDSHAKE ||
+					    io_hdr->opcode == ZVOL_OPCODE_OPEN) {
+						if (io_hdr->len) {
 							data = malloc(io_hdr->len);
 							nbytes = 0;
 							count = test_read_data(events[i].data.fd, (uint8_t *)data, io_hdr->len);
@@ -365,7 +370,7 @@ main(int argc, char **argv)
 								recv_len = 0;
 								total_len = io_hdr->len;
 								break;
-							} else if((uint64_t)count < io_hdr->len && errno == EAGAIN) {
+							} else if ((uint64_t)count < io_hdr->len && errno == EAGAIN) {
 								read_rem_data = true;
 								recv_len = count;
 								total_len = io_hdr->len;
@@ -374,8 +379,14 @@ main(int argc, char **argv)
 							read_rem_data = false;
 						}
 					}
+			
+					if (io_hdr->opcode == ZVOL_OPCODE_OPEN) {
+						open_ptr = (zvol_op_open_data_t *)data;
+						REPLICA_LOG("Volume name:%s blocksize: %d timeout:%d\n",
+						    open_ptr->volname, open_ptr->tgt_block_size, open_ptr->timeout);
+					}
 execute_io:
-					if(io_hdr->opcode == ZVOL_OPCODE_WRITE) {
+					if (io_hdr->opcode == ZVOL_OPCODE_WRITE) {
 						io_rw_hdr = (struct zvol_io_rw_hdr *)data;
 						data += sizeof(struct zvol_io_rw_hdr);
 						while((rc = pwrite(vol_fd, data + nbytes, io_rw_hdr->len - nbytes, io_hdr->offset + nbytes))) {
