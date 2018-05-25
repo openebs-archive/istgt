@@ -120,7 +120,8 @@ inform_mgmt_conn(replica_t *r)
 {
 	uint64_t num = 1;
 	r->disconnect_conn = 1;
-	(void) write(r->mgmt_eventfd1, &num, sizeof (num));
+	if (write(r->mgmt_eventfd1, &num, sizeof (num)) != sizeof (num))
+		REPLICA_NOTICELOG("Failed report err to mgmt_conn for replica(%p)\n", r);
 }
 
 static rcmd_t *

@@ -180,42 +180,6 @@ perform_read_write_on_fd(int fd, uint8_t *data, uint64_t len, int state)
 	return nbytes;
 }
 
-uint8_t *
-get_read_resp_data(void *data, uint64_t *datalen)
-{
-	uint8_t *dataptr = (uint8_t *)data;
-	uint64_t len = 0, parsed = 0;
-	uint8_t *read_data;
-	struct zvol_io_rw_hdr *io_hdr;
-	zvol_io_hdr_t *hdr;
-
-	hdr = (zvol_io_hdr_t *) data;
-	dataptr = (uint8_t *)data + sizeof (zvol_io_hdr_t);
-
-	while (parsed < hdr->len) {
-		io_hdr = (struct zvol_io_rw_hdr *)dataptr;
-		len += io_hdr->len;
-		dataptr += (sizeof(struct zvol_io_rw_hdr) + io_hdr->len);
-		parsed += (sizeof(struct zvol_io_rw_hdr) + io_hdr->len);
-	}
-
-	read_data = (uint8_t *)malloc(len);
-	dataptr = (uint8_t *)data + sizeof (zvol_io_hdr_t);
-	len = 0;
-	parsed = 0;
-
-	while (parsed < hdr->len) {
-		io_hdr = (struct zvol_io_rw_hdr *)dataptr;
-		dataptr += (sizeof(struct zvol_io_rw_hdr));
-		memcpy(read_data + len, dataptr, io_hdr->len);
-		len += io_hdr->len;
-		dataptr += (io_hdr->len);
-		parsed += (sizeof(struct zvol_io_rw_hdr) + io_hdr->len);
-	}
-	*datalen = len;
-	return read_data;
-}
-
 void
 get_all_read_resp_data_chunk(replica_rcomm_resp_t *resp, struct io_data_chunk_list_t *io_chunk_list)
 {
@@ -293,10 +257,13 @@ create_replica_entry(spec_t *spec, int epfd, int mgmt_fd)
 	memset(replica, 0, sizeof(replica_t));
 	replica->epfd = epfd;
 	replica->mgmt_fd = mgmt_fd;
+
 	TAILQ_INIT(&(replica->mgmt_cmd_queue));
+
 	replica->initial_checkpointed_io_seq = 0;
 	replica->mgmt_io_resp_hdr = malloc(sizeof(zvol_io_hdr_t));
 	replica->mgmt_io_resp_data = NULL;
+
 	MTX_LOCK(&spec->rq_mtx);
 	TAILQ_INSERT_TAIL(&spec->rwaitq, replica, r_waitnext);
 	MTX_UNLOCK(&spec->rq_mtx);
@@ -333,7 +300,6 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	pthread_t r_thread;
 	zvol_io_hdr_t *ack_hdr;
 	mgmt_ack_t *ack_data;
-	mgmt_ack_t handshake_resp;
 	int i;
 
 	ack_hdr = replica->mgmt_io_resp_hdr;	
@@ -368,35 +334,46 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	rio->len = strlen(spec->lu->volname);
 	rio->version = REPLICA_VERSION;
 
-	rc = write(replica->iofd, rio, sizeof(zvol_io_hdr_t));
-	(void) write(replica->iofd, spec->lu->volname, strlen(spec->lu->volname));
-	(void) read(replica->iofd, &handshake_resp, sizeof (handshake_resp));
-	free(rio);
+	if (write(replica->iofd, rio, sizeof(zvol_io_hdr_t)) != sizeof(zvol_io_hdr_t)) {
+		REPLICA_ERRLOG("failed to send io hdr to replica\n");
+		goto replica_error;
+	}
+
+	if (write(replica->iofd, spec->lu->volname,
+		strlen(spec->lu->volname)) != (ssize_t)strlen(spec->lu->volname)) {
+		REPLICA_ERRLOG("failed to send volname to replica\n");
+		goto replica_error;
+	}
+
+	if (read(replica->iofd, rio, sizeof (*rio)) != sizeof (*rio)) {
+		REPLICA_ERRLOG("failed to read handshake response from replica\n");
+		goto replica_error;
+	}
 
 	if(init_mempool(&replica->cmdq, rcmd_mempool_count, sizeof (rcmd_t), 0,
 	    "replica_cmd_mempool", NULL, NULL, NULL, false)) {
 		REPLICA_ERRLOG("Failed to initialize replica cmdq\n");
-		replica->iofd = -1;
-		close(iofd);
-		return -1;
+		goto replica_error;
 	}
 
 	rc = make_socket_non_blocking(iofd);
 	if (rc == -1) {
 		REPLICA_ERRLOG("make_socket_non_blocking() failed errno:%d\n", errno);
-		replica->iofd = -1;
-		close(iofd);
-		return -1;
+		goto replica_error;
 	}
 
 	rc = pthread_create(&r_thread, NULL, &replica_thread,
 			(void *)replica);
 	if (rc != 0) {
 		ISTGT_ERRLOG("pthread_create(r_thread) failed\n");
+replica_error:
 		replica->iofd = -1;
 		close(iofd);
+		free(rio);
 		return -1;
 	}
+
+	free(rio);
 
 	for (i = 0; (i < 10) && (replica->mgmt_eventfd2 == -1); i++)
 		sleep(1);
@@ -875,7 +852,8 @@ inform_data_conn(replica_t *r)
 {
 	uint64_t num = 1;
 	r->disconnect_conn = 1;
-	(void) write(r->mgmt_eventfd2, &num, sizeof (num));
+	if (write(r->mgmt_eventfd2, &num, sizeof (num)) != sizeof (num))
+		REPLICA_NOTICELOG("Failed to inform err to data_conn for replica(%p)\n", r);
 }
 
 static void
@@ -888,6 +866,9 @@ free_replica(replica_t *r)
 	free(r->mgmt_io_resp_hdr);
 	free(r->m_event1);
 	free(r->m_event2);
+
+	if (r->ip)
+		free(r->ip);
 	free(r);
 }
 

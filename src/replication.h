@@ -142,7 +142,6 @@ void clear_rcomm_cmd(rcommon_cmd_t *);
 void ask_replica_status(spec_t *spec, replica_t *replica);
 void get_all_read_resp_data_chunk(replica_rcomm_resp_t *, struct io_data_chunk_list_t *);
 uint8_t *process_chunk_read_resp(struct io_data_chunk_list_t  *io_chunk_list, uint64_t len);
-uint8_t * get_read_resp_data(void *data, uint64_t *datalen);
 extern void * replica_thread(void *);
 extern int do_drainfd(int );
 void close_fd(int epollfd, int fd);
