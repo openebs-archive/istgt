@@ -147,6 +147,10 @@ send_io_resp(int fd, zvol_io_hdr_t *io_hdr, void *buf)
 	int iovcnt, i, nbytes = 0;
 	int rc = 0;
 	io_hdr->status = ZVOL_OP_STATUS_OK;
+
+	if (fd < 0)
+		return -1;
+
 	if(io_hdr->opcode == ZVOL_OPCODE_READ) {
 		iovcnt = 3;
 		io_rw_hdr.io_num = 2000;
@@ -212,12 +216,11 @@ main(int argc, char **argv)
 		if_healthy = 0;
 //		sleeptime = atoi(argv[6]);
 	}
-	int iofd, mgmtfd, sfd, rc, epfd, event_count, i;
+	int iofd = -1, mgmtfd, sfd, rc, epfd, event_count, i;
 	int64_t count;
 	struct epoll_event event, *events;
 	uint8_t *data, *data_ptr_cpy;
-	uint64_t data_len, nbytes = 0;
-	char *volname;
+	uint64_t nbytes = 0;
 	int vol_fd = open(test_vol, O_RDWR, 0666);
 	zvol_op_code_t opcode;
 	zvol_io_hdr_t *io_hdr = malloc(sizeof(zvol_io_hdr_t));
@@ -281,11 +284,9 @@ main(int argc, char **argv)
 				}
 				if(mgmtio->len) {
 					data = data_ptr_cpy = malloc(mgmtio->len);
-					data_len = mgmtio->len;
 					count = test_read_data(events[i].data.fd, (uint8_t *)data, mgmtio->len);
 				}
 				opcode = mgmtio->opcode;
-				volname = (char *)data;
 				send_mgmtack(mgmtfd, opcode, data, replicaip, replica_port);
 			} else if (events[i].data.fd == sfd) {
 				struct sockaddr saddr;

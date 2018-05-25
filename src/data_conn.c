@@ -120,7 +120,7 @@ inform_mgmt_conn(replica_t *r)
 {
 	uint64_t num = 1;
 	r->disconnect_conn = 1;
-	write(r->mgmt_eventfd1, &num, sizeof (num));
+	(void) write(r->mgmt_eventfd1, &num, sizeof (num));
 }
 
 static rcmd_t *

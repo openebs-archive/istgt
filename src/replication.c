@@ -369,8 +369,8 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	rio->version = REPLICA_VERSION;
 
 	rc = write(replica->iofd, rio, sizeof(zvol_io_hdr_t));
-	write(replica->iofd, spec->lu->volname, strlen(spec->lu->volname));
-	read(replica->iofd, &handshake_resp, sizeof (handshake_resp));
+	(void) write(replica->iofd, spec->lu->volname, strlen(spec->lu->volname));
+	(void) read(replica->iofd, &handshake_resp, sizeof (handshake_resp));
 	free(rio);
 
 	if(init_mempool(&replica->cmdq, rcmd_mempool_count, sizeof (rcmd_t), 0,
@@ -639,14 +639,14 @@ accept_mgmt_conns(int epfd, int sfd)
 			continue;
 		}
 
+		mevent1 = (mgmt_event_t *)malloc(sizeof(mgmt_event_t));
+		mevent2 = (mgmt_event_t *)malloc(sizeof(mgmt_event_t));
+
 		replica->mgmt_eventfd1 = eventfd(0, EFD_NONBLOCK);
 		if (replica->mgmt_eventfd1 < 0) {
 			perror("r_mgmt_eventfd1");
 			goto cleanup;
 		}
-
-		mevent1 = (mgmt_event_t *)malloc(sizeof(mgmt_event_t));
-		mevent2 = (mgmt_event_t *)malloc(sizeof(mgmt_event_t));
 
 		mevent1->fd = replica->mgmt_eventfd1;
 		mevent1->r_ptr = replica;
@@ -875,7 +875,7 @@ inform_data_conn(replica_t *r)
 {
 	uint64_t num = 1;
 	r->disconnect_conn = 1;
-	write(r->mgmt_eventfd2, &num, sizeof (num));
+	(void) write(r->mgmt_eventfd2, &num, sizeof (num));
 }
 
 static void
