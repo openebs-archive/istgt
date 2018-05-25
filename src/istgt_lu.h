@@ -814,27 +814,20 @@ typedef struct istgt_lu_disk_t {
 
 #ifdef REPLICATION
 	TAILQ_ENTRY(istgt_lu_disk_t)  spec_next;
-	TAILQ_HEAD(, rcommon_cmd_s) rcommon_sendq; //Contains IOs to be sent to replicas
-	TAILQ_HEAD(, rcommon_cmd_s) rcommon_wait_readq; //Contains IOs waiting for acks from replicas
 	TAILQ_HEAD(, rcommon_cmd_s) rcommon_waitq; //Contains IOs waiting for acks from atleast n(consistency level) replicas
-	TAILQ_HEAD(, rcommon_cmd_s) rcommon_pendingq; //Contains IOs waiting for acks from remaining replicas
 	rte_smempool_t rcommon_deadlist;	// Contains completed IOs
 	TAILQ_HEAD(, replica_s) rq; //Queue of replicas connected to this spec(volume)
 	TAILQ_HEAD(, replica_s) rwaitq; //Queue of replicas completed handshake, and yet to have data connection to this spec(volume)
 	int replica_count;
-	uint64_t replica_index_list;
 	int replication_factor;
 	int consistency_factor;
 	int healthy_rcount;
 	int degraded_rcount;
 	bool ready;
-	int receiver_epfd;
 	/*Common for both the above queues,
 	Since same cmd is part of both the queues*/
-	pthread_cond_t rq_cond;
 	pthread_mutex_t rq_mtx; 
 	pthread_mutex_t rcommonq_mtx; 
-	pthread_cond_t rcommonq_cond; 
 	pthread_mutex_t luworker_rmutex[ISTGT_MAX_NUM_LUWORKERS];
 	pthread_cond_t luworker_rcond[ISTGT_MAX_NUM_LUWORKERS];
 #endif

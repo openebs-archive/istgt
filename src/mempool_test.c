@@ -82,7 +82,7 @@ verify_mempool_values_n_destroy(rte_smempool_t *mempool)
 }
 
 int
-main()
+main(void)
 {
 	rte_smempool_t mempool;
 

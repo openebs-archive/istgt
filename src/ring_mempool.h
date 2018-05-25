@@ -24,4 +24,4 @@ void * get_from_mempool(rte_smempool_t *obj);
 void put_to_mempool(rte_smempool_t *obj, void *node);
 unsigned get_num_entries_from_mempool(rte_smempool_t *obj);
 
-#endif
+#endif /* _RING_MEMPOOL_H */

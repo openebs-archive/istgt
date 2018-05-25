@@ -25,345 +25,81 @@ cstor_conn_ops_t cstor_ops = {
 	.conn_connect = replication_connect,
 };
 
-#define	RCMD_MEMPOOL_ENTRIES	100000
 rte_smempool_t rcmd_mempool;
 size_t rcmd_mempool_count = RCMD_MEMPOOL_ENTRIES;
 
 extern rte_smempool_t rcommon_cmd_mempool;
 extern size_t rcommon_cmd_mempool_count;
-static void cleanup_replica(replica_t *replica);
 
-#define build_replica_io_hdr() \
-{\
-	rio->opcode = cmd->opcode;\
-	rio->version = REPLICA_VERSION;\
-	rio->io_seq = cmd->io_seq;\
-	rio->offset = cmd->offset;\
-	if (cmd->opcode == ZVOL_OPCODE_WRITE) {\
-		rio->len = cmd->data_len + sizeof(struct zvol_io_rw_hdr);\
-		rio->checkpointed_io_seq = 0;\
-	} else\
-		rio->len = cmd->data_len;\
-	rio_rw_hdr->io_num = cmd->io_seq;\
-	rio_rw_hdr->len = cmd->data_len;\
-}
+static void handle_mgmt_conn_error(replica_t *r, int sfd, struct epoll_event *events,
+    int ev_count);
+static int read_io_resp(spec_t *spec, replica_t *replica, io_event_t *revent);
+static void respond_with_error_for_all_outstanding_mgmt_ios(replica_t *r);
+static void inform_data_conn(replica_t *r);
+static void free_replica(replica_t *r);
+static int handle_mgmt_event_fd(replica_t *replica);
+int initialize_volume(spec_t *spec);
 
-#define build_replica_mgmt_hdr() \
-{\
-	rmgmtio = (zvol_io_hdr_t *)malloc(sizeof(zvol_io_hdr_t));\
-	rmgmtio->opcode = mgmt_opcode;\
-	rmgmtio->version = REPLICA_VERSION;\
-	rmgmtio->len    = data_len;\
-}
+#define BUILD_REPLICA_MGMT_HDR(_mgmtio_hdr, _mgmt_opcode, _data_len)	\
+	do {								\
+		_mgmtio_hdr = malloc(sizeof(zvol_io_hdr_t));		\
+		_mgmtio_hdr->opcode = _mgmt_opcode;			\
+		_mgmtio_hdr->version = REPLICA_VERSION;			\
+		_mgmtio_hdr->len    = _data_len;			\
+	} while (0)
 
-/*
-#define build_mgmt_cmd() \
-{\
-	mgmt_cmd = malloc(sizeof(mgmt_cmd_t));\
-	mgmt_cmd->opcode = opcode;\
-	mgmt_cmd->data_len = malloc \
-}
-*/
-
-#define build_rcmd() \
-{\
-	rcmd = get_from_mempool(&rcmd_mempool);\
-	rcmd->opcode = cmd->opcode;\
-	rcmd->offset = cmd->offset;\
-	rcmd->data_len = cmd->data_len;\
-	rcmd->io_seq = cmd->io_seq;\
-	rcmd->ack_recvd = false;\
-	rcmd->rcommq_ptr = cmd;\
-	rcmd->status = 0;\
-	rcmd->iovcnt = cmd->iovcnt;\
-	for (i=1; i < rcmd->iovcnt + 1; i++) {\
-		rcmd->iov[i].iov_base = cmd->iov[i].iov_base;\
-		rcmd->iov[i].iov_len = cmd->iov[i].iov_len;\
-	}\
-}
-
-#define check_for_blockage(_cmd, _pending_cmd) {\
-	uint64_t current_lba = _cmd->offset; \
-	uint64_t current_lbE = current_lba + _cmd->data_len; \
-	uint64_t pending_lba = _pending_cmd->offset; \
-	uint64_t pending_lbE = pending_lba + _pending_cmd->data_len; \
-	if ((current_lbE < pending_lba)  || \
-			(pending_lbE < current_lba)) { \
-		cmd_blocked = false; \
-	} else {\
-		cmd_blocked = true; \
-	}\
-}
-
-#define signal_luworker() { \
-	MTX_LOCK(&spec->luworker_rmutex[luworker_id]); \
-	pthread_cond_signal(&spec->luworker_rcond[luworker_id]); \
-	MTX_UNLOCK(&spec->luworker_rmutex[luworker_id]); \
-}
-
-#define	clear_mgmt_cmd(_replica, _mgmt_cmd)		\
-	do {						\
-		TAILQ_REMOVE(&_replica->mgmt_cmd_queue,	\
-			_mgmt_cmd, mgmt_cmd_next);	\
-		free(_mgmt_cmd->io_hdr);		\
-		free(_mgmt_cmd->data);			\
-		free(_mgmt_cmd);			\
+#define	clear_mgmt_cmd(_replica, _mgmt_cmd)				\
+	do {								\
+		TAILQ_REMOVE(&_replica->mgmt_cmd_queue, _mgmt_cmd,	\
+		    mgmt_cmd_next);					\
+		if (_mgmt_cmd->io_hdr)					\
+			free(_mgmt_cmd->io_hdr);			\
+		if (_mgmt_cmd->data)					\
+			free(_mgmt_cmd->data);				\
+		free(_mgmt_cmd);					\
 	} while(0)
 
-#define	EMPTY_MGMT_Q_OF_REPLICA(_replica)					\
-	do {									\
-		mgmt_cmd_t *_mgmt_cmd;						\
-		while((_mgmt_cmd = TAILQ_FIRST(&replica->mgmt_cmd_queue))) {	\
-			clear_mgmt_cmd(_replica, _mgmt_cmd);			\
-		}								\
+#define	EMPTY_MGMT_Q_OF_REPLICA(_replica)				\
+	do {								\
+		mgmt_cmd_t *_mgmt_cmd;					\
+		while((_mgmt_cmd = 					\
+		    TAILQ_FIRST(&_replica->mgmt_cmd_queue))) {		\
+			clear_mgmt_cmd(_replica, _mgmt_cmd);		\
+		}							\
         } while(0)
 
-#define CHECK_FOR_BLOCKAGE_IN_Q(queue, next) {\
-	if(cmd_blocked == false) {\
-		TAILQ_FOREACH(pending_rcmd, queue, next) {\
-			pending_cmd = pending_rcmd->rcommq_ptr;\
-			check_for_blockage(cmd, pending_cmd);\
-			if(cmd_blocked == true) {\
-				TAILQ_INSERT_TAIL(&replica->blockedq, rcmd, rblocked_cmd_next);\
-				break;\
-			}\
-		}\
-	}\
-}
-
-//Picks cmds from send queue and sends them to replica
-void *
-replicator(void *arg) {
-	spec_t *spec = (spec_t *)arg;
-	replica_t *replica;
-	bool read_cmd_sent;
-	int i = 0;
-	rcommon_cmd_t *cmd = NULL;
-	rcmd_t *rcmd = NULL;
-	bool cmd_blocked = false;
-	rcommon_cmd_t *pending_cmd;
-	rcmd_t *pending_rcmd;
-
-	while(1) {
-		MTX_LOCK(&spec->rcommonq_mtx);
-dequeue_common_sendq:
-		cmd = TAILQ_FIRST(&spec->rcommon_sendq);
-		if(!cmd) {
-			pthread_cond_wait(&spec->rcommonq_cond, &spec->rcommonq_mtx);
-			goto dequeue_common_sendq;
-		}
-		cmd->io_seq = ++spec->io_seq;
-		cmd->acks_recvd = 0;
-		TAILQ_REMOVE(&spec->rcommon_sendq, cmd, send_cmd_next);
-		cmd->state = CMD_ENQUEUED_TO_WAITQ;
-		TAILQ_INSERT_TAIL(&spec->rcommon_waitq, cmd, wait_cmd_next);
-		MTX_UNLOCK(&spec->rcommonq_mtx);
-
-		//Enqueue to individual replica cmd queues and send on the respective fds
-		read_cmd_sent = false;
-		MTX_LOCK(&spec->rq_mtx);
-
-		TAILQ_FOREACH(replica, &spec->rq, r_next) {
-			if(replica == NULL) {
-				REPLICA_LOG("Replica not present");
-				MTX_UNLOCK(&spec->rq_mtx);
-				exit(EXIT_FAILURE);
-			}
-			//Create an entry for replica queue
-			build_rcmd();
-			MTX_LOCK(&replica->r_mtx);
-			if(replica->removed) {
-				MTX_UNLOCK(&replica->r_mtx);
-				continue;
-			}
-			cmd->copies_sent++;
-
-			if (!TAILQ_EMPTY(&replica->blockedq))
-				TAILQ_INSERT_TAIL(&replica->blockedq, rcmd, rblocked_cmd_next);
-			else {
-				cmd_blocked = false;
-				CHECK_FOR_BLOCKAGE_IN_Q((&replica->sendq), rsend_cmd_next)
-				CHECK_FOR_BLOCKAGE_IN_Q((&replica->waitq), rwait_cmd_next)
-				CHECK_FOR_BLOCKAGE_IN_Q((&replica->read_waitq), rread_cmd_next)
-
-				if(cmd_blocked == false) {
-					TAILQ_INSERT_TAIL(&replica->sendq, rcmd, rsend_cmd_next);
-					if(rcmd->opcode == ZVOL_OPCODE_READ) {
-						read_cmd_sent = true;
-					}
-					pthread_cond_signal(&replica->r_cond);
-				}
-			}
-			MTX_UNLOCK(&replica->r_mtx);
-			if((rcmd->opcode == ZVOL_OPCODE_READ) && read_cmd_sent) {
-				break;
-			}
-		}
-		MTX_UNLOCK(&spec->rq_mtx);
-	}
-}
-
-int
-wait_for_fd(int epfd) {
-	int event_count = 0;
-	struct epoll_event event;
-epollwait:
-	event_count = epoll_wait(epfd, &event, 1, -1);
-
-	if (event_count < 0) {
-		if (errno == EINTR)
-			goto epollwait;
-		REPLICA_ERRLOG("epoll_wait ret %d err %d.. better to restart..\n", event_count, errno);
-		goto epollwait;
-	}
-	if (!(event.events & EPOLLOUT)) {
-		REPLICA_LOG("epoll err event %d on fd %d..\n", event.events, event.data.fd);
-		return -1;
-	} else {
-		return 0;
-	}
-}
-
-int
-sendio(int epfd, int fd, rcommon_cmd_t *cmd, rcmd_t *rcmd) {
-	char buf[sizeof(zvol_io_hdr_t) + sizeof(struct zvol_io_rw_hdr)];
-	zvol_io_hdr_t *rio = (zvol_io_hdr_t *)(&(buf[0]));
-	struct zvol_io_rw_hdr *rio_rw_hdr = (struct zvol_io_rw_hdr *)(&(buf[sizeof(zvol_io_hdr_t)]));
-	int i = 0;
-	int64_t rc = 0;
-	int64_t nbytes = 0;
-	nbytes = cmd->total_len;
-	build_replica_io_hdr();
-	rcmd->iov[0].iov_base = rio;
-	if (cmd->opcode == ZVOL_OPCODE_WRITE)
-		rcmd->iov[0].iov_len = sizeof(zvol_io_hdr_t) + sizeof(struct zvol_io_rw_hdr);
-	else
-		rcmd->iov[0].iov_len = sizeof(zvol_io_hdr_t);
-	nbytes += rcmd->iov[0].iov_len;
-	while (nbytes) {
-write_to_socket:
-		rc = writev(fd, rcmd->iov, rcmd->iovcnt+1);
-		if (rc < 0) {
-			if (errno == EAGAIN) {
-				rc = wait_for_fd(epfd);
-				if (rc == 0)
-					goto write_to_socket;
-				return -1;
-			} else {
-				REPLICA_LOG("write error %ld on fd %d\n", rc, fd);
-				return -1;
-			}
-		} else if (rc == 0)
-			REPLICA_LOG("fd %d returned 0\n", fd);
-		nbytes -= rc;
-		if (nbytes <= 0)
-			break;
-		for (i=0; i < rcmd->iovcnt + 1; i++) {
-			if (rcmd->iov[i].iov_len != 0 && rcmd->iov[i].iov_len > (size_t)rc) {
-				rcmd->iov[i].iov_base
-					= (void *) (((uint8_t *)rcmd->iov[i].iov_base) + rc);
-				rcmd->iov[i].iov_len -= rc;
-				break;
-			} else {
-				rc -= rcmd->iov[i].iov_len;
-				rcmd->iov[i].iov_len = 0;
-			}
-		}
-	}
-	return 0;
-}
-
-void *
-replica_sender(void *arg)
-{
-	replica_t *replica = (replica_t *)arg;
-	int rc, i, count;
-	uint64_t ncmd;
-	rcmd_t *rcmd = NULL, *pending_rcmd = NULL;
-	rcommon_cmd_t *pending_cmd;
-	struct epoll_event *events;
-	bool cmd_blocked = false;
-
-	events = calloc(MAXEVENTS, sizeof(*events));
-
-	while(1) {
-		count = epoll_wait(replica->sender_epfd, events, MAXEVENTS, -1);
-		if (count == -1) {
-			//TODO cleanup
-			REPLICA_ERRLOG("got error on replica sender epfd\n");
-			exit(1);
-		}
-
-		for (i = 0; i < count; rc++) {
-			if (events[i].data.fd == replica->eventfd) {
-				// got notification regarding new IO
-				rc = eventfd_read(replica->eventfd, &ncmd);
-				if (rc == -1) {
-					//TODO cleanup
-					REPLICA_ERRLOG("failed to read from replica eventfd\n");
-				}
-				REPLICA_LOG("got event count %lu\n", ncmd);
-
-				while (get_num_entries_from_mempool(&replica->cmdq)) {
-					rcmd = get_from_mempool(&replica->cmdq);
-					if (!rcmd)
-						break;
-
-					if (!TAILQ_EMPTY(&replica->blockedq)) {
-						TAILQ_INSERT_TAIL(&replica->blockedq, rcmd, rblocked_cmd_next);
-					} else {
-						cmd_blocked = false;
-						rcmd_t *cmd = rcmd;	// to avoid change in macro : TODO
-						CHECK_FOR_BLOCKAGE_IN_Q((&replica->sendq), rsend_cmd_next)
-						CHECK_FOR_BLOCKAGE_IN_Q((&replica->waitq), rwait_cmd_next)
-
-						if(cmd_blocked == false) {
-							TAILQ_INSERT_TAIL(&replica->sendq, rcmd, rsend_cmd_next);
 /*
-	TODO
-							if(rcmd->opcode == ZVOL_OPCODE_READ) {
-								read_cmd_sent = true; //TODO handling of read command
-							}
-*/
-						} else {
-							TAILQ_INSERT_TAIL(&replica->blockedq, rcmd, rblocked_cmd_next);
-						}
-					}
-				}
-			} else {
-				// got EPOLLOUT on data connection
-				MTX_LOCK(&replica->r_mtx);
-dequeue_rsendq:
-				rcmd = TAILQ_FIRST(&replica->sendq);
-				if(!rcmd) {
-					if(replica->removed) {
-						MTX_UNLOCK(&replica->r_mtx);
-						break;
-					}
-					goto dequeue_rsendq;
-				}
-				TAILQ_REMOVE(&replica->sendq, rcmd, rsend_cmd_next);
-				if(rcmd->opcode == ZVOL_OPCODE_READ) {
-					rcmd->rrio_seq = ++replica->rrio_seq;
-					TAILQ_INSERT_TAIL(&replica->read_waitq, rcmd, rread_cmd_next);
-				} else {
-					rcmd->wrio_seq = ++replica->wrio_seq;
-//					rcommq_ptr = rcmd->rcommq_ptr;
-					TAILQ_INSERT_TAIL(&replica->waitq, rcmd, rwait_cmd_next);
-				}
-				MTX_UNLOCK(&replica->r_mtx);
-				rc = sendio(replica->sender_epfd, replica->iofd, rcmd->rcommq_ptr, rcmd);
-				if(rc < 0) {
-					remove_replica_from_list(replica->spec, replica->iofd);
-					break;
-				}
-			}
-		}
-	}
-	return(NULL);
+ * breaks if fd is closed or drained recv buf of fd
+ * updates amount of data read to continue next time
+ */
+#define CHECK_AND_ADD_BREAK_IF_PARTIAL(_io_read, _count, _reqlen,	\
+	    _donecount)							\
+{									\
+	if (_count == -1) {						\
+		_donecount = -1;					\
+		break;							\
+	}								\
+	if ((uint64_t) _count != _reqlen) {				\
+		(_io_read) += _count;					\
+		break;							\
+	}								\
 }
 
-void update_volstate(spec_t *spec)
+/* MACRO from istgt_lu_disk.c */
+#define timesdiff(_st, _now, _re)					\
+{									\
+	clock_gettime(CLOCK_MONOTONIC, &_now);				\
+	if ((_now.tv_nsec - _st.tv_nsec)<0) {				\
+		_re.tv_sec  = _now.tv_sec - _st.tv_sec - 1;		\
+		_re.tv_nsec = 1000000000 + _now.tv_nsec - _st.tv_nsec;	\
+	} else {							\
+		_re.tv_sec  = _now.tv_sec - _st.tv_sec;			\
+		_re.tv_nsec = _now.tv_nsec - _st.tv_nsec;		\
+	}								\
+}
+
+void
+update_volstate(spec_t *spec)
 {
 	uint64_t max;
 	replica_t *replica;
@@ -383,95 +119,9 @@ void update_volstate(spec_t *spec)
 			spec->io_seq = max;
 		}
 		spec->ready = true;
-		pthread_cond_broadcast(&spec->rq_cond); //TODO
 	} else {
 		spec->ready = false;
 	}
-}
-
-void clear_replica_cmd(spec_t *spec, rcmd_t *rep_cmd) {
-	rcommon_cmd_t *rcommq_ptr = rep_cmd->rcommq_ptr;
-	int luworker_id = rcommq_ptr->luworker_id;
-	//TODO Add check for acks_received in read also, same as write
-	if(rep_cmd->opcode == ZVOL_OPCODE_READ) {
-		MTX_LOCK(&rcommq_ptr->rcommand_mtx);
-		rcommq_ptr->state = CMD_EXECUTION_DONE;
-		rcommq_ptr->status = -1;
-		rcommq_ptr->completed = true;
-		MTX_UNLOCK(&rcommq_ptr->rcommand_mtx);
-		signal_luworker();
-	} else if(rep_cmd->opcode == ZVOL_OPCODE_WRITE) {
-		MTX_LOCK(&spec->rcommonq_mtx);
-		MTX_LOCK(&rcommq_ptr->rcommand_mtx);
-		rcommq_ptr->ios_aborted++;
-		if(rcommq_ptr->acks_recvd + rcommq_ptr->ios_aborted
-				== rcommq_ptr->copies_sent) {
-			if(rcommq_ptr->state == CMD_ENQUEUED_TO_PENDINGQ)
-				TAILQ_REMOVE(&spec->rcommon_pendingq, rcommq_ptr, pending_cmd_next);
-			else if(rcommq_ptr->state == CMD_ENQUEUED_TO_WAITQ)
-				TAILQ_REMOVE(&spec->rcommon_waitq, rcommq_ptr, wait_cmd_next);
-			MTX_UNLOCK(&spec->rcommonq_mtx);
-			rcommq_ptr->state = CMD_EXECUTION_DONE;
-			if(rcommq_ptr->completed) {
-				MTX_UNLOCK(&rcommq_ptr->rcommand_mtx);
-				clear_rcomm_cmd(rcommq_ptr);
-			} else {
-				rcommq_ptr->completed = true;
-				if (rcommq_ptr->acks_recvd < spec->consistency_factor) {
-					rcommq_ptr->status = -1;
-					signal_luworker();
-				}
-				MTX_UNLOCK(&rcommq_ptr->rcommand_mtx);
-			}
-		}
-		else {
-			MTX_UNLOCK(&rcommq_ptr->rcommand_mtx);
-			MTX_UNLOCK(&spec->rcommonq_mtx);
-		}
-	}
-}
-
-#define EMPTY_Q_OF_REPLICA(queue, next) \
-	while((rep_cmd = TAILQ_FIRST((queue)))) { \
-		clear_replica_cmd(spec, rep_cmd); \
-		TAILQ_REMOVE((queue), rep_cmd, next); \
-		ios_aborted++; \
-	}
-
-int
-remove_replica_from_list(spec_t *spec, int iofd) {
-	replica_t *replica;
-	int ios_aborted = 0;
-	rcmd_t *rep_cmd = NULL;
-	struct epoll_event event;
-	MTX_LOCK(&spec->rq_mtx);
-	TAILQ_FOREACH(replica, &spec->rq, r_next) {
-		if(iofd == replica->iofd) {
-			TAILQ_REMOVE(&spec->rq, replica, r_next);
-			spec->replica_count--;
-			update_volstate(spec);
-			REPLICA_LOG("REMOVE REPLICA FROM LIST\n");
-			MTX_LOCK(&replica->r_mtx);
-			MTX_UNLOCK(&spec->rq_mtx);
-
-			EMPTY_Q_OF_REPLICA((&replica->waitq), rwait_cmd_next)
-			EMPTY_Q_OF_REPLICA((&replica->blockedq), rblocked_cmd_next)
-			EMPTY_Q_OF_REPLICA((&replica->read_waitq), rread_cmd_next)
-
-			EMPTY_MGMT_Q_OF_REPLICA(replica);
-			replica->removed = true;
-			pthread_cond_signal(&replica->r_cond);
-			epoll_ctl(spec->receiver_epfd, EPOLL_CTL_DEL, replica->iofd, &event);
-			MTX_UNLOCK(&replica->r_mtx);
-//TODO	check if needed		cleanup_replica(replica);
-			break;
-		}
-	}
-	if (replica != NULL)
-		REPLICA_LOG("%d IOs aborted for replica %d", ios_aborted, replica->id);
-	else
-		MTX_UNLOCK(&spec->rq_mtx);
-	return 0;
 }
 
 /*
@@ -529,38 +179,6 @@ perform_read_write_on_fd(int fd, uint8_t *data, uint64_t len, int state)
 
 	return nbytes;
 }
-
-void unblock_blocked_cmds(replica_t *replica)
-{
-	rcmd_t *cmd, *pending_cmd;
-	bool cmd_blocked, blocked = true;
-	TAILQ_FOREACH(pending_cmd, &replica->blockedq, rblocked_cmd_next) {
-		blocked = false;
-		TAILQ_FOREACH(cmd, &replica->waitq, rwait_cmd_next) {
-			check_for_blockage(cmd, pending_cmd);
-			if(cmd_blocked == true) {
-/*
-				if(!cmd->ack_recvd) {
-					blocked = true;
-					break;
-				}
-*/
-				blocked = true;
-				break;
-			}
-		}
-		if(blocked) {
-			break;
-		} else {
-			/* we need to have similar check_for_blockage code for read_waitq */
-			TAILQ_REMOVE(&replica->blockedq, pending_cmd, rblocked_cmd_next);
-			TAILQ_INSERT_TAIL(&replica->sendq, pending_cmd, rsend_cmd_next);
-			pthread_cond_signal(&replica->r_cond);
-		}
-	}
-}
-
-uint8_t *get_read_resp_data(void *data, uint64_t *datalen);
 
 uint8_t *
 get_read_resp_data(void *data, uint64_t *datalen)
@@ -661,262 +279,6 @@ process_chunk_read_resp(struct io_data_chunk_list_t  *io_chunk_list, uint64_t le
 	return read_data;
 }
 
-int
-handle_read_resp(spec_t *spec, replica_t *replica)
-{
-	int luworker_id;
-	bool io_found = false;
-	rcmd_t *rep_cmd = NULL;
-	rcommon_cmd_t *rcommq_ptr = NULL;
-	zvol_io_hdr_t *io_rsp_hdr = replica->io_resp_hdr;
-	void *data = replica->io_resp_data;
-	uint64_t datalen = 0;
-	uint8_t *dataptr = NULL;
-
-	MTX_LOCK(&replica->r_mtx);
-	//Find IO in read queue, signal luworker, and dequeue
-	TAILQ_FOREACH(rep_cmd, &replica->read_waitq, rread_cmd_next) {
-		if(io_rsp_hdr->io_seq == rep_cmd->io_seq) {
-			io_found = true;
-			rep_cmd->ack_recvd = true;
-			TAILQ_REMOVE(&replica->read_waitq, rep_cmd, rread_cmd_next);
-			MTX_UNLOCK(&replica->r_mtx);
-
-//			if (io_rsp_hdr->status == ZVOL_OP_STATUS_OK)
-//				dataptr = get_read_resp_data(io_rsp_hdr, data, &datalen);
-
-			MTX_LOCK(&spec->rcommonq_mtx);
-			rcommq_ptr = rep_cmd->rcommq_ptr;
-
-			if (io_rsp_hdr->status == ZVOL_OP_STATUS_OK) {
-				rcommq_ptr->acks_recvd++;
-//				rcommq_ptr->resp_status[replica->id] = ZVOL_OP_STATUS_OK;
-			} else {
-				rcommq_ptr->ios_aborted++;
-//				rcommq_ptr->resp_status[replica->id] = ZVOL_OP_STATUS_FAILED;
-			}
-
-//			resp_entry = calloc(1, sizeof(resp_entry));
-//			resp_entry->data = dataptr;
-//			resp_entry->len = datalen;
-//			rcommq_ptr->resp_list[replica->id] = resp_entry;
-
-			luworker_id = rcommq_ptr->luworker_id;
-			put_to_mempool(&rcmd_mempool, rep_cmd);
-
-			signal_luworker();
-			return 0;
-		}
-	}
-	MTX_UNLOCK(&replica->r_mtx);
-	if(!io_found) {
-		REPLICA_ERRLOG("error .. no io\n");
-		/* a print or a stats */
-		return -1;
-	}
-	return 0;
-}
-
-//else case for matching with copies_sent will be handled outside handle_consistency_met
-#define handle_consistency_met() {\
-	rcommq_ptr->status = 1; \
-	TAILQ_REMOVE(&spec->rcommon_waitq, rcommq_ptr, wait_cmd_next); \
-	if ((rcommq_ptr->acks_recvd + rcommq_ptr->ios_aborted) != rcommq_ptr->copies_sent) { \
-		rcommq_ptr->state = CMD_ENQUEUED_TO_PENDINGQ; \
-		TAILQ_INSERT_TAIL(&spec->rcommon_pendingq, rcommq_ptr, pending_cmd_next); \
-	} \
-	signal_luworker(); \
-}
-
-#define handle_all_resp_recvd() { \
-	if(rcommq_ptr->state == CMD_ENQUEUED_TO_PENDINGQ) { \
-		TAILQ_REMOVE(&spec->rcommon_pendingq, rcommq_ptr, pending_cmd_next); \
-	} else if(rcommq_ptr->state == CMD_ENQUEUED_TO_WAITQ) { \
-		TAILQ_REMOVE(&spec->rcommon_waitq, rcommq_ptr, wait_cmd_next); \
-	} \
-	rcommq_ptr->state = CMD_EXECUTION_DONE; \
-	if(rcommq_ptr->completed) { \
-		MTX_UNLOCK(&rcommq_ptr->rcommand_mtx); \
-		clear_rcomm_cmd(rcommq_ptr); \
-		rcommq_ptr = NULL; \
-	} else { \
-		rcommq_ptr->completed = true; \
-		if (rcommq_ptr->acks_recvd < spec->consistency_factor) { \
-			rcommq_ptr->status = -1; \
-			signal_luworker(); \
-		} \
-		MTX_UNLOCK(&rcommq_ptr->rcommand_mtx); \
-	} \
-}
-
-#if 0
-int
-assign_id_to_replica(replica_t *replica)
-{
-	int replica_id = -1;
-	int rc = -1;
-	spec_t *spec = replica->spec;
-	int count;
-
-	MTX_LOCK(&spec->rq_mtx);
-
-	count = sizeof (spec->replica_index_list) * 8 - 1;
-	do {
-		if (!(spec->replica_index_list >> count & 1)) {
-			replica_id = count;
-			break;
-		}
-	} while (count--);
-
-	if (replica_id == -1) {
-		REPLICA_ERRLOG("Max replica limit reached\n");
-	} else {
-		spec->replica_index_list |= (1 << replica_id);
-		replica->id = replica_id;
-		rc = 0;
-	}
-
-	MTX_UNLOCK(&spec->rq_mtx);
-	return rc;
-}
-#endif
-
-int
-handle_write_resp(spec_t *spec, replica_t *replica)
-{
-	int luworker_id;
-	rcmd_t *rep_cmd = NULL;
-	rcommon_cmd_t *rcommq_ptr;
-	zvol_io_hdr_t *io_rsp = replica->io_resp_hdr;
-
-	MTX_LOCK(&replica->r_mtx);
-	TAILQ_FOREACH(rep_cmd, &replica->waitq, rwait_cmd_next) {
-		if(rep_cmd->io_seq == io_rsp->io_seq) {
-			break;
-		}
-	}
-
-	if(rep_cmd == NULL) {
-		REPLICA_ERRLOG("rep_cmd not found io_seq:%lu\n", io_rsp->io_seq);
-		MTX_UNLOCK(&replica->r_mtx);
-		return -1;
-	}
-
-	rep_cmd->ack_recvd = true;
-	rep_cmd->status = io_rsp->status;
-	rcommq_ptr = rep_cmd->rcommq_ptr;
-	TAILQ_REMOVE(&replica->waitq, rep_cmd, rwait_cmd_next);
-	MTX_UNLOCK(&replica->r_mtx);
-
-	//below lock/unlock sequence is to make sure atomically that
-	//copies_sent is incremented by adding command to all replicas.
-	//this is actually required only in the case of
-	//(rcommq_ptr->acks_recvd + rcommq_ptr->ios_aborted == rcommq_ptr->copies_sent)
-	MTX_LOCK(&spec->rq_mtx);
-	MTX_UNLOCK(&spec->rq_mtx);
-
-
-	if (rep_cmd->status == ZVOL_OP_STATUS_OK) {
-		rcommq_ptr->acks_recvd++;
-//		rcommq_ptr->resp_status[replica->id] = ZVOL_OP_STATUS_OK;
-	} else {
-		rcommq_ptr->ios_aborted++;
-//		rcommq_ptr->resp_status[replica->id] = ZVOL_OP_STATUS_FAILED;
-	}
-
-	luworker_id = rcommq_ptr->luworker_id;
-
-#if 0
-	if (rcommq_ptr->acks_recvd == spec->consistency_factor) {
-	//above condition can be met multiple times, so, below condition is required
-		if (rcommq_ptr->status == 0)
-			handle_consistency_met();
-	}
-	if (rcommq_ptr->acks_recvd + rcommq_ptr->ios_aborted
-	    == rcommq_ptr->copies_sent) {
-		handle_all_resp_recvd();
-	}
-	else
-		MTX_UNLOCK(&rcommq_ptr->rcommand_mtx);
-	MTX_UNLOCK(&spec->rcommonq_mtx);
-#endif
-	put_to_mempool(&rcmd_mempool, rep_cmd);
-	rep_cmd = NULL;
-	signal_luworker();
-
-	//TODO if io_rsp status is not OK, replica need to be cleared
-	return 0;
-}
-
-typedef struct io_event {
-	int fd;
-	int *state;
-	zvol_io_hdr_t *io_hdr;
-	void **io_data;
-	int *byte_count;
-} io_event_t;
-
-int read_io_resp(spec_t *spec, replica_t *replica, io_event_t *revent);
-
-//Receive IO responses in this thread
-void *
-replica_receiver(void *arg)
-{
-	spec_t *spec = (spec_t *)arg;
-	replica_t *replica;
-	int i, event_count, replica_count = 0, ret;
-	struct epoll_event event, *events;
-	io_event_t revent;
-
-	//Create a new epoll epfd
-	int epfd = spec->receiver_epfd;
-	events = calloc(MAXEVENTS, sizeof(event));
-	while(1) {
-		if(replica_count == 0) {
-			MTX_LOCK(&spec->rq_mtx);
-			if(spec->replica_count == 0) {
-				//Wait until at least one IO connection has been made to a registered replica
-				pthread_cond_wait(&spec->rq_cond, &spec->rq_mtx);
-			}
-			MTX_UNLOCK(&spec->rq_mtx);
-		}
-		//Wait for events on all iofds
-		event_count = epoll_wait(epfd, events, MAXEVENTS, -1);
-		for(i=0; i< event_count; i++) {
-			//Remove the replica from queue
-			if (!(events[i].events & EPOLLIN)) {
-				remove_replica_from_list(spec, events[i].data.fd);
-				REPLICA_LOG("epoll error\n");
-				continue;
-			} else {
-				MTX_LOCK(&spec->rq_mtx);
-				TAILQ_FOREACH(replica, &spec->rq, r_next) {
-					if(events[i].data.fd == replica->iofd) {
-						break;
-					}
-				}
-				MTX_UNLOCK(&spec->rq_mtx);
-
-				revent.fd = events[i].data.fd;
-				revent.state = &(replica->io_state);
-				revent.io_hdr = replica->io_resp_hdr;
-				revent.io_data = &(replica->io_resp_data);
-				revent.byte_count = &(replica->io_read);
-
-				ret = read_io_resp(spec, replica, &revent);
-
-				if (ret != 0) {
-					MTX_LOCK(&replica->r_mtx);
-					unblock_blocked_cmds(replica);
-					MTX_UNLOCK(&replica->r_mtx);
-				}
-			}
-		}
-	}
-	close(epfd);
-	return NULL;
-}
-
 /* creates replica entry and adds to spec's rwaitq list after creating mgmt connection */
 replica_t *
 create_replica_entry(spec_t *spec, int epfd, int mgmt_fd)
@@ -928,6 +290,7 @@ create_replica_entry(spec_t *spec, int epfd, int mgmt_fd)
 	if (!replica)
 		return NULL;
 
+	memset(replica, 0, sizeof(replica_t));
 	replica->epfd = epfd;
 	replica->mgmt_fd = mgmt_fd;
 	TAILQ_INIT(&(replica->mgmt_cmd_queue));
@@ -942,12 +305,12 @@ create_replica_entry(spec_t *spec, int epfd, int mgmt_fd)
 	replica->iofd = -1;
 	replica->spec = spec;
 
-	rc = pthread_mutex_init(&replica->r_mtx, NULL); //check
+	rc = pthread_mutex_init(&replica->r_mtx, NULL);
 	if (rc != 0) {
 		REPLICA_ERRLOG("pthread_mutex_init() failed errno:%d\n", errno);
 		return NULL;
 	}
-	rc = pthread_cond_init(&replica->r_cond, NULL); //check
+	rc = pthread_cond_init(&replica->r_cond, NULL);
 	if (rc != 0) {
 		REPLICA_ERRLOG("pthread_cond_init() failed errno:%d\n", errno);
 		return NULL;
@@ -955,7 +318,6 @@ create_replica_entry(spec_t *spec, int epfd, int mgmt_fd)
 	return replica;
 }
 
-void *replica_thread(void *);
 /*
  * updates replica entry with IP/port
  * removes from spec's rwaitq, adds to rq after data connection
@@ -977,9 +339,7 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	ack_hdr = replica->mgmt_io_resp_hdr;	
 	ack_data = (mgmt_ack_t *)replica->mgmt_io_resp_data;
 
-	TAILQ_INIT(&replica->sendq);
 	TAILQ_INIT(&replica->waitq);
-	TAILQ_INIT(&replica->read_waitq);
 	TAILQ_INIT(&replica->blockedq);
 	TAILQ_INIT(&replica->readyq);
 
@@ -996,15 +356,10 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	replica->pool_guid = ack_data->pool_guid;
 	replica->zvol_guid = ack_data->zvol_guid;
 
-	replica->least_recvd = 0;
-	replica->wrio_seq = 0;
-	replica->rrio_seq = 0;
 	replica->spec = spec;
 	replica->io_resp_hdr = (zvol_io_hdr_t *)malloc(sizeof(zvol_io_hdr_t));
-	replica->io_resp_data = NULL;
 	replica->io_state = READ_IO_RESP_HDR;
 	replica->io_read = 0;
-	replica->removed = false;
 
 	rio = (zvol_io_hdr_t *)malloc(sizeof(zvol_io_hdr_t));
 	rio->opcode = ZVOL_OPCODE_HANDSHAKE;
@@ -1021,7 +376,9 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	if(init_mempool(&replica->cmdq, rcmd_mempool_count, sizeof (rcmd_t), 0,
 	    "replica_cmd_mempool", NULL, NULL, NULL, false)) {
 		REPLICA_ERRLOG("Failed to initialize replica cmdq\n");
-		exit(EXIT_FAILURE);
+		replica->iofd = -1;
+		close(iofd);
+		return -1;
 	}
 
 	rc = make_socket_non_blocking(iofd);
@@ -1047,6 +404,7 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	if (replica->mgmt_eventfd2 == -1) {
 		ISTGT_ERRLOG("unable to set mgmteventfd2 for more than 10 seconds for replica %s %d..\n", replica->ip, replica->port);
 		MTX_LOCK(&replica->r_mtx);
+		replica->dont_free = 1;
 		replica->iofd = -1;
 		MTX_UNLOCK(&replica->r_mtx);
 		close(iofd);
@@ -1059,87 +417,11 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	spec->degraded_rcount++;
 	TAILQ_REMOVE(&spec->rwaitq, replica, r_waitnext);
 	TAILQ_INSERT_TAIL(&spec->rq, replica, r_next);
-	if(spec->replica_count == 1)
-		pthread_cond_signal(&spec->rq_cond);
 	update_volstate(spec);
 
 	MTX_UNLOCK(&spec->rq_mtx);
 
-
-#if 0
-	event.data.fd = replica->iofd;
-	event.events = EPOLLIN | EPOLLET;
-	rc = epoll_ctl(spec->receiver_epfd, EPOLL_CTL_ADD, iofd, &event);
-	if (rc == -1) {
-		/*
-		 * TODO: need to cleanup replica and also update volstate here
-		 */
-		return NULL;
-	}
-
-	replica->sender_epfd = epoll_create1(0);
-	event.data.fd = replica->iofd;
-	event.events = EPOLLOUT;
-	rc = epoll_ctl(replica->sender_epfd, EPOLL_CTL_ADD, replica->iofd, &event);
-	if (rc == -1) {
-		REPLICA_LOG("epoll_ctl_add failed errno:%d\n", errno);
-		/*
-		 * TODO: need to cleanup replica and also update volstate here
-		 */
-		return NULL;
-	}
-
-	rc = pthread_create(&replica_sender_thread, NULL, &replica_sender,
-			(void *)replica);
-	if (rc != 0) {
-		ISTGT_ERRLOG("pthread_create(replicator_thread) failed\n");
-		/*
-		 * TODO: need to cleanup replica and also update volstate here
-		 */
-		return NULL;
-	}
-#endif
 	return 0;
-}
-
-static void
-cleanup_replica(replica_t *replica)
-{
-	MTX_LOCK(&replica->r_mtx);
-	if(replica->mgmt_fd != -1)  {
-		close(replica->mgmt_fd);
-		replica->mgmt_fd = -1;
-	}
-
-	if(replica->iofd != -1)  {
-		close(replica->iofd);
-		replica->iofd = -1;
-	}
-
-	if(replica->sender_epfd != -1) {
-		close(replica->sender_epfd);
-		replica->sender_epfd = -1;
-	}
-
-	if(replica->io_resp_hdr) {
-		free(replica->io_resp_hdr);
-	}
-
-	if(replica->ip) {
-		free(replica->ip);
-	}
-
-	free(replica->mgmt_io_resp_hdr);
-	if (replica->mgmt_io_resp_data) {
-		free(replica->mgmt_io_resp_data);
-		replica->mgmt_io_resp_data = NULL;
-	}
-
-	MTX_UNLOCK(&replica->r_mtx);
-
-	pthread_mutex_destroy(&replica->r_mtx);
-	pthread_cond_destroy(&replica->r_cond);
-	free(replica);
 }
 
 static int
@@ -1155,7 +437,7 @@ send_replica_handshake_query(replica_t *replica, spec_t *spec)
 
 	data_len = strlen(spec->lu->volname) + 1;
 
-	build_replica_mgmt_hdr();
+	BUILD_REPLICA_MGMT_HDR(rmgmtio, mgmt_opcode, data_len);
 
 	data = (uint8_t *)malloc(data_len);
 	snprintf((char *)data, data_len, "%s", spec->lu->volname);
@@ -1183,7 +465,7 @@ send_replica_status_query(replica_t *replica, spec_t *spec)
 
 	mgmt_cmd = malloc(sizeof(mgmt_cmd_t));
 	data_len = strlen(spec->lu->volname) + 1;
-	build_replica_mgmt_hdr();
+	BUILD_REPLICA_MGMT_HDR(rmgmtio, mgmt_opcode, data_len);
 
 	data = (uint8_t *)malloc(data_len);
 	snprintf((char *)data, data_len, "%s", spec->lu->volname);
@@ -1219,11 +501,10 @@ ask_replica_status_all(spec_t *spec)
 		ret = send_replica_status_query(replica, spec);
 		if (ret == -1) {
 			REPLICA_ERRLOG("send mgmtIO for status failed on "
-			    "replica(%d, %s:%d) .. stopped sendign status "
-			    "in this iteration\n", replica->id,
-			    replica->ip, replica->port);
+			    "replica(%s:%d) .. stopped sendign status "
+			    "in this iteration\n", replica->ip, replica->port);
 			MTX_UNLOCK(&spec->rq_mtx);
-			handle_mgmt_conn_error(replica);
+			handle_mgmt_conn_error(replica, 0, NULL, 0);
 			return;
 		}
 	}
@@ -1292,27 +573,19 @@ zvol_handshake(spec_t *spec, replica_t *replica)
 	return rc;
 }
 
-typedef struct mgmt_event {
-	int fd;
-	replica_t *r_ptr;
-} mgmt_event_t;
-
 /*
  * accepts (mgmt) connections on which handshake and other management IOs are sent
  * sends handshake IO to start handshake on accepted (mgmt) connection
  */
 void
-accept_mgmt_conns(int epfd, int sfd) {
+accept_mgmt_conns(int epfd, int sfd)
+{
 	struct epoll_event event;
 	int rc, rcount=0;
 	spec_t *spec;
-	int mgmtfd[MAXREPLICA];
 	char *buf = malloc(BUFSIZE);
 	int mgmt_fd;
 	mgmt_event_t *mevent1, *mevent2;
-
-	mevent1 = (mgmt_event_t *)malloc(sizeof(mgmt_event_t));
-	mevent2 = (mgmt_event_t *)malloc(sizeof(mgmt_event_t));
 
 	while (1) {
 		struct sockaddr saddr;
@@ -1333,7 +606,6 @@ accept_mgmt_conns(int epfd, int sfd) {
 				sbuf, sizeof(sbuf),
 				NI_NUMERICHOST | NI_NUMERICSERV);
 		if (rc == 0) {
-			mgmtfd[rcount] = mgmt_fd;
 			rcount++;
 			REPLICA_LOG("Accepted connection on descriptor %d "
 					"(host=%s, port=%s)\n", mgmt_fd, hbuf, sbuf);
@@ -1370,8 +642,11 @@ accept_mgmt_conns(int epfd, int sfd) {
 		replica->mgmt_eventfd1 = eventfd(0, EFD_NONBLOCK);
 		if (replica->mgmt_eventfd1 < 0) {
 			perror("r_mgmt_eventfd1");
-			return NULL;
+			goto cleanup;
 		}
+
+		mevent1 = (mgmt_event_t *)malloc(sizeof(mgmt_event_t));
+		mevent2 = (mgmt_event_t *)malloc(sizeof(mgmt_event_t));
 
 		mevent1->fd = replica->mgmt_eventfd1;
 		mevent1->r_ptr = replica;
@@ -1380,43 +655,39 @@ accept_mgmt_conns(int epfd, int sfd) {
 		rc = epoll_ctl(epfd, EPOLL_CTL_ADD, replica->mgmt_eventfd1, &event);
 		if(rc == -1) {
 			REPLICA_ERRLOG("epoll_ctl() failed on fd %d, errno:%d.. closing it..", mgmt_fd, errno);
-			cleanup_replica(replica);
-			close(mgmt_fd);
-			continue;
+			goto cleanup;
 		}
 
 		mevent2->fd = mgmt_fd;
 		mevent2->r_ptr = replica;
 		event.data.ptr = mevent2;
 		event.events = EPOLLIN | EPOLLHUP | EPOLLERR | EPOLLET | EPOLLOUT | EPOLLRDHUP;
+
 		rc = epoll_ctl(epfd, EPOLL_CTL_ADD, mgmt_fd, &event);
 		if(rc == -1) {
 			REPLICA_ERRLOG("epoll_ctl() failed on fd %d, errno:%d.. closing it..", mgmt_fd, errno);
-			cleanup_replica(replica);
+cleanup:
+			if (replica->mgmt_eventfd1 != -1) {
+				epoll_ctl(epfd, EPOLL_CTL_DEL, replica->mgmt_eventfd1, NULL);
+				close(replica->mgmt_eventfd1);
+				free(mevent2);
+				free(mevent1);
+			}
+			if (replica) {
+				pthread_mutex_destroy(&replica->r_mtx);
+				pthread_cond_destroy(&replica->r_cond);
+				MTX_LOCK(&spec->rq_mtx);
+				TAILQ_REMOVE(&spec->rwaitq, replica, r_waitnext);
+				MTX_UNLOCK(&spec->rq_mtx);
+			}
 			close(mgmt_fd);
 			continue;
 		}
-
+		replica->m_event1 = mevent1;
+		replica->m_event2 = mevent2;
 		send_replica_handshake_query(replica, spec);
-
 	}
 	free(buf);
-}
-
-/*
- * breaks if fd is closed or drained recv buf of fd
- * updates amount of data read to continue next time
- */
-#define CHECK_AND_ADD_BREAK_IF_PARTIAL(io_read, count, reqlen, donecount) \
-{ \
-	if (count == -1) { \
-		donecount = -1; \
-		break; \
-	} \
-	if (count != reqlen) { \
-		(io_read) += count; \
-		break; \
-	} \
 }
 
 /*
@@ -1434,7 +705,8 @@ write_io_data(replica_t *replica, io_event_t *wevent)
 	zvol_io_hdr_t *write_hdr = wevent->io_hdr;
 	void **data = wevent->io_data;
 	int *write_count = wevent->byte_count;
-	uint64_t reqlen, count;
+	uint64_t reqlen;
+	int count;
 	int donecount = 0;
 	(void)replica;
 
@@ -1462,7 +734,7 @@ write_io_data(replica_t *replica, io_event_t *wevent)
 			*state = READ_IO_RESP_HDR;
 			break;
 	}
-
+	REPLICA_ERRLOG("got doneocount : %d : r:%p\n", donecount, replica);
 	return donecount;
 }
 
@@ -1481,8 +753,8 @@ read_io_resp(spec_t *spec, replica_t *replica, io_event_t *revent)
 	zvol_io_hdr_t *resp_hdr = revent->io_hdr;
 	void **resp_data = revent->io_data;
 	int *read_count = revent->byte_count;
-	uint64_t reqlen, count;
-	int errorno = 0, fd_closed = 0;
+	uint64_t reqlen;
+	int count, rc = 0;
 	int donecount = 0;
 
 	switch(*state) {
@@ -1512,17 +784,6 @@ read_io_resp_hdr:
 			*read_count = 0;
 
 			switch (resp_hdr->opcode) {
-				case ZVOL_OPCODE_READ:
-					handle_read_resp(spec, replica);
-					replica->io_resp_data = NULL;
-					break;
-
-				case ZVOL_OPCODE_WRITE:
-					if ((*resp_data) != NULL)
-						REPLICA_ERRLOG("resp_data should be NULL for write IOs\n");
-					handle_write_resp(spec, replica);
-					break;
-
 				case ZVOL_OPCODE_HANDSHAKE:
 					if(resp_hdr->len != sizeof (mgmt_ack_t))
 						REPLICA_ERRLOG("mgmt_ack_len %lu not matching with size of mgmt_ack_data..\n",
@@ -1531,7 +792,10 @@ read_io_resp_hdr:
 					/* dont process handshake on data connection */
 					if (fd != replica->iofd)
 						rc = zvol_handshake(spec, replica);
+
+					memset(resp_hdr, 0, sizeof(zvol_io_hdr_t));
 					free(*resp_data);
+
 					if (rc == -1)
 						donecount = -1;
 					break;
@@ -1552,10 +816,12 @@ read_io_resp_hdr:
 					break;
 			}
 			*resp_data = NULL;
+			*read_count = 0;
 			donecount++;
 			*state = READ_IO_RESP_HDR;
 			goto read_io_resp_hdr;
 	}
+
 	return donecount;
 }
 
@@ -1566,21 +832,22 @@ int
 handle_write_data_event(replica_t *replica)
 {
 	io_event_t wevent;
-	int rc = -1;
-	mgmt_cmd_t *mgmt_cmd;
+	int rc = 0;
+	mgmt_cmd_t *mgmt_cmd = NULL;
 
 	MTX_LOCK(&replica->r_mtx);
 	mgmt_cmd = TAILQ_FIRST(&replica->mgmt_cmd_queue);
 	if (!mgmt_cmd) {
+		rc = 0;
 		MTX_UNLOCK(&replica->r_mtx);
-		return;
+		return rc;
 	}
 
-	if ((mgmt_cmd->mgmt_cmd_state != WRITE_IO_SEND_HDR &&
-		mgmt_cmd->mgmt_cmd_state != WRITE_IO_SEND_DATA)) {
+	if (mgmt_cmd->mgmt_cmd_state != WRITE_IO_SEND_HDR &&
+		mgmt_cmd->mgmt_cmd_state != WRITE_IO_SEND_DATA) {
 		MTX_UNLOCK(&replica->r_mtx);
 		REPLICA_ERRLOG("write IO is in wait state on mgmt connection..");
-		return rc; //TODO if returned 0
+		return rc;
 	}
 
 	MTX_UNLOCK(&replica->r_mtx);
@@ -1595,39 +862,15 @@ handle_write_data_event(replica_t *replica)
 	return rc;
 }
 
-void
-handle_mgmt_cmd(replica_t *r, mgmt_cmd_t *mgmt_cmd)
-{
-	r->mgmt_io_resp_hdr->status = ZVOL_OP_STATUS_FAILED;
-	switch (mgmt_cmd->io_hdr->opcode)
-	{
-		case ZVOL_OPCODE_HANDSHAKE:
-			break;
-		case ZVOL_OPCODE_REPLICA_STATUS:
-			break;
-	}
-	free(mgmt_cmd->io_hdr);
-	free(mgmt_cmd->data);
-	free(mgmt_cmd);
-}
-
-void
+static void
 respond_with_error_for_all_outstanding_mgmt_ios(replica_t *r)
 {
-	mgmt_cmd_t *mgmt_cmd, *next_cmd;
-
 	MTX_LOCK(&r->r_mtx);
-	mgmt_cmd = TAILQ_FIRST(&r->mgmt_cmd_queue);
-	while (mgmt_cmd != NULL) {
-		next_cmd = TAILQ_NEXT(mgmt_cmd, mgmt_cmd_next);
-		TAILQ_REMOVE(&r->mgmt_cmd_queue, mgmt_cmd, mgmt_cmd_next);
-		handle_mgmt_cmd(r, mgmt_cmd);
-		mgmt_cmd = next_cmd;
-	}
+	EMPTY_MGMT_Q_OF_REPLICA(r);
 	MTX_UNLOCK(&r->r_mtx);
 }
 
-void
+static void
 inform_data_conn(replica_t *r)
 {
 	uint64_t num = 1;
@@ -1635,18 +878,21 @@ inform_data_conn(replica_t *r)
 	write(r->mgmt_eventfd2, &num, sizeof (num));
 }
 
-void
+static void
 free_replica(replica_t *r)
 {
 	/* TOOD: when to remove from rwaitq of spec */
 	pthread_mutex_destroy(&r->r_mtx);
 	pthread_cond_destroy(&r->r_cond);
 
-	free(r->io_resp_hdr);
+	free(r->mgmt_io_resp_hdr);
+	free(r->m_event1);
+	free(r->m_event2);
 	free(r);
 }
 
-void close_fd(int epollfd, int fd)
+void
+close_fd(int epollfd, int fd)
 {
 	if (epoll_ctl(epollfd, EPOLL_CTL_DEL, fd, NULL) == -1) {
 		perror("epoll_ctl");
@@ -1655,24 +901,16 @@ void close_fd(int epollfd, int fd)
 	close(fd);
 }
 
-void close_mgmt_eventfd2(replica_t *r)
-{
-	int mgmt_fd = r->mgmt_fd;
-	if (epoll_ctl(r->epollfd, EPOLL_CTL_DEL, r->mgmt_fd, NULL) == -1) {
-		perror("epoll_ctl");
-		return;
-	}
-	r->mgmt_fd = -1;
-	close(mgmt_fd);
-}
-
-
-void
-handle_mgmt_conn_error(replica_t *r)
+static void
+handle_mgmt_conn_error(replica_t *r, int sfd, struct epoll_event *events, int ev_count)
 {
 	int epollfd = r->epfd;
 	int mgmtfd, mgmt_eventfd1;
+	int i;
+	mgmt_event_t *mevent;
+	replica_t *r_ev;
 
+	MTX_LOCK(&r->spec->rq_mtx);
 	MTX_LOCK(&r->r_mtx);
 
 	r->conn_closed++;
@@ -1680,8 +918,12 @@ handle_mgmt_conn_error(replica_t *r)
 		//ASSERT(r->conn_closed == 1);
 		/* case where error happened while sending HANDSHAKE or sending is successful but error from zvol_handshake */
 		if ((r->iofd == -1) || (r->mgmt_eventfd2 == -1)) {
-			TAILQ_REMOVE(&r->spec->rwaitq, r, r_waitnext); //TODO rwait_next);
-			r->conn_closed++;
+			TAILQ_FOREACH(r_ev, &(r->spec->rwaitq), r_waitnext) {
+				if (r_ev == r) {
+					TAILQ_REMOVE(&r->spec->rwaitq, r, r_waitnext);
+					r->conn_closed++;
+				}
+			}
 		} else {
 			inform_data_conn(r);
 		}
@@ -1692,6 +934,7 @@ handle_mgmt_conn_error(replica_t *r)
 	mgmtfd = r->mgmt_fd;
 	r->mgmt_fd = -1;
 	MTX_UNLOCK(&r->r_mtx);
+	MTX_UNLOCK(&r->spec->rq_mtx);
 
 	close_fd(epollfd, mgmtfd);
 
@@ -1708,23 +951,43 @@ handle_mgmt_conn_error(replica_t *r)
 
 	mgmt_eventfd1 = r->mgmt_eventfd1;
 	r->mgmt_eventfd1 = -1;
-	close(mgmt_eventfd1);
+	close_fd(epollfd, mgmt_eventfd1);
 
-	if (r->mgmt_eventfd2 != -1)
+	for (i = 0; i < ev_count; i++) {
+		if (events[i].data.fd == sfd) {
+			continue;
+		} else {
+			if (events[i].data.ptr == NULL)
+				continue;
+
+			mevent = events[i].data.ptr;
+			r_ev = mevent->r_ptr;
+
+			if (r_ev != r)
+				continue;
+
+			if (mevent->fd == mgmt_eventfd1 ||
+				mevent->fd == mgmtfd) {
+				events[i].data.ptr = NULL;
+			} else
+				REPLICA_ERRLOG("unexpected fd(%d) for replica:%p\n", mevent->fd, r);
+		}
+	}
+
+	if (r->dont_free != 1)
 		free_replica(r);
 }
 
-int
+static int
 handle_mgmt_event_fd(replica_t *replica)
 {
-	int rc = 0;
+	int rc = -1;
 
 	do_drainfd(replica->mgmt_eventfd1);
 
 	MTX_LOCK(&replica->r_mtx);
 	if (replica->disconnect_conn == 1) {
 		MTX_UNLOCK(&replica->r_mtx);
-		handle_mgmt_conn_error(replica);
 		return rc;
 	}
 	MTX_UNLOCK(&replica->r_mtx);
@@ -1781,30 +1044,18 @@ handle_read_data_event(replica_t *replica)
 	return (rc);
 }
 
-/* MACRO from istgt_lu_disk.c */
-#define timesdiff(_st, _now, _re)                    \
-{                                                    \
-        clock_gettime(CLOCK_MONOTONIC, &_now);                   \
-        if ((_now.tv_nsec - _st.tv_nsec)<0) {            \
-                _re.tv_sec  = _now.tv_sec - _st.tv_sec - 1;  \
-                _re.tv_nsec = 1000000000 + _now.tv_nsec - _st.tv_nsec; \
-        } else {                                         \
-                _re.tv_sec  = _now.tv_sec - _st.tv_sec;      \
-                _re.tv_nsec = _now.tv_nsec - _st.tv_nsec;    \
-        }                                                \
-}
-
 /*
  * initializes replication
  * - by starting listener to accept mgmt connections
  * - reads data on accepted mgmt connection
  */
 void *
-init_replication(void *arg __attribute__((__unused__))) {
+init_replication(void *arg __attribute__((__unused__)))
+{
 	struct epoll_event event, *events;
 	int rc, sfd, event_count, i;
 	int64_t epfd;
-	replica_t *replica, *r;
+	replica_t *r;
 	int timeout;
 	struct timespec last, now, diff;
 	mgmt_event_t *mevent;
@@ -1815,6 +1066,7 @@ init_replication(void *arg __attribute__((__unused__))) {
 		REPLICA_LOG("conn_listen() failed, errorno:%d sfd:%d", errno, sfd);
 		exit(EXIT_FAILURE);
 	}
+
 	epfd = epoll_create1(0);
 	event.data.fd = sfd;
 	event.events = EPOLLIN | EPOLLET | EPOLLERR | EPOLLHUP;
@@ -1823,6 +1075,7 @@ init_replication(void *arg __attribute__((__unused__))) {
 		REPLICA_ERRLOG("epoll_ctl() failed, errrno:%d", errno);
 		exit(EXIT_FAILURE);
 	}
+
 	events = calloc(MAXEVENTS, sizeof(event));
 	timeout = 60 * 1000;	// 60 seconds
 	clock_gettime(CLOCK_MONOTONIC, &last);
@@ -1841,22 +1094,25 @@ init_replication(void *arg __attribute__((__unused__))) {
 			if (events[i].events & EPOLLHUP || events[i].events & EPOLLERR ||
 				events[i].events & EPOLLRDHUP) {
 				if (events[i].data.fd == sfd) {
-					//TODO: should we do exit here?
 					REPLICA_ERRLOG("epoll event %d on fd %d... better to restart listener\n",
 					    events[i].events, events[i].data.fd);
+					exit(EXIT_FAILURE);	//Here, we can exit o/w need to perform cleanup for all replica
 				} else {
-					REPLICA_ERRLOG("epoll event %d on replica\n",
-					    events[i].events);
-					replica = (replica_t *)events[i].data.ptr;
-					//TODO: refcount to handle remove path from replica_receiver
-					close(replica->mgmt_fd);
-					remove_replica_from_list(replica->spec, replica->iofd);
+					if (events[i].data.ptr == NULL)
+						continue;
+					mevent = events[i].data.ptr;
+					r = mevent->r_ptr;
+					REPLICA_ERRLOG("epoll event %d on replica %p\n", events[i].events, r);
+					handle_mgmt_conn_error(r, sfd, events, event_count);
 				}
 			} else {
 				if (events[i].data.fd == sfd) {
 					//Accept management connections from replicas and add the replicas to replica queue
 					accept_mgmt_conns(epfd, sfd);
 				} else {
+					if (events[i].data.ptr == NULL)
+						continue;
+
 					mevent = events[i].data.ptr;
 					r = mevent->r_ptr;
 
@@ -1868,14 +1124,14 @@ init_replication(void *arg __attribute__((__unused__))) {
 							rc = handle_mgmt_event_fd(r);
 					}
 					if (rc == -1)
-						handle_mgmt_conn_error(r);
+						handle_mgmt_conn_error(r, sfd, events, event_count);
 
 					rc = 0;
 					if (events[i].events & EPOLLOUT)
 						//ASSERT(mevent->fd == r->mgmt_fd);
 						rc = handle_write_data_event(r);
 					if (rc == -1)
-						handle_mgmt_conn_error(r);
+						handle_mgmt_conn_error(r, sfd, events, event_count);
 				}
 			}
 		}
@@ -1898,6 +1154,186 @@ init_replication(void *arg __attribute__((__unused__))) {
 	close (epfd);
 	return EXIT_SUCCESS;
 }
+
+int
+initialize_replication()
+{
+	//Global initializers for replication library
+	int rc;
+	TAILQ_INIT(&spec_q);
+	rc = pthread_mutex_init(&specq_mtx, NULL);
+	if (rc != 0) {
+		perror("specq_init failed");
+		return -1;
+	}
+	return 0;
+}
+
+int
+initialize_volume(spec_t *spec)
+{
+	int rc;
+	pthread_t deadlist_cleanup_thread;
+
+	spec->io_seq = 0;
+	TAILQ_INIT(&spec->rcommon_waitq);
+	TAILQ_INIT(&spec->rq);
+	TAILQ_INIT(&spec->rwaitq);
+
+        if(init_mempool(&spec->rcommon_deadlist, rcmd_mempool_count, sizeof (rcmd_t), 0,
+            "rcmd_mempool", NULL, NULL, NULL, false)) {
+		return -1;
+	}
+
+	spec->replica_count = 0;
+	spec->replication_factor = spec->lu->replication_factor;
+	spec->consistency_factor = spec->lu->consistency_factor;
+	spec->healthy_rcount = 0;
+	spec->degraded_rcount = 0;
+	spec->ready = false;
+
+	rc = pthread_mutex_init(&spec->rcommonq_mtx, NULL);
+	if (rc != 0) {
+		perror("rq_mtx_init failed");
+		return -1;
+	}
+
+	rc = pthread_mutex_init(&spec->rq_mtx, NULL);
+	if (rc != 0) {
+		perror("rq_mtx_init failed");
+		return -1;
+	}
+
+	rc = pthread_create(&deadlist_cleanup_thread, NULL, &cleanup_deadlist,
+			(void *)spec);
+	if (rc != 0) {
+		ISTGT_ERRLOG("pthread_create(replicator_thread) failed\n");
+		return -1;
+	}
+
+	MTX_LOCK(&specq_mtx);
+	TAILQ_INSERT_TAIL(&spec_q, spec, spec_next);
+	MTX_UNLOCK(&specq_mtx);
+	return 0;
+}
+
+int
+initialize_replication_mempool(bool should_fail)
+{
+	int rc = 0;
+
+	rc = init_mempool(&rcmd_mempool, rcmd_mempool_count, sizeof (rcmd_t), 0,
+	    "rcmd_mempool", NULL, NULL, NULL, true);
+	if (rc == -1) {
+		ISTGT_ERRLOG("Failed to create mempool for command\n");
+		goto error;
+	} else if (rc) {
+		ISTGT_NOTICELOG("rcmd mempool initialized with %u entries\n",
+		    rcmd_mempool.length);
+		if (should_fail) {
+			goto error;
+		}
+		rc = 0;
+	}
+
+	rc = init_mempool(&rcommon_cmd_mempool, rcommon_cmd_mempool_count,
+	    sizeof (rcommon_cmd_t), 0, "rcommon_mempool", NULL, NULL, NULL, true);
+	if (rc == -1) {
+		ISTGT_ERRLOG("Failed to create mempool for command\n");
+		goto error;
+	} else if (rc) {
+		ISTGT_NOTICELOG("rcmd mempool initialized with %u entries\n",
+		    rcommon_cmd_mempool.length);
+		if (should_fail) {
+			goto error;
+		}
+		rc = 0;
+	}
+
+	goto exit;
+
+error:
+	if (rcmd_mempool.ring)
+		destroy_mempool(&rcmd_mempool);
+	if (rcommon_cmd_mempool.ring)
+		destroy_mempool(&rcommon_cmd_mempool);
+
+exit:
+	return rc;
+}
+
+int
+destroy_relication_mempool(void)
+{
+	int rc = 0;
+
+	rc = destroy_mempool(&rcmd_mempool);
+	if (rc) {
+		ISTGT_ERRLOG("Failed to destroy mempool for rcmd.. err(%d)\n",
+		    rc);
+		goto exit;
+	}
+
+	rc = destroy_mempool(&rcommon_cmd_mempool);
+	if (rc) {
+		ISTGT_ERRLOG("Failed to destroy mempool for rcommon_cmd.."
+		    " err(%d)\n", rc);
+		goto exit;
+	}
+
+exit:
+	return rc;
+}
+
+static void
+destroy_resp_list(rcommon_cmd_t *rcomm_cmd)
+{
+	int i;
+
+	for (i = 0; i < rcomm_cmd->copies_sent; i++) {
+		if (rcomm_cmd->resp_list[i].data_ptr) {
+			free(rcomm_cmd->resp_list[i].data_ptr);
+		}
+	}
+}
+
+void *
+cleanup_deadlist(void *arg)
+{
+	spec_t *spec = (spec_t *)arg;
+	rcommon_cmd_t *rcomm_cmd;
+	int i, count = 0, entry_count = 0;
+
+	while (1) {
+		entry_count = get_num_entries_from_mempool(&spec->rcommon_deadlist);
+		while (entry_count) {
+			count = 0;
+			rcomm_cmd = get_from_mempool(&spec->rcommon_deadlist);
+
+			for (i = 0; i < rcomm_cmd->copies_sent; i++) {
+				if (rcomm_cmd->resp_list[i].status)
+					count++;
+			}
+
+			if (count == rcomm_cmd->copies_sent) {
+				destroy_resp_list(rcomm_cmd);
+				free(rcomm_cmd->iov[0].iov_base);
+
+				for (i=1; i<rcomm_cmd->iovcnt + 1; i++)
+					xfree(rcomm_cmd->iov[i].iov_base);
+
+				memset(rcomm_cmd, 0, sizeof(rcommon_cmd_t));
+				put_to_mempool(&rcommon_cmd_mempool, rcomm_cmd);
+			} else {
+				put_to_mempool(&spec->rcommon_deadlist, rcomm_cmd);
+			}
+			entry_count--;
+		}
+		sleep(1);	//add predefined time here
+	}
+	return (NULL);
+}
+
 /*
 int
 remove_volume(spec_t *spec) {
@@ -1969,204 +1405,3 @@ remove_volume(spec_t *spec) {
 	MTX_UNLOCK(&specq_mtx);
 }
 */
-
-int
-initialize_replication() {
-	//Global initializers for replication library
-	int rc;
-	TAILQ_INIT(&spec_q);
-	rc = pthread_mutex_init(&specq_mtx, NULL);
-	if (rc != 0) {
-		perror("specq_init failed");
-		return -1;
-	}
-	return 0;
-}
-
-int
-initialize_volume(spec_t *spec) {
-	int rc;
-	pthread_t deadlist_cleanup_thread, replicator_thread, replica_receiver_thread;
-
-	spec->io_seq = 0;
-	TAILQ_INIT(&spec->rcommon_sendq);
-	TAILQ_INIT(&spec->rcommon_wait_readq);
-	TAILQ_INIT(&spec->rcommon_waitq);
-	TAILQ_INIT(&spec->rcommon_pendingq);
-	TAILQ_INIT(&spec->rq);
-	TAILQ_INIT(&spec->rwaitq);
-
-        if(init_mempool(&spec->rcommon_deadlist, rcmd_mempool_count, sizeof (rcmd_t), 0,
-            "rcmd_mempool", NULL, NULL, NULL, false)) {
-		return -1;
-	}
-
-	spec->replica_count = 0;
-	spec->replication_factor = spec->lu->replication_factor;
-	spec->consistency_factor = spec->lu->consistency_factor;
-	spec->healthy_rcount = 0;
-	spec->degraded_rcount = 0;
-	spec->ready = false;
-	spec->receiver_epfd = epoll_create1(0);
-	if(spec->receiver_epfd < 0)
-		return -1;
-	rc = pthread_mutex_init(&spec->rcommonq_mtx, NULL); //check
-	if (rc != 0) {
-		perror("rq_mtx_init failed");
-		return -1;
-	}
-	rc = pthread_cond_init(&spec->rcommonq_cond, NULL); //check
-	if (rc != 0) {
-		perror("rq_mtx_init failed");
-		return -1;
-	}
-	rc = pthread_mutex_init(&spec->rq_mtx, NULL); //check
-	if (rc != 0) {
-		perror("rq_mtx_init failed");
-		return -1;
-	}
-	pthread_cond_init(&spec->rq_cond, NULL); //check
-	if (rc != 0) {
-		perror("rq_cond_init failed");
-		return -1;
-	}
-
-	rc = pthread_create(&deadlist_cleanup_thread, NULL, &cleanup_deadlist,
-			(void *)spec);
-	if (rc != 0) {
-		ISTGT_ERRLOG("pthread_create(replicator_thread) failed\n");
-		return -1;
-	}
-#if 0
-	rc = pthread_create(&replica_receiver_thread, NULL, &replica_receiver,
-			(void *)spec);
-	if (rc != 0) {
-		ISTGT_ERRLOG("pthread_create(replicator_thread) failed\n");
-		return -1;
-	}
-#endif
-	MTX_LOCK(&specq_mtx);
-	TAILQ_INSERT_TAIL(&spec_q, spec, spec_next);
-	MTX_UNLOCK(&specq_mtx);
-	return 0;
-}
-//When all the replicas are up, make replicas as RW and change state of istgt to REAL;
-
-
-int
-initialize_replication_mempool(bool should_fail) {
-	int rc = 0;
-
-	rc = init_mempool(&rcmd_mempool, rcmd_mempool_count, sizeof (rcmd_t), 0,
-	    "rcmd_mempool", NULL, NULL, NULL, true);
-	if (rc == -1) {
-		ISTGT_ERRLOG("Failed to create mempool for command\n");
-		goto error;
-	} else if (rc) {
-		ISTGT_NOTICELOG("rcmd mempool initialized with %u entries\n",
-		    rcmd_mempool.length);
-		if (should_fail) {
-			goto error;
-		}
-		rc = 0;
-	}
-
-	rc = init_mempool(&rcommon_cmd_mempool, rcommon_cmd_mempool_count,
-	    sizeof (rcommon_cmd_t), 0, "rcommon_mempool", NULL, NULL, NULL, true);
-	if (rc == -1) {
-		ISTGT_ERRLOG("Failed to create mempool for command\n");
-		goto error;
-	} else if (rc) {
-		ISTGT_NOTICELOG("rcmd mempool initialized with %u entries\n",
-		    rcommon_cmd_mempool.length);
-		if (should_fail) {
-			goto error;
-		}
-		rc = 0;
-	}
-
-	goto exit;
-
-error:
-	if (rcmd_mempool.ring)
-		destroy_mempool(&rcmd_mempool);
-	if (rcommon_cmd_mempool.ring)
-		destroy_mempool(&rcommon_cmd_mempool);
-
-exit:
-	return rc;
-}
-
-int
-destroy_relication_mempool(void) {
-	int rc = 0;
-
-	rc = destroy_mempool(&rcmd_mempool);
-	if (rc) {
-		ISTGT_ERRLOG("Failed to destroy mempool for rcmd.. err(%d)\n",
-		    rc);
-		goto exit;
-	}
-
-	rc = destroy_mempool(&rcommon_cmd_mempool);
-	if (rc) {
-		ISTGT_ERRLOG("Failed to destroy mempool for rcommon_cmd.."
-		    " err(%d)\n", rc);
-		goto exit;
-	}
-
-exit:
-	return rc;
-}
-
-static void
-destroy_resp_list(rcommon_cmd_t *rcomm_cmd)
-{
-	int i;
-
-	for (i = 0; i < rcomm_cmd->copies_sent; i++) {
-		if (rcomm_cmd->resp_list[i].data_ptr) {
-			free(rcomm_cmd->resp_list[i].data_ptr);
-		}
-	}
-}
-
-void *
-cleanup_deadlist(void *arg)
-{
-	spec_t *spec = (spec_t *)arg;
-	rcommon_cmd_t *rcomm_cmd;
-	int i, count = 0, entry_count = 0;
-
-	while (1) {
-		entry_count = get_num_entries_from_mempool(&spec->rcommon_deadlist);
-		while (entry_count) {
-			count = 0;
-			rcomm_cmd = get_from_mempool(&spec->rcommon_deadlist);
-
-//			MTX_LOCK(rcomm_cmd->mutex);
-			for (i = 0; i < rcomm_cmd->copies_sent; i++) {
-				if (rcomm_cmd->resp_list[i].status)
-					count++;
-			}
-//			MTX_UNLOCK(rcomm_cmd->mutex);
-
-			if (count == rcomm_cmd->copies_sent) {
-				destroy_resp_list(rcomm_cmd);
-				free(rcomm_cmd->iov[0].iov_base);
-				pthread_mutex_destroy(&(rcomm_cmd->rcommand_mtx));
-				for (i=1; i<rcomm_cmd->iovcnt + 1; i++)
-					xfree(rcomm_cmd->iov[i].iov_base);
-				REPLICA_ERRLOG("count mached : %d :%d\n", count, rcomm_cmd->copies_sent);
-				memset(rcomm_cmd, 0, sizeof(rcommon_cmd_t));
-				put_to_mempool(&rcommon_cmd_mempool, rcomm_cmd);
-			} else {
-				REPLICA_ERRLOG("rc : %p, count:%d, cc:%d\n", rcomm_cmd, count, rcomm_cmd->copies_sent);
-				put_to_mempool(&spec->rcommon_deadlist, rcomm_cmd);
-			}
-			entry_count--;
-		}
-		sleep(1);	//add predefined time here
-	}
-	return (NULL);
-}

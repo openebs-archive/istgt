@@ -26,39 +26,9 @@ rcmd_t * find_replica_cmd(replica_t *r, uint64_t ioseq);
 int read_cmd(replica_t *r);
 int write_cmd(int fd, rcmd_t *cmd);
 int handle_data_eventfd(void *arg);
-int do_drainfd(int data_eventfd);
 int handle_epoll_in_event(replica_t *r);
-void *replica_thread(void *arg);
-
-#if 0
-	parsed = 0;
-	data_node = TAILQ_FIRST(&cmd->data_list);
-	while (data_node != NULL) {
-		next_node = TAILQ_NEXT(data_node);
-		ret = write_data_segment(data_node, parsed, written);
-		if (ret == WRITE_COMPLETED) {
-			data_node = next_node;
-			continue;
-		}
-		else
-			break;
-	}
-}
-
-write_status_t
-write_data_segment(data_node, parsed, written)
-{
-	len = data_node->len;
-	if ((parsed + len) <= written) {
-		parsed += len;
-		data_node = next_node;
-		continue;
-	}
-	offset_to_write = (written - parsed);
-	len_to_write = (parsed + len - written);
-	rc = write(data_node->data_ptr, offset_to_write, len_to_write);
-}
-#endif
+static void inform_mgmt_conn(replica_t *r);
+static rcmd_t *dequeue_replica_cmdq(replica_t *replica);
 
 #define check_for_blockage() { \
 	uint64_t current_lba = cmd->offset; \
@@ -82,21 +52,23 @@ write_data_segment(data_node, parsed, written)
 	} \
 }
 
-#define SEND_ERROR_RESPONSES(head) { \
-	cmd = TAILQ_FIRST(head); \
-	while (cmd != NULL) { \
-		next_cmd = TAILQ_NEXT(cmd, next); \
-		TAILQ_REMOVE(head, cmd, next); \
-		idx = cmd->idx; \
-		rcomm_cmd = cmd->rcommq_ptr; \
+#define SEND_ERROR_RESPONSES(head, _mtx, _cond) { \
+	rcmd = TAILQ_FIRST(head); \
+	while (rcmd != NULL) { \
+		next_rcmd = TAILQ_NEXT(rcmd, next); \
+		TAILQ_REMOVE(head, rcmd, next); \
+		idx = rcmd->idx;		\
+		rcomm_cmd = rcmd->rcommq_ptr; 	\
+		_mtx = rcomm_cmd->mutex;	\
+		_cond = rcomm_cmd->cond_var;	\
 		rcomm_cmd->resp_list[idx].io_resp_hdr.status = ZVOL_OP_STATUS_FAILED; \
 		rcomm_cmd->resp_list[idx].data_ptr = NULL; \
 		rcomm_cmd->resp_list[idx].data_len = 0; \
 		rcomm_cmd->resp_list[idx].status = 1; \
-		MTX_LOCK(rcomm_cmd->mutex); \
-		pthread_cond_signal(rcomm_cmd->cond_var); \
-		MTX_UNLOCK(rcomm_cmd->mutex); \
-		cmd = next_cmd; \
+		MTX_LOCK(_mtx); \
+		pthread_cond_signal(_cond); \
+		MTX_UNLOCK(_mtx); \
+		rcmd = next_rcmd; \
 	} \
 }
 
@@ -143,7 +115,7 @@ done:
 	return;
 }
 
-void
+static void
 inform_mgmt_conn(replica_t *r)
 {
 	uint64_t num = 1;
@@ -151,7 +123,7 @@ inform_mgmt_conn(replica_t *r)
 	write(r->mgmt_eventfd1, &num, sizeof (num));
 }
 
-void *
+static rcmd_t *
 dequeue_replica_cmdq(replica_t *replica)
 {
 	unsigned count = 0;
@@ -166,24 +138,20 @@ dequeue_replica_cmdq(replica_t *replica)
 void
 respond_with_error_for_all_outstanding_ios(replica_t *r)
 {
-	rcmd_t *cmd, *next_cmd;
+	rcmd_t *rcmd, *next_rcmd;
 	int idx;
 	rcommon_cmd_t *rcomm_cmd;
 	pthread_mutex_t *mtx;
 	pthread_cond_t *cond_var;
 
-	while ((cmd = dequeue_replica_cmdq(r) != NULL))
-		move_to_blocked_or_ready_q(r, cmd);
+	while ((rcmd = dequeue_replica_cmdq(r)) != NULL)
+		move_to_blocked_or_ready_q(r, rcmd);
 
-	SEND_ERROR_RESPONSES((&(r->waitq)));
-	SEND_ERROR_RESPONSES((&(r->readyq)));
-	SEND_ERROR_RESPONSES((&(r->blockedq)));
+	SEND_ERROR_RESPONSES((&(r->waitq)), mtx, cond_var);
+	SEND_ERROR_RESPONSES((&(r->readyq)), mtx, cond_var);
+	SEND_ERROR_RESPONSES((&(r->blockedq)), mtx, cond_var);
 }
 
-/*
- * TODO:
- * need spec lock to update replica vars also
- */
 int
 handle_data_conn_error(replica_t *r)
 {
@@ -191,8 +159,10 @@ handle_data_conn_error(replica_t *r)
 	spec_t *spec;
 	replica_t *r1 = NULL;
 
-	if (r->iofd == -1)
+	if (r->iofd == -1) {
+		REPLICA_ERRLOG("repl %s %d %p\n", r->ip, r->port, r);
 		return -1;
+	}
 
 	MTX_LOCK(&r->spec->rq_mtx);
 	spec = r->spec;
@@ -229,7 +199,6 @@ handle_data_conn_error(replica_t *r)
 	fd = r->iofd;
 	r->iofd = -1;
 
-//TODO check
         if (r->io_resp_hdr)
                 free(r->io_resp_hdr);
         if (r->ongoing_io_buf)
@@ -239,14 +208,13 @@ handle_data_conn_error(replica_t *r)
 
 	data_eventfd = r->data_eventfd;
 	r->data_eventfd = -1;
-	close(data_eventfd);
+	close_fd(epollfd, data_eventfd);
 
 	respond_with_error_for_all_outstanding_ios(r);
 
 	MTX_LOCK(&r->r_mtx);
 	r->conn_closed++;
 	if (r->conn_closed != 2) {
-		//ASSERT(r->conn_closed == 1);
 		inform_mgmt_conn(r);
 		pthread_cond_wait(&r->r_cond, &r->r_mtx);
 	}
@@ -260,7 +228,7 @@ handle_data_conn_error(replica_t *r)
 
 	/* replica might have got destroyed */
 	/* shouldn't access any replica related variables */
-	close(mgmt_eventfd2);
+	close_fd(epollfd, mgmt_eventfd2);
 
 	close(epollfd);
 	return 0;
@@ -282,7 +250,7 @@ handle_epoll_out_event(replica_t *r)
 			continue;
 		}
 		else {
-			//ASSERT(ret == WRITE_PARTIAL); TODO
+			//ASSERT(ret == WRITE_PARTIAL);
 			break;
 		}
 	}
@@ -329,11 +297,6 @@ find_replica_cmd(replica_t *r, uint64_t ioseq)
 	return NULL;
 }
 
-/*
- * TODO:
- * ongoing_io
- * ongoing_io_len, and ongoing_io_buf
- */
 int
 read_cmd(replica_t *r)
 {
@@ -432,19 +395,6 @@ start:
 	goto start;
 }
 
-#if 0
-		if (is_destroy_cmd(cmd)) {
-			//handle_data_conn_error(r);
-			return -1;
-		}
-#endif
-
-/*
- * TODO:
- * dequeue_replica_cmdq
- * lockless cmdq in replica
- * blockedq, readyq, waitq
- */
 int
 handle_data_eventfd(void *arg)
 {
@@ -456,6 +406,15 @@ handle_data_eventfd(void *arg)
 		move_to_blocked_or_ready_q(r, cmd);
 	ret = handle_epoll_out_event(r);
 	return ret;
+}
+
+static int
+handle_mgmt_eventfd(void *arg)
+{
+	replica_t *r = (replica_t *) arg;
+	if (r->disconnect_conn > 0)
+		return -1;
+	return 0;
 }
 
 int
@@ -474,19 +433,12 @@ do_drainfd(int data_eventfd)
 			break;
 		}
 		if (rc == 0) {
-			//TODO chk whether rc is 0 means EOF on fd
 			return -1;
 		}
 	}
 	return 0;
 }
 
-/*
- * TODO:
- * idx in rcmd
- * mutex, cond_var in rcommon_cmd_t
- * resp_list[].io_resp_hdr, data_ptr, data_len, status in rcommon_cmd_t
- */
 int
 handle_epoll_in_event(replica_t *r)
 {
@@ -519,7 +471,7 @@ start:
 		rcomm_cmd->resp_list[idx].status = 1;
 
 		MTX_LOCK(mtx);
-		if (rcomm_cmd->status != 5) { //TODO change it to something meaningful
+		if (rcomm_cmd->status != 2) {
 			pthread_cond_signal(cond_var);
 		}
 		MTX_UNLOCK(mtx);
@@ -549,16 +501,11 @@ start:
 	return ret;
 }
 
-/*
- * TODO:
- * added data_eventfd, mgmt_eventfd, epollfd to replica
- */
-#define	MAX_EVENTS	64
 void *
 replica_thread(void *arg)
 {
 	int r_data_eventfd, r_mgmt_eventfd, r_epollfd;
-	struct epoll_event ev, events[MAX_EVENTS];
+	struct epoll_event ev, events[MAXEVENTS];
 	int i, nfds, fd, ret = 0;
 	void *ptr;
 	replica_t *r = (replica_t *)arg;
@@ -566,12 +513,6 @@ replica_thread(void *arg)
 	r->data_eventfd = r_data_eventfd = eventfd(0, EFD_NONBLOCK);
 	if (r_data_eventfd < 0) {
 		perror("r_data_eventfd");
-		return NULL;
-	}
-
-	r->mgmt_eventfd2 = r_mgmt_eventfd = eventfd(0, EFD_NONBLOCK);
-	if (r_mgmt_eventfd < 0) {
-		perror("r_mgmt_eventfd");
 		return NULL;
 	}
 
@@ -585,6 +526,12 @@ replica_thread(void *arg)
 	ev.data.fd = r_data_eventfd;
 	if (epoll_ctl(r_epollfd, EPOLL_CTL_ADD, r_data_eventfd, &ev) == -1) {
 		perror("epoll_ctl_data_eventfd");
+		return NULL;
+	}
+
+	r->mgmt_eventfd2 = r_mgmt_eventfd = eventfd(0, EFD_NONBLOCK);
+	if (r_mgmt_eventfd < 0) {
+		perror("r_mgmt_eventfd");
 		return NULL;
 	}
 
@@ -608,7 +555,7 @@ replica_thread(void *arg)
 	prctl(PR_SET_NAME, "replica", 0, 0, 0);
 
 	while (1) {
-		nfds = epoll_wait(r_epollfd, events, MAX_EVENTS, -1);
+		nfds = epoll_wait(r_epollfd, events, MAXEVENTS, -1);
 		if (nfds == -1) {
 			if (errno == EINTR)
 				continue;
@@ -624,8 +571,8 @@ replica_thread(void *arg)
 					goto exit;
 				if (fd == r_data_eventfd)
 					ret = handle_data_eventfd(arg);
-				//else
-					//ret = handle_mgmt_eventfd(arg);
+				else
+					ret = handle_mgmt_eventfd(arg);
 				if (ret == -1)
 					goto exit;
 				continue;
