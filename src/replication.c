@@ -1298,7 +1298,6 @@ cleanup_deadlist(void *arg)
 
 			if (count == rcomm_cmd->copies_sent) {
 				destroy_resp_list(rcomm_cmd);
-				free(rcomm_cmd->iov[0].iov_base);
 
 				for (i=1; i<rcomm_cmd->iovcnt + 1; i++)
 					xfree(rcomm_cmd->iov[i].iov_base);
