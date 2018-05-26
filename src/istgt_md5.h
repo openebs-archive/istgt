@@ -44,6 +44,6 @@ typedef struct istgt_md5ctx_t {
 
 int istgt_md5init(ISTGT_MD5CTX *md5ctx);
 int istgt_md5final(void *md5, ISTGT_MD5CTX *md5ctx);
-int istgt_md5update(ISTGT_MD5CTX *md5ctx, const void *data, size_t len);
+int istgt_md5update(ISTGT_MD5CTX *md5ctx, const void *data, int len);
 
 #endif /* ISTGT_MD5_H */
