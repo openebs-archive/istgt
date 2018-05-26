@@ -40,7 +40,7 @@ source   = istgt.c istgt_iscsi.c istgt_iscsi_param.c \
 	istgt_lu_ctl.c \
 	istgt_log.c istgt_conf.c istgt_sock.c istgt_misc.c \
 	istgt_queue.c istgt_crc32c.c istgt_md5.c replication.c replication_misc.c \
-	ring_mempool.c rte_ring.c
+	ring_mempool.c rte_ring.c data_conn.c
 header   = istgt_ver.h istgt.h istgt_iscsi.h istgt_iscsi_xcopy.h istgt_iscsi_param.h \
 	istgt_scsi.h istgt_proto.h istgt_lu.h \
 	istgt_log.h istgt_conf.h istgt_sock.h \
