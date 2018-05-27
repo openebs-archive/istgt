@@ -311,6 +311,7 @@ typedef struct istgt_lu_t {
 	int type;
 	int online;
 	int readonly;
+	int quiesce;
 	int blocklen;
 	int recordsize;
 	int rshift;
@@ -967,3 +968,4 @@ int istgt_lu_disk_get_reservation(ISTGT_LU_DISK *spec);
 #endif
 
 #endif /* ISTGT_LU_H */
+

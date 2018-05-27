@@ -5751,7 +5751,6 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 		// check for status of rcomm_cmd
 		if (check_for_command_completion(spec, rcomm_cmd, cmd)) {
 			if (rcomm_cmd->status == -1)
-				rc = -1;
 			else
 				rc = cmd->data_len = rcomm_cmd->data_len;
 			put_to_mempool(&spec->rcommon_deadlist, rcomm_cmd);
@@ -5931,6 +5930,10 @@ freeiovcnt:
 	if (spec->lu->readonly) {
 		ISTGT_ERRLOG("c#%d LU%d: readonly unit\n", conn->id, spec->lu->num);
 		goto freeiovcnt;
+	}
+	while (spec->lu->quiesce) {
+		ISTGT_ERRLOG("c#%d LU%d: quiescing write IOs\n", conn->id, spec->lu->num);
+		sleep(1);
 	}
 	if(spec->wzero) {
 		nbits = nbytes << 3;
@@ -11028,3 +11031,4 @@ istgt_lu_disk_execute(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 		xfree(data);
 	return 0;
 }
+

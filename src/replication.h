@@ -104,6 +104,13 @@ typedef struct io_data_chunk {
 } io_data_chunk_t;
 
 TAILQ_HEAD(io_data_chunk_list_t, io_data_chunk);
+typedef struct rcommon_mgmt_cmd {
+	int cmds_sent;
+	int cmds_succeeded;
+	int cmds_failed;
+	int done;
+	pthread_mutex_t mtx;
+} rcommon_mgmt_cmd_t;
 
 typedef struct mgmt_cmd_s {
 	TAILQ_ENTRY(mgmt_cmd_s) mgmt_cmd_next;
@@ -115,6 +122,7 @@ typedef struct mgmt_cmd_s {
 	 * amount of IO data written/read in current command state
 	 */
 	int io_bytes;
+	rcommon_mgmt_cmd_t *rcomm_mgmt;
 } mgmt_cmd_t;
 
 typedef struct io_event {
@@ -152,3 +160,4 @@ void close_fd(int epollfd, int fd);
 #define REPLICA_WARNLOG(fmt, ...)	syslog(LOG_ERR, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
 
 #endif /* _REPLICATION_H */
+

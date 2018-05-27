@@ -33,7 +33,7 @@ extern size_t rcommon_cmd_mempool_count;
 
 static void handle_mgmt_conn_error(replica_t *r, int sfd, struct epoll_event *events,
     int ev_count);
-static int read_io_resp(spec_t *spec, replica_t *replica, io_event_t *revent);
+static int read_io_resp(spec_t *spec, replica_t *replica, io_event_t *revent, mgmt_cmd_t *mgmt_cmd);
 static void respond_with_error_for_all_outstanding_mgmt_ios(replica_t *r);
 static void inform_data_conn(replica_t *r);
 static void free_replica(replica_t *r);
@@ -96,6 +96,17 @@ int initialize_volume(spec_t *spec);
 		_re.tv_sec  = _now.tv_sec - _st.tv_sec;			\
 		_re.tv_nsec = _now.tv_nsec - _st.tv_nsec;		\
 	}								\
+}
+
+#define IS_WRITE_IO_IN_Q(queue, next) { \
+	if (write_io_found == false) { \
+		TAILQ_FOREACH(cmd, queue, next) { \
+			if (cmd->opcode == ZVOL_OPCODE_WRITE) { \
+				write_io_found = true; \
+				break; \
+			} \
+		} \
+	} \
 }
 
 void
@@ -431,6 +442,218 @@ send_replica_handshake_query(replica_t *replica, spec_t *spec)
 	return 0;
 }
 
+void handle_snap_create_resp(replica_t *replica, mgmt_cmd_t *mgmt_cmd);
+
+void
+handle_snap_create_resp(replica_t *replica, mgmt_cmd_t *mgmt_cmd)
+{
+	zvol_io_hdr_t *hdr = replica->mgmt_io_resp_hdr;
+	rcommon_mgmt_cmd_t *rcomm_mgmt = mgmt_cmd->rcomm_mgmt;
+	bool delete = false;
+	MTX_LOCK(&rcomm_mgmt->mtx);
+	if (hdr->status != ZVOL_OP_STATUS_OK)
+		rcomm_mgmt->cmds_failed++;
+	else
+		rcomm_mgmt->cmds_succeeded++;
+	if ((rcomm_mgmt->done == 1) &&
+	    (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_failed + rcomm_mgmt->cmds_succeeded)))
+		delete = true;
+	MTX_UNLOCK(&rcomm_mgmt->mtx);
+	if (delete == true)
+		free(rcomm_mgmt);
+}
+
+static int
+send_replica_snapshot(spec_t *spec, replica_t *replica, char *snapname, zvol_op_code_t opcode, rcommon_mgmt_cmd_t *rcomm_mgmt)
+{
+	zvol_io_hdr_t *rmgmtio = NULL;
+	size_t data_len;
+	char *data;
+	zvol_op_code_t mgmt_opcode = opcode;
+	mgmt_cmd_t *mgmt_cmd;
+	uint64_t num = 1;
+	int ret = 0;
+
+	mgmt_cmd = malloc(sizeof(mgmt_cmd_t));
+	mgmt_cmd->rcomm_mgmt = rcomm_mgmt;
+	data_len = strlen(spec->lu->volname) + strlen(snapname) + 2;
+
+	BUILD_REPLICA_MGMT_HDR(rmgmtio, mgmt_opcode, data_len);
+
+	data = (char *)malloc(data_len);
+	snprintf(data, data_len, "%s@%s", spec->lu->volname, snapname);
+
+	mgmt_cmd->io_hdr = rmgmtio;
+	mgmt_cmd->io_bytes = 0;
+	mgmt_cmd->data = data;
+	mgmt_cmd->mgmt_cmd_state = WRITE_IO_SEND_HDR;
+
+	MTX_LOCK(&replica->r_mtx);
+	//TODO: Add it as the second IO, rather than tailing
+	TAILQ_INSERT_TAIL(&replica->mgmt_cmd_queue, mgmt_cmd, mgmt_cmd_next);
+	MTX_UNLOCK(&replica->r_mtx);
+
+	if (rcomm_mgmt != NULL)
+		rcomm_mgmt->cmds_sent++;
+
+	if (write(r->mgmt_eventfd1, &num, sizeof (num)) != sizeof (num)) {
+		REPLICA_NOTICELOG("Failed to inform to mgmt_eventfd for replica(%p)\n", r);
+		ret = -1;
+	}
+
+	return ret;
+}
+
+/*
+static bool
+any_ongoing_snapshot_command(spec_t *spec)
+{
+	replica_t *replica;
+	mgmt_cmd_t *cmd;
+	MTX_LOCK(&spec->rq_mtx);
+	TAILQ_FOREACH(replica, &spec->rq, r_next) {
+		MTX_LOCK(&replica->r_mtx);
+		TAILQ_FOREACH(cmd, &replica->mgmt_cmd_queue, mgmt_cmd_next) {
+			if (cmd->io_hdr->opcode == ZVOL_OPCODE_SNAP_CREATE) {
+				MTX_UNLOCK(&replica->r_mtx);
+				MTX_UNLOCK(&spec->rq_mtx);
+				return true;
+			}
+		}
+		MTX_UNLOCK(&replica->r_mtx);
+	}
+	MTX_UNLOCK(&spec->rq_mtx);
+	return false;
+}
+*/
+
+static int
+is_volume_healthy(spec_t *spec)
+{
+	if (spec->healthy_rcount != spec->replication_factor)
+		return false;
+	return true;
+}
+
+static bool
+pause_and_timed_wait_for_ongoing_ios(spec_t *spec, int sec)
+{
+	struct timespec last, now, diff;
+	bool ret = false;
+	rcommon_cmd_t *cmd;
+	bool write_io_found = false;
+
+	spec->lu->quiesce = 1;
+
+	clock_gettime(CLOCK_MONOTONIC, &last);
+	timesdiff(last, now, diff);
+
+	while ((diff.tv_sec < sec) && (is_volume_healthy(spec) == true)) {
+		write_io_found = false;
+		IS_WRITE_IO_IN_Q(&spec->rcommon_sendq, send_cmd_next);
+		IS_WRITE_IO_IN_Q(&spec->rcommon_waitq, wait_cmd_next);
+		IS_WRITE_IO_IN_Q(&spec->rcommon_pendingq, pending_cmd_next);
+		if (write_io_found == false)
+		{
+			ret = true;
+			break;
+		}
+		MTX_UNLOCK(&spec->rq_mtx);
+		sleep (1);
+		MTX_LOCK(&spec->rq_mtx);
+		timesdiff(last, now, diff);
+	}
+
+	if (ret == false)
+		spec->lu->quiesce = 0;
+
+	return ret;
+}
+
+int istgt_lu_destroy_snapshot(spec_t *spec, char *snapname)
+{
+	replica_t *replica;
+	TAILQ_FOREACH(replica, &spec->rq, r_next)
+		send_replica_snapshot(spec, replica, snapname, ZVOL_OPCODE_SNAP_DESTROY, NULL);
+	return true;
+}
+
+/*
+ * This API will create snapshot with given name on the spec.
+ * It will wait for io_wait_time seconds to complete ongoing IOs.
+ * Overall, this API will wait for wait_time seconds to get response
+ * for snapshot command (this includes io_wait_time).
+ * In case of any failures, snapshot destroy command will be sent to all replicas.
+ */
+int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int wait_time)
+{
+	bool r;
+	replica_t *replica;
+	int free_rcomm_mgmt = 0;
+	struct timespec last, now, diff;
+	struct rcommon_mgmt_cmd *rcomm_mgmt;
+
+	clock_gettime(CLOCK_MONOTONIC, &last);
+	MTX_LOCK(&spec->rq_mtx);
+
+	if (is_volume_healthy(spec) == false) {
+		MTX_UNLOCK(&spec->rq_mtx);
+		return false;
+	}
+
+	r = pause_and_timed_wait_for_ongoing_ios(spec, io_wait_time);
+	if (r == false) {
+		MTX_UNLOCK(&spec->rq_mtx);
+		return false;
+	}
+
+	rcomm_mgmt = (struct rcommon_mgmt_cmd *)malloc(sizeof (struct rcommon_mgmt_cmd));
+	pthread_mutex_init(&rcomm_mgmt->mtx, NULL);
+	rcomm_mgmt->cmds_sent = 0;
+	rcomm_mgmt->cmds_succeeded = 0;
+	rcomm_mgmt->cmds_failed = 0;
+	rcomm_mgmt->done = 0;
+	free_rcomm_mgmt = 0;
+
+	TAILQ_FOREACH(replica, &spec->rq, r_next) {
+		rc = send_replica_snapshot(spec, replica, snapname, ZVOL_OPCODE_SNAP_CREATE, rcomm_mgmt);
+		if (rc < 0) {
+			r = false;
+			goto done;
+		}
+	}
+
+	r = false;
+	timesdiff(last, now, diff);
+	MTX_LOCK(&rcomm_mgmt->mtx);
+	while (diff.tv_sec < wait_time) {
+		if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed))
+			break;
+		MTX_UNLOCK(&rcomm_mgmt->mtx);
+		MTX_UNLOCK(&spec->rq_mtx);
+		sleep(1);
+		MTX_LOCK(&spec->rq_mtx);
+		MTX_LOCK(&rcomm_mgmt->mtx);
+		timesdiff(last, now, diff);
+	}
+	rcomm_mgmt->done = 1;
+	if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed)) {
+		free_rcomm_mgmt = 1;
+		if ((rcomm_mgmt->cmds_succeeded == spec->replication_factor) && (rcomm_mgmt->cmds_failed == 0))
+			r = true;
+	}
+	MTX_UNLOCK(&rcomm_mgmt->mtx);
+done:
+	spec->lu->quiesce = 0;
+	if (r == false)
+		TAILQ_FOREACH(replica, &spec->rq, r_next)
+			send_replica_snapshot(spec, replica, snapname, ZVOL_OPCODE_SNAP_DESTROY, NULL);
+	MTX_UNLOCK(&spec->rq_mtx);
+	if (free_rcomm_mgmt == 1)
+		free(rcomm_mgmt);
+	return r;
+}
+
 static int
 send_replica_status_query(replica_t *replica, spec_t *spec)
 {
@@ -486,8 +709,7 @@ ask_replica_status_all(spec_t *spec)
 		}
 	}
 	MTX_UNLOCK(&spec->rq_mtx);
-}
-
+} 
 static int
 update_replica_status(spec_t *spec, replica_t *replica)
 {
@@ -723,7 +945,7 @@ write_io_data(replica_t *replica, io_event_t *wevent)
  * this goes on until EAGAIN or connection gets closed.
  */
 int
-read_io_resp(spec_t *spec, replica_t *replica, io_event_t *revent)
+read_io_resp(spec_t *spec, replica_t *replica, io_event_t *revent, mgmt_cmd_t *mgmt_cmd)
 {
 	int fd = revent->fd;
 	int *state = revent->state;
@@ -786,6 +1008,20 @@ read_io_resp_hdr:
 					if (fd != replica->iofd)
 						update_replica_status(spec, replica);
 					free(*resp_data);
+					break;
+
+				case ZVOL_OPCODE_SNAP_CREATE:
+					if ((*resp_data) != NULL)
+						REPLICA_ERRLOG("resp_data should be NULL for snap create\n");
+
+					/* snap create response must come from mgmt connection */
+					if (fd != replica->iofd)
+						handle_snap_create_resp(replica, mgmt_cmd);
+					break;
+
+				case ZVOL_OPCODE_SNAP_DESTROY:
+					if ((*resp_data) != NULL)
+						REPLICA_ERRLOG("resp_data should be NULL for snap delete\n");
 					break;
 
 				default:
