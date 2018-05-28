@@ -496,8 +496,8 @@ send_replica_snapshot(spec_t *spec, replica_t *replica, char *snapname, zvol_op_
 	if (rcomm_mgmt != NULL)
 		rcomm_mgmt->cmds_sent++;
 
-	if (write(r->mgmt_eventfd1, &num, sizeof (num)) != sizeof (num)) {
-		REPLICA_NOTICELOG("Failed to inform to mgmt_eventfd for replica(%p)\n", r);
+	if (write(replica->mgmt_eventfd1, &num, sizeof (num)) != sizeof (num)) {
+		REPLICA_NOTICELOG("Failed to inform to mgmt_eventfd for replica(%p)\n", replica);
 		ret = -1;
 	}
 
@@ -540,8 +540,8 @@ pause_and_timed_wait_for_ongoing_ios(spec_t *spec, int sec)
 {
 	struct timespec last, now, diff;
 	bool ret = false;
-	rcommon_cmd_t *cmd;
 	bool write_io_found = false;
+	replica_t *replica;
 
 	spec->lu->quiesce = 1;
 
@@ -550,11 +550,22 @@ pause_and_timed_wait_for_ongoing_ios(spec_t *spec, int sec)
 
 	while ((diff.tv_sec < sec) && (is_volume_healthy(spec) == true)) {
 		write_io_found = false;
-		IS_WRITE_IO_IN_Q(&spec->rcommon_sendq, send_cmd_next);
-		IS_WRITE_IO_IN_Q(&spec->rcommon_waitq, wait_cmd_next);
-		IS_WRITE_IO_IN_Q(&spec->rcommon_pendingq, pending_cmd_next);
-		if (write_io_found == false)
-		{
+		TAILQ_FOREACH(replica, &spec->rq, r_next) {
+			if (replica->inflight_write_io_cnt != 0) {
+				write_io_found = true;
+				break;
+			}
+		}
+		if (write_io_found == false) {
+			if (spec->inflight_write_io_cnt != 0) {
+				write_io_found = true;
+				break;
+			}
+		}
+//		IS_WRITE_IO_IN_Q(&spec->rcommon_sendq, send_cmd_next);
+//		IS_WRITE_IO_IN_Q(&spec->rcommon_waitq, wait_cmd_next);
+//		IS_WRITE_IO_IN_Q(&spec->rcommon_pendingq, pending_cmd_next);
+		if (write_io_found == false) {
 			ret = true;
 			break;
 		}
@@ -570,6 +581,7 @@ pause_and_timed_wait_for_ongoing_ios(spec_t *spec, int sec)
 	return ret;
 }
 
+int istgt_lu_destroy_snapshot(spec_t *spec, char *snapname);
 int istgt_lu_destroy_snapshot(spec_t *spec, char *snapname)
 {
 	replica_t *replica;
@@ -578,6 +590,7 @@ int istgt_lu_destroy_snapshot(spec_t *spec, char *snapname)
 	return true;
 }
 
+int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int wait_time);
 /*
  * This API will create snapshot with given name on the spec.
  * It will wait for io_wait_time seconds to complete ongoing IOs.
@@ -592,6 +605,7 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	int free_rcomm_mgmt = 0;
 	struct timespec last, now, diff;
 	struct rcommon_mgmt_cmd *rcomm_mgmt;
+	int rc;
 
 	clock_gettime(CLOCK_MONOTONIC, &last);
 	MTX_LOCK(&spec->rq_mtx);
@@ -1247,7 +1261,7 @@ handle_read_data_event(replica_t *replica)
 	revent.io_data = (void **)(&(replica->mgmt_io_resp_data));
 	revent.byte_count = &(mgmt_cmd->io_bytes);
 
-	rc = read_io_resp(replica->spec, replica, &revent);
+	rc = read_io_resp(replica->spec, replica, &revent, mgmt_cmd);
 	if (rc > 0) {
 		if (rc > 1)
 			REPLICA_NOTICELOG("read performed on management connection for more"

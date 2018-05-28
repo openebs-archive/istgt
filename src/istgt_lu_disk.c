@@ -5751,6 +5751,7 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 		// check for status of rcomm_cmd
 		if (check_for_command_completion(spec, rcomm_cmd, cmd)) {
 			if (rcomm_cmd->status == -1)
+				rc = -1;
 			else
 				rc = cmd->data_len = rcomm_cmd->data_len;
 			put_to_mempool(&spec->rcommon_deadlist, rcomm_cmd);
@@ -5916,6 +5917,11 @@ istgt_lu_disk_lbwrite(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cm
 		iov[i].iov_len = lu_cmd->iobuf[i].iov_len;
 	}
 
+	while (spec->lu->quiesce) {
+		ISTGT_ERRLOG("c#%d LU%d: quiescing write IOs\n", conn->id, spec->lu->num);
+		sleep(1);
+	}
+
 	if (nbytes != lu_cmd->iobufsize) { //aj-the below call doesn't read anything
 		ISTGT_ERRLOG("c#%d nbytes(%zu) != iobufsize(%zu) (write lba:%lu+%u)\n",
 		    conn->id, (size_t) nbytes, lu_cmd->iobufsize, lba, len);
@@ -5930,10 +5936,6 @@ freeiovcnt:
 	if (spec->lu->readonly) {
 		ISTGT_ERRLOG("c#%d LU%d: readonly unit\n", conn->id, spec->lu->num);
 		goto freeiovcnt;
-	}
-	while (spec->lu->quiesce) {
-		ISTGT_ERRLOG("c#%d LU%d: quiescing write IOs\n", conn->id, spec->lu->num);
-		sleep(1);
 	}
 	if(spec->wzero) {
 		nbits = nbytes << 3;
@@ -5965,6 +5967,10 @@ freeiovcnt:
 			spec->inject_cnt--;
 			sleep(8);
 		}
+
+	MTX_LOCK(&spec->rq_mtx);
+	spec->inflight_write_io_cnt += 1;
+	MTX_UNLOCK(&spec->rq_mtx);
 
 	timediffw(lu_cmd, 'w');
 	if (spec->wzero && nthbitset == nbits) {
@@ -6008,6 +6014,11 @@ freeiovcnt:
 		}
 #endif
 	}
+
+	MTX_LOCK(&spec->rq_mtx);
+	spec->inflight_write_io_cnt -= 1;
+	MTX_UNLOCK(&spec->rq_mtx);
+
 	lu_cmd->iobufsize = 0;
 	lu_cmd->iobufindx = -1;
 	for (i=0; i< iovcnt; ++i) {

@@ -60,6 +60,7 @@ typedef struct replica_s {
 	int data_eventfd;
 	int epfd;
 	int dont_free;
+	uint64_t inflight_write_io_cnt;
 
 	zvol_io_hdr_t *io_resp_hdr;	// header recieved on data connection
 	int io_state;			// state of command on data connection
