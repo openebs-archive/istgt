@@ -113,26 +113,36 @@ run_data_integrity_test() {
 
 	setup_test_env
 
-	sudo $REPLICATION_TEST "$CONTROLLER_IP" "$CONTROLLER_PORT" "$replica1_ip" "$replica1_port" "/tmp/test_vol1" &
+	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V "/tmp/test_vol1" &
 	replica1_pid=$!
-	sudo $REPLICATION_TEST "$CONTROLLER_IP" "$CONTROLLER_PORT" "$replica2_ip" "$replica2_port" "/tmp/test_vol2" &
+	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V "/tmp/test_vol2" &
 	replica2_pid=$!
-	sudo $REPLICATION_TEST "$CONTROLLER_IP" "$CONTROLLER_PORT" "$replica3_ip" "$replica3_port" "/tmp/test_vol3" &
+	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V "/tmp/test_vol3" &
 	replica3_pid=$!
 
 	sleep 15
 	write_and_verify_data
 
-	sudo kill -9 $replica1_pid
+	kill -9 $replica1_pid
 	sleep 5
 	write_and_verify_data
 
-	sudo $REPLICATION_TEST "$CONTROLLER_IP" "$CONTROLLER_PORT" "$replica1_ip" "$replica1_port" "/tmp/test_vol1" &
+	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V "/tmp/test_vol1" -t 5 &
 	replica1_pid=$!
 	sleep 5
 	write_and_verify_data
-
-	sudo kill -9 $replica1_pid $replica2_pid $replica3_pid
+	sleep 5
+	# execute write_and_verify_data to make sure that replica get disconnected due to timeout
+	write_and_verify_data
+	sleep 5
+	wait $replica1_pid
+	if [ $? == 0 ]; then
+		echo "Replica timeout failed"
+		exit 1
+	else
+		echo "Replica timeout passed"
+	fi
+	kill -9 $replica2_pid $replica3_pid
 	cleanup_test_env
 }
 

@@ -6,6 +6,7 @@
 #include "zrepl_prot.h"
 #include "istgt_integration.h"
 #include "replication.h"
+#include "replication_misc.h"
 #include "ring_mempool.h"
 
 #define	READ_PARTIAL	1
@@ -29,6 +30,8 @@ int handle_data_eventfd(void *arg);
 int handle_epoll_in_event(replica_t *r);
 static void inform_mgmt_conn(replica_t *r);
 static rcmd_t *dequeue_replica_cmdq(replica_t *replica);
+
+int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 
 #define check_for_blockage() { \
 	uint64_t current_lba = cmd->offset; \
@@ -247,6 +250,7 @@ handle_epoll_out_event(replica_t *r)
 			return -1;
 		if (ret == WRITE_COMPLETED) {
 			TAILQ_REMOVE(&r->readyq, cmd, next);
+			clock_gettime(CLOCK_MONOTONIC, &cmd->queued_time);
 			TAILQ_INSERT_TAIL(&r->waitq, cmd, next);
 			continue;
 		}
@@ -447,7 +451,6 @@ handle_epoll_in_event(replica_t *r)
 	rcommon_cmd_t *rcomm_cmd;
 	bool task_completed = false;
 	bool unblocked = false;
-	pthread_mutex_t *mtx;
 	pthread_cond_t *cond_var;
 
 start:
@@ -460,7 +463,6 @@ start:
 		TAILQ_REMOVE(&r->waitq, r->ongoing_io, next);
 		rcomm_cmd = r->ongoing_io->rcommq_ptr;
 
-		mtx = rcomm_cmd->mutex;
 		cond_var = rcomm_cmd->cond_var;
 
 		rcomm_cmd->resp_list[idx].io_resp_hdr = *(r->io_resp_hdr);
@@ -471,11 +473,9 @@ start:
 			rcomm_cmd->resp_list[idx].data_len = r->ongoing_io_len;
 		rcomm_cmd->resp_list[idx].status = 1;
 
-		MTX_LOCK(mtx);
 		if (rcomm_cmd->status != 2) {
 			pthread_cond_signal(cond_var);
 		}
-		MTX_UNLOCK(mtx);
 
 		free(r->ongoing_io->iov_data);
 		put_to_mempool(&rcmd_mempool, r->ongoing_io);
@@ -509,7 +509,10 @@ replica_thread(void *arg)
 	struct epoll_event ev, events[MAXEVENTS];
 	int i, nfds, fd, ret = 0;
 	void *ptr;
+	struct timespec now, diff;
 	replica_t *r = (replica_t *)arg;
+	rcmd_t *pending_cmd;
+	int epoll_timeout = (replica_timeout / 2) * 1000;
 
 	r->data_eventfd = r_data_eventfd = eventfd(0, EFD_NONBLOCK);
 	if (r_data_eventfd < 0) {
@@ -556,7 +559,7 @@ replica_thread(void *arg)
 	prctl(PR_SET_NAME, "replica", 0, 0, 0);
 
 	while (1) {
-		nfds = epoll_wait(r_epollfd, events, MAXEVENTS, -1);
+		nfds = epoll_wait(r_epollfd, events, MAXEVENTS, epoll_timeout);
 		if (nfds == -1) {
 			if (errno == EINTR)
 				continue;
@@ -600,13 +603,21 @@ replica_thread(void *arg)
 			if (ret == -1)
 				goto exit;
 		}
-		/* Need to handle wait IOs that are taking more than IO timeout */
-		// handle_data_conn_error(r);
-		// return -1;
+
+		/* check for replica IO timeout */
+		pending_cmd = TAILQ_FIRST(&r->waitq);
+		if (pending_cmd != NULL) {
+			clock_gettime(CLOCK_MONOTONIC, &now);
+			timesdiff(pending_cmd->queued_time, now, diff);
+			if (diff.tv_sec >= replica_timeout) {
+				REPLICA_ERRLOG("timeout happened for replica(%s:%d)..\n", r->ip, r->port);
+				ret = -1;
+				goto exit;
+			}
+		}
 	}
 exit:
 	if (ret == -1)
 		handle_data_conn_error(r);
 	return NULL;
 }
-

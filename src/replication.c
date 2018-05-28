@@ -85,19 +85,6 @@ int initialize_volume(spec_t *spec);
 	}								\
 }
 
-/* MACRO from istgt_lu_disk.c */
-#define timesdiff(_st, _now, _re)					\
-{									\
-	clock_gettime(CLOCK_MONOTONIC, &_now);				\
-	if ((_now.tv_nsec - _st.tv_nsec)<0) {				\
-		_re.tv_sec  = _now.tv_sec - _st.tv_sec - 1;		\
-		_re.tv_nsec = 1000000000 + _now.tv_nsec - _st.tv_nsec;	\
-	} else {							\
-		_re.tv_sec  = _now.tv_sec - _st.tv_sec;			\
-		_re.tv_nsec = _now.tv_nsec - _st.tv_nsec;		\
-	}								\
-}
-
 void
 update_volstate(spec_t *spec)
 {
@@ -728,7 +715,7 @@ write_io_data(replica_t *replica, io_event_t *wevent)
 			*state = READ_IO_RESP_HDR;
 			break;
 	}
-	REPLICA_ERRLOG("got doneocount : %d : r:%p\n", donecount, replica);
+
 	return donecount;
 }
 
