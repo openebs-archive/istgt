@@ -10,6 +10,7 @@
 #include <sys/epoll.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <istgt_proto.h>
 #include <sys/prctl.h>
 #include <sys/eventfd.h>
 #include "zrepl_prot.h"
@@ -96,17 +97,6 @@ int initialize_volume(spec_t *spec);
 		_re.tv_sec  = _now.tv_sec - _st.tv_sec;			\
 		_re.tv_nsec = _now.tv_nsec - _st.tv_nsec;		\
 	}								\
-}
-
-#define IS_WRITE_IO_IN_Q(queue, next) { \
-	if (write_io_found == false) { \
-		TAILQ_FOREACH(cmd, queue, next) { \
-			if (cmd->opcode == ZVOL_OPCODE_WRITE) { \
-				write_io_found = true; \
-				break; \
-			} \
-		} \
-	} \
 }
 
 void
@@ -459,9 +449,13 @@ send_replica_handshake_query(replica_t *replica, spec_t *spec)
 	return 0;
 }
 
-void handle_snap_create_resp(replica_t *replica, mgmt_cmd_t *mgmt_cmd);
-
-void
+/*
+ * This function handles the response for SNAP_CREATE opcode.
+ * In case of timeout, when the thread that triggered snapshot goes away,
+ * this function handles deletion of rcommon_mgmt_cmd_t once all the responses
+ * are received
+ */
+static void
 handle_snap_create_resp(replica_t *replica, mgmt_cmd_t *mgmt_cmd)
 {
 	zvol_io_hdr_t *hdr = replica->mgmt_io_resp_hdr;
@@ -472,7 +466,7 @@ handle_snap_create_resp(replica_t *replica, mgmt_cmd_t *mgmt_cmd)
 		rcomm_mgmt->cmds_failed++;
 	else
 		rcomm_mgmt->cmds_succeeded++;
-	if ((rcomm_mgmt->done == 1) &&
+	if ((rcomm_mgmt->caller_gone == 1) &&
 	    (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_failed + rcomm_mgmt->cmds_succeeded)))
 		delete = true;
 	MTX_UNLOCK(&rcomm_mgmt->mtx);
@@ -552,6 +546,13 @@ is_volume_healthy(spec_t *spec)
 	return true;
 }
 
+/*
+ * This function quiesces write IOs, waits for ongoing write IOs
+ * If volume is not healthy or timeout happens while waiting for ongoing IOs,
+ * write IOs will be allowed, and false will be returned.
+ * If there are no pending write IOs and volume is healthy, true will be returned.
+ * rq_mtx is required to be held by caller
+ */
 static bool
 pause_and_timed_wait_for_ongoing_ios(spec_t *spec, int sec)
 {
@@ -579,9 +580,6 @@ pause_and_timed_wait_for_ongoing_ios(spec_t *spec, int sec)
 				break;
 			}
 		}
-//		IS_WRITE_IO_IN_Q(&spec->rcommon_sendq, send_cmd_next);
-//		IS_WRITE_IO_IN_Q(&spec->rcommon_waitq, wait_cmd_next);
-//		IS_WRITE_IO_IN_Q(&spec->rcommon_pendingq, pending_cmd_next);
 		if (write_io_found == false) {
 			ret = true;
 			break;
@@ -598,7 +596,6 @@ pause_and_timed_wait_for_ongoing_ios(spec_t *spec, int sec)
 	return ret;
 }
 
-int istgt_lu_destroy_snapshot(spec_t *spec, char *snapname);
 int istgt_lu_destroy_snapshot(spec_t *spec, char *snapname)
 {
 	replica_t *replica;
@@ -607,7 +604,6 @@ int istgt_lu_destroy_snapshot(spec_t *spec, char *snapname)
 	return true;
 }
 
-int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int wait_time);
 /*
  * This API will create snapshot with given name on the spec.
  * It will wait for io_wait_time seconds to complete ongoing IOs.
@@ -643,20 +639,27 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	rcomm_mgmt->cmds_sent = 0;
 	rcomm_mgmt->cmds_succeeded = 0;
 	rcomm_mgmt->cmds_failed = 0;
-	rcomm_mgmt->done = 0;
+	rcomm_mgmt->caller_gone = 0;
 	free_rcomm_mgmt = 0;
 
+	r = false;
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
 		rc = send_replica_snapshot(spec, replica, snapname, ZVOL_OPCODE_SNAP_CREATE, rcomm_mgmt);
 		if (rc < 0) {
-			r = false;
+			rcomm_mgmt->caller_gone = 1;
 			goto done;
 		}
 	}
 
-	r = false;
 	timesdiff(last, now, diff);
 	MTX_LOCK(&rcomm_mgmt->mtx);
+
+	if (rcomm_mgmt->cmds_sent != spec->replication_factor) {
+		rcomm_mgmt->caller_gone = 1;
+		MTX_UNLOCK(&rcomm_mgmt->mtx);
+		goto done;
+	}
+
 	while (diff.tv_sec < wait_time) {
 		if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed))
 			break;
@@ -667,7 +670,7 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 		MTX_LOCK(&rcomm_mgmt->mtx);
 		timesdiff(last, now, diff);
 	}
-	rcomm_mgmt->done = 1;
+	rcomm_mgmt->caller_gone = 1;
 	if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed)) {
 		free_rcomm_mgmt = 1;
 		if ((rcomm_mgmt->cmds_succeeded == spec->replication_factor) && (rcomm_mgmt->cmds_failed == 0))
@@ -1046,8 +1049,7 @@ read_io_resp_hdr:
 						REPLICA_ERRLOG("resp_data should be NULL for snap create\n");
 
 					/* snap create response must come from mgmt connection */
-					if (fd != replica->iofd)
-						handle_snap_create_resp(replica, mgmt_cmd);
+					handle_snap_create_resp(replica, mgmt_cmd);
 					break;
 
 				case ZVOL_OPCODE_SNAP_DESTROY:

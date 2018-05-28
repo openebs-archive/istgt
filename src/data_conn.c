@@ -67,9 +67,11 @@ static rcmd_t *dequeue_replica_cmdq(replica_t *replica);
 		rcomm_cmd->resp_list[idx].data_ptr = NULL; \
 		rcomm_cmd->resp_list[idx].data_len = 0; \
 		rcomm_cmd->resp_list[idx].status = 1; \
-		MTX_LOCK(_mtx); \
+		MTX_LOCK(_mtx);	\
 		pthread_cond_signal(_cond); \
 		MTX_UNLOCK(_mtx); \
+		free(rcmd->iov_data);	\
+		put_to_mempool(&rcmd_mempool, rcmd);	\
 		rcmd = next_rcmd; \
 	} \
 }

@@ -105,10 +105,10 @@ typedef struct io_data_chunk {
 
 TAILQ_HEAD(io_data_chunk_list_t, io_data_chunk);
 typedef struct rcommon_mgmt_cmd {
-	int cmds_sent;
-	int cmds_succeeded;
-	int cmds_failed;
-	int done;
+	int cmds_sent; // total cmds sent
+	int cmds_succeeded; // success responses received
+	int cmds_failed; // failure responses received
+	int caller_gone; // thread that is waiting for responses is gone?
 	pthread_mutex_t mtx;
 } rcommon_mgmt_cmd_t;
 
