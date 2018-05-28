@@ -12,7 +12,6 @@
 #include <errno.h>
 #include <sys/prctl.h>
 #include <sys/eventfd.h>
-#include </usr/include/assert.h>
 #include "zrepl_prot.h"
 #include "replication.h"
 #include "istgt_integration.h"
