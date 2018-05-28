@@ -62,7 +62,7 @@ static rcmd_t *dequeue_replica_cmdq(replica_t *replica);
 		_mtx = rcomm_cmd->mutex;	\
 		_cond = rcomm_cmd->cond_var;	\
 		if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE)	\
-			r->inflight_write_io_cnt -= 1;	\
+			r->replica_inflight_write_io_cnt -= 1;	\
 		rcomm_cmd->resp_list[idx].io_resp_hdr.status = ZVOL_OP_STATUS_FAILED; \
 		rcomm_cmd->resp_list[idx].data_ptr = NULL; \
 		rcomm_cmd->resp_list[idx].data_len = 0; \
@@ -106,7 +106,7 @@ move_to_blocked_or_ready_q(replica_t *r, rcmd_t *cmd)
 	rcmd_t *pending_rcmd;
 
 	if (cmd->opcode == ZVOL_OPCODE_WRITE)
-		r->inflight_write_io_cnt += 1;
+		r->replica_inflight_write_io_cnt += 1;
 
 	if (!TAILQ_EMPTY(&r->blockedq)) {
 		TAILQ_INSERT_TAIL(&r->blockedq, cmd, next);
@@ -474,7 +474,7 @@ start:
 		rcomm_cmd->resp_list[idx].data_ptr = r->ongoing_io_buf;
 		if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) {
 			rcomm_cmd->resp_list[idx].data_len = rcomm_cmd->data_len;
-			r->inflight_write_io_cnt -= 1;
+			r->replica_inflight_write_io_cnt -= 1;
 		}
 		else
 			rcomm_cmd->resp_list[idx].data_len = r->ongoing_io_len;

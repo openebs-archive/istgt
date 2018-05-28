@@ -60,15 +60,6 @@ int initialize_volume(spec_t *spec);
 		free(_mgmt_cmd);					\
 	} while(0)
 
-#define	EMPTY_MGMT_Q_OF_REPLICA(_replica)				\
-	do {								\
-		mgmt_cmd_t *_mgmt_cmd;					\
-		while((_mgmt_cmd = 					\
-		    TAILQ_FIRST(&_replica->mgmt_cmd_queue))) {		\
-			clear_mgmt_cmd(_replica, _mgmt_cmd);		\
-		}							\
-        } while(0)
-
 /*
  * breaks if fd is closed or drained recv buf of fd
  * updates amount of data read to continue next time
@@ -569,7 +560,7 @@ pause_and_timed_wait_for_ongoing_ios(spec_t *spec, int sec)
 	while ((diff.tv_sec < sec) && (is_volume_healthy(spec) == true)) {
 		write_io_found = false;
 		TAILQ_FOREACH(replica, &spec->rq, r_next) {
-			if (replica->inflight_write_io_cnt != 0) {
+			if (replica->replica_inflight_write_io_cnt != 0) {
 				write_io_found = true;
 				break;
 			}
@@ -1045,16 +1036,11 @@ read_io_resp_hdr:
 					break;
 
 				case ZVOL_OPCODE_SNAP_CREATE:
-					if ((*resp_data) != NULL)
-						REPLICA_ERRLOG("resp_data should be NULL for snap create\n");
-
 					/* snap create response must come from mgmt connection */
 					handle_snap_create_resp(replica, mgmt_cmd);
 					break;
 
 				case ZVOL_OPCODE_SNAP_DESTROY:
-					if ((*resp_data) != NULL)
-						REPLICA_ERRLOG("resp_data should be NULL for snap delete\n");
 					break;
 
 				default:
@@ -1109,14 +1095,6 @@ handle_write_data_event(replica_t *replica)
 }
 
 static void
-respond_with_error_for_all_outstanding_mgmt_ios(replica_t *r)
-{
-	MTX_LOCK(&r->r_mtx);
-	EMPTY_MGMT_Q_OF_REPLICA(r);
-	MTX_UNLOCK(&r->r_mtx);
-}
-
-static void
 inform_data_conn(replica_t *r)
 {
 	uint64_t num = 1;
@@ -1149,6 +1127,35 @@ close_fd(int epollfd, int fd)
 		return;
 	}
 	close(fd);
+}
+
+/*
+ * This function empties mgmt queue, and
+ * calls the callback with mgmt cmd status as failed
+ */
+static void
+empty_mgmt_q_of_replica(replica_t *r)
+{
+	mgmt_cmd_t *mgmt_cmd;
+	while ((mgmt_cmd = TAILQ_FIRST(&r->mgmt_cmd_queue))) {
+		switch (mgmt_cmd->io_hdr->opcode) {
+			case ZVOL_OPCODE_SNAP_CREATE:
+				mgmt_cmd->io_hdr->status = ZVOL_OP_STATUS_FAILED;
+				handle_snap_create_resp(r, mgmt_cmd);
+				break;
+			default:
+				break;
+		}
+		clear_mgmt_cmd(r, mgmt_cmd);
+	}
+}
+
+static void
+respond_with_error_for_all_outstanding_mgmt_ios(replica_t *r)
+{
+	MTX_LOCK(&r->r_mtx);
+	empty_mgmt_q_of_replica(r);
+	MTX_UNLOCK(&r->r_mtx);
 }
 
 static void
