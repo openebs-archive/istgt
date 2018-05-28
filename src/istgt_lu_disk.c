@@ -6033,14 +6033,18 @@ freeiovcnt:
 				conn->id, markedForFree, markedForReturn, conn, conn->cid, diskIoPendingL, nbytes, rc, lba, len);
 		if (diskIoPendingL == 0 && markedForFree == 1)
 			lu_cmd->connGone = 1;
+#ifndef REPLICATION
 		for (i=0; i<iovcnt; ++i)
 			xfree(iov[i].iov_base);
+#endif
 		return -1;
 	}
 	if (rc < 0)  {
 		errlog(lu_cmd, "c#%d lu_disk_write() failed wrote:%lu of %lu+%lu (%lu) lba:%lu+%u", conn->id, rc, offset, nbytes, l_offset, lba, len)
+#ifndef REPLICATION
 		for (i=0; i<iovcnt; ++i)
 			xfree(iov[i].iov_base);
+#endif
 		return -1;
 	}
 	ISTGT_TRACELOG(ISTGT_TRACE_SCSI, "c#%d Wrote %lu/%lu bytes (lba:%lu+%u) %s\n",

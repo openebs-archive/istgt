@@ -40,6 +40,9 @@ extern "C" {
  * version number. If replica does not support the version, then it replies
  * with "version mismatch" error, puts supported version in version field
  * and closes the connection.
+ *
+ * If you modify the struct definitions in this file make sure they are
+ * properly aligned (and packed).
  */
 
 #define	REPLICA_VERSION	1
@@ -47,12 +50,23 @@ extern "C" {
 #define	MAX_IP_LEN	64
 #define	TARGET_PORT	6060
 
+#define	ZVOL_OP_FLAG_REBUILD 0x01
+
 enum zvol_op_code {
+	// Used to obtain info about a zvol on mgmt connection
 	ZVOL_OPCODE_HANDSHAKE = 0,
+	// Following 4 requests are used on data connection
+	ZVOL_OPCODE_OPEN,
 	ZVOL_OPCODE_READ,
 	ZVOL_OPCODE_WRITE,
-	ZVOL_OPCODE_UNMAP,
 	ZVOL_OPCODE_SYNC,
+	// Following commands apply to mgmt connection
+	ZVOL_OPCODE_UNMAP,
+	ZVOL_OPCODE_PREPARE_FOR_REBUILD,
+	ZVOL_OPCODE_START_REBUILD,
+	ZVOL_OPCODE_REBUILD_STEP,
+	ZVOL_OPCODE_REBUILD_STEP_DONE,
+	ZVOL_OPCODE_REBUILD_COMPLETE,
 	ZVOL_OPCODE_SNAP_CREATE,
 	ZVOL_OPCODE_SNAP_DESTROY,
 	ZVOL_OPCODE_REPLICA_STATUS,
@@ -75,20 +89,32 @@ typedef enum zvol_op_status zvol_op_status_t;
 struct zvol_io_hdr {
 	uint16_t	version;
 	zvol_op_code_t	opcode;
+	zvol_op_status_t status;
+	uint8_t 	flags;
+	uint8_t 	padding[3];
 	uint64_t	io_seq;
 	/* only used for read/write */
 	uint64_t	offset;
 	/*
-	 * Length of data in payload.
-	 * (for read/write that includes size of io headers with meta data).
+	 * Length of data in payload, with following exceptions:
+	 *  1) for read request: size of data to read (payload has zero length)
+	 *  2) for write reply: size of data written (payload has zero length)
+	 * Note that for write request it includes size of io headers with
+	 * meta data.
 	 */
 	uint64_t	len;
 	uint64_t	checkpointed_io_seq;
-	uint8_t 	flags;
-	zvol_op_status_t status;
 } __attribute__((packed));
 
 typedef struct zvol_io_hdr zvol_io_hdr_t;
+
+struct zvol_op_open_data {
+	uint32_t	tgt_block_size;	// used block size for rw in bytes
+	uint32_t	timeout;	// replica timeout in seconds
+	char		volname[MAX_NAME_LEN];
+} __attribute__((packed));
+
+typedef struct zvol_op_open_data zvol_op_open_data_t;
 
 /*
  * Payload data send in response to handshake on control connection. It tells
@@ -99,7 +125,8 @@ struct mgmt_ack {
 	uint64_t zvol_guid;
 	uint16_t port;
 	char	ip[MAX_IP_LEN];
-	char	volname[MAX_NAME_LEN];
+	char	volname[MAX_NAME_LEN]; // Replica helping rebuild
+	char	dw_volname[MAX_NAME_LEN]; // Replica being rebuilt
 } __attribute__((packed));
 
 typedef struct mgmt_ack mgmt_ack_t;
@@ -110,7 +137,8 @@ typedef struct mgmt_ack mgmt_ack_t;
 enum zvol_rebuild_status {
 	ZVOL_REBUILDING_INIT,		/* rebuilding initiated on zvol */
 	ZVOL_REBUILDING_IN_PROGRESS,	/* zvol is rebuilding */
-	ZVOL_REBUILDING_DONE		/* done with rebuilding */
+	ZVOL_REBUILDING_DONE,		/* done with rebuilding */
+	ZVOL_REBUILDING_FAILED		/* Rebuilding failed */
 } __attribute__((packed));
 
 typedef enum zvol_rebuild_status zvol_rebuild_status_t;

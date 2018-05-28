@@ -307,10 +307,11 @@ int
 update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 {
 	int rc;
-	zvol_io_hdr_t *rio;
+	zvol_io_hdr_t *rio_hdr;
 	pthread_t r_thread;
 	zvol_io_hdr_t *ack_hdr;
 	mgmt_ack_t *ack_data;
+	zvol_op_open_data_t *rio_payload;
 	int i;
 
 	ack_hdr = replica->mgmt_io_resp_hdr;	
@@ -334,34 +335,48 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	replica->zvol_guid = ack_data->zvol_guid;
 
 	replica->spec = spec;
-	replica->io_resp_hdr = (zvol_io_hdr_t *)malloc(sizeof(zvol_io_hdr_t));
+	replica->io_resp_hdr = (zvol_io_hdr_t *) malloc(sizeof (zvol_io_hdr_t));
 	replica->io_state = READ_IO_RESP_HDR;
 	replica->io_read = 0;
 
-	rio = (zvol_io_hdr_t *)malloc(sizeof(zvol_io_hdr_t));
-	rio->opcode = ZVOL_OPCODE_HANDSHAKE;
-	rio->io_seq = 0;
-	rio->offset = 0;
-	rio->len = strlen(spec->lu->volname);
-	rio->version = REPLICA_VERSION;
+	rio_hdr = (zvol_io_hdr_t *) malloc(sizeof (zvol_io_hdr_t));
+	rio_hdr->opcode = ZVOL_OPCODE_OPEN;
+	rio_hdr->io_seq = 0;
+	rio_hdr->offset = 0;
+	rio_hdr->len = sizeof (zvol_op_open_data_t);
+	rio_hdr->version = REPLICA_VERSION;
 
-	if (write(replica->iofd, rio, sizeof(zvol_io_hdr_t)) != sizeof(zvol_io_hdr_t)) {
+	rio_payload = (zvol_op_open_data_t *) malloc(
+	    sizeof (zvol_op_open_data_t));
+	rio_payload->timeout = (10 *60);
+	rio_payload->tgt_block_size = spec->lu->blocklen;
+	strncpy(rio_payload->volname, spec->lu->volname,
+	    sizeof (rio_payload->volname));
+
+	if (write(replica->iofd, rio_hdr, sizeof (*rio_hdr)) !=
+	    sizeof (*rio_hdr)) {
 		REPLICA_ERRLOG("failed to send io hdr to replica\n");
 		goto replica_error;
 	}
 
-	if (write(replica->iofd, spec->lu->volname,
-		strlen(spec->lu->volname)) != (ssize_t)strlen(spec->lu->volname)) {
-		REPLICA_ERRLOG("failed to send volname to replica\n");
+	if (write(replica->iofd, rio_payload, sizeof (zvol_op_open_data_t)) !=
+	    sizeof (zvol_op_open_data_t)) {
+		REPLICA_ERRLOG("failed to send data-open payload to replica\n");
 		goto replica_error;
 	}
 
-	if (read(replica->iofd, rio, sizeof (*rio)) != sizeof (*rio)) {
-		REPLICA_ERRLOG("failed to read handshake response from replica\n");
+	if (read(replica->iofd, rio_hdr, sizeof (*rio_hdr)) !=
+	    sizeof (*rio_hdr)) {
+		REPLICA_ERRLOG("failed to read data-open response from replica\n");
 		goto replica_error;
 	}
 
-	if(init_mempool(&replica->cmdq, rcmd_mempool_count, sizeof (rcmd_t), 0,
+	if (rio_hdr->status != ZVOL_OP_STATUS_OK) {
+		REPLICA_ERRLOG("data-open response is not OK\n");
+		goto replica_error;
+	}
+
+	if (init_mempool(&replica->cmdq, rcmd_mempool_count, sizeof (rcmd_t), 0,
 	    "replica_cmd_mempool", NULL, NULL, NULL, false)) {
 		REPLICA_ERRLOG("Failed to initialize replica cmdq\n");
 		goto replica_error;
@@ -380,11 +395,13 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 replica_error:
 		replica->iofd = -1;
 		close(iofd);
-		free(rio);
+		free(rio_hdr);
+		free(rio_payload);
 		return -1;
 	}
 
-	free(rio);
+	free(rio_hdr);
+	free(rio_payload);
 
 	for (i = 0; (i < 10) && (replica->mgmt_eventfd2 == -1); i++)
 		sleep(1);
@@ -1548,7 +1565,6 @@ cleanup_deadlist(void *arg)
 
 			if (count == rcomm_cmd->copies_sent) {
 				destroy_resp_list(rcomm_cmd);
-				free(rcomm_cmd->iov[0].iov_base);
 
 				for (i=1; i<rcomm_cmd->iovcnt + 1; i++)
 					xfree(rcomm_cmd->iov[i].iov_base);
