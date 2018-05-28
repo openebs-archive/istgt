@@ -210,6 +210,7 @@ main(int argc, char **argv)
 	char *test_vol = argv[5];
 	int sleeptime = 0;
 	struct zvol_io_rw_hdr *io_rw_hdr;
+	zvol_op_open_data_t *open_ptr;
 
 	if (argv[6] != NULL) {
 		printf("got 6th arg.. not setting healthy\n");
@@ -364,8 +365,10 @@ main(int argc, char **argv)
 						read_rem_hdr = false;
 					}
 
-					if(io_hdr->opcode == ZVOL_OPCODE_WRITE || io_hdr->opcode == ZVOL_OPCODE_HANDSHAKE) {
-						if(io_hdr->len) {
+					if (io_hdr->opcode == ZVOL_OPCODE_WRITE ||
+					    io_hdr->opcode == ZVOL_OPCODE_HANDSHAKE ||
+					    io_hdr->opcode == ZVOL_OPCODE_OPEN) {
+						if (io_hdr->len) {
 							data = malloc(io_hdr->len);
 							nbytes = 0;
 							count = test_read_data(events[i].data.fd, (uint8_t *)data, io_hdr->len);
@@ -374,7 +377,7 @@ main(int argc, char **argv)
 								recv_len = 0;
 								total_len = io_hdr->len;
 								break;
-							} else if((uint64_t)count < io_hdr->len && errno == EAGAIN) {
+							} else if ((uint64_t)count < io_hdr->len && errno == EAGAIN) {
 								read_rem_data = true;
 								recv_len = count;
 								total_len = io_hdr->len;
@@ -382,6 +385,12 @@ main(int argc, char **argv)
 							}
 							read_rem_data = false;
 						}
+					}
+
+					if (io_hdr->opcode == ZVOL_OPCODE_OPEN) {
+						open_ptr = (zvol_op_open_data_t *)data;
+						REPLICA_LOG("Volume name:%s blocksize:%d timeout:%d\n",
+						    open_ptr->volname, open_ptr->tgt_block_size, open_ptr->timeout);
 					}
 execute_io:
 					if(io_hdr->opcode == ZVOL_OPCODE_WRITE) {
