@@ -61,13 +61,17 @@ static rcmd_t *dequeue_replica_cmdq(replica_t *replica);
 		rcomm_cmd = rcmd->rcommq_ptr; 	\
 		_mtx = rcomm_cmd->mutex;	\
 		_cond = rcomm_cmd->cond_var;	\
+		if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE)	\
+			r->replica_inflight_write_io_cnt -= 1;	\
 		rcomm_cmd->resp_list[idx].io_resp_hdr.status = ZVOL_OP_STATUS_FAILED; \
 		rcomm_cmd->resp_list[idx].data_ptr = NULL; \
 		rcomm_cmd->resp_list[idx].data_len = 0; \
 		rcomm_cmd->resp_list[idx].status = 1; \
-		MTX_LOCK(_mtx); \
+		MTX_LOCK(_mtx);	\
 		pthread_cond_signal(_cond); \
 		MTX_UNLOCK(_mtx); \
+		free(rcmd->iov_data);	\
+		put_to_mempool(&rcmd_mempool, rcmd);	\
 		rcmd = next_rcmd; \
 	} \
 }
@@ -100,6 +104,9 @@ move_to_blocked_or_ready_q(replica_t *r, rcmd_t *cmd)
 {
 	bool cmd_blocked = false;
 	rcmd_t *pending_rcmd;
+
+	if (cmd->opcode == ZVOL_OPCODE_WRITE)
+		r->replica_inflight_write_io_cnt += 1;
 
 	if (!TAILQ_EMPTY(&r->blockedq)) {
 		TAILQ_INSERT_TAIL(&r->blockedq, cmd, next);
@@ -465,8 +472,10 @@ start:
 
 		rcomm_cmd->resp_list[idx].io_resp_hdr = *(r->io_resp_hdr);
 		rcomm_cmd->resp_list[idx].data_ptr = r->ongoing_io_buf;
-		if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE)
+		if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) {
 			rcomm_cmd->resp_list[idx].data_len = rcomm_cmd->data_len;
+			r->replica_inflight_write_io_cnt -= 1;
+		}
 		else
 			rcomm_cmd->resp_list[idx].data_len = r->ongoing_io_len;
 		rcomm_cmd->resp_list[idx].status = 1;

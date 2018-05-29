@@ -5917,6 +5917,11 @@ istgt_lu_disk_lbwrite(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cm
 		iov[i].iov_len = lu_cmd->iobuf[i].iov_len;
 	}
 
+	while (spec->lu->quiesce) {
+		ISTGT_ERRLOG("c#%d LU%d: quiescing write IOs\n", conn->id, spec->lu->num);
+		sleep(1);
+	}
+
 	if (nbytes != lu_cmd->iobufsize) { //aj-the below call doesn't read anything
 		ISTGT_ERRLOG("c#%d nbytes(%zu) != iobufsize(%zu) (write lba:%lu+%u)\n",
 		    conn->id, (size_t) nbytes, lu_cmd->iobufsize, lba, len);
@@ -5963,6 +5968,10 @@ freeiovcnt:
 			sleep(8);
 		}
 
+	MTX_LOCK(&spec->rq_mtx);
+	spec->inflight_write_io_cnt += 1;
+	MTX_UNLOCK(&spec->rq_mtx);
+
 	timediffw(lu_cmd, 'w');
 	if (spec->wzero && nthbitset == nbits) {
 		msg = "wzero";
@@ -6005,6 +6014,11 @@ freeiovcnt:
 		}
 #endif
 	}
+
+	MTX_LOCK(&spec->rq_mtx);
+	spec->inflight_write_io_cnt -= 1;
+	MTX_UNLOCK(&spec->rq_mtx);
+
 	lu_cmd->iobufsize = 0;
 	lu_cmd->iobufindx = -1;
 	for (i=0; i< iovcnt; ++i) {
@@ -11032,3 +11046,4 @@ istgt_lu_disk_execute(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 		xfree(data);
 	return 0;
 }
+

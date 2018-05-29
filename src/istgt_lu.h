@@ -311,6 +311,7 @@ typedef struct istgt_lu_t {
 	int type;
 	int online;
 	int readonly;
+	int quiesce;
 	int blocklen;
 	int recordsize;
 	int rshift;
@@ -759,6 +760,7 @@ typedef struct istgt_lu_disk_t {
 	uint32_t rsize;
 	uint32_t rshift;
 	uint32_t rshiftreal;
+	uint64_t inflight_write_io_cnt;
 	uint32_t max_unmap_sectors;
 	struct IO_types IO_size[10];	
 
@@ -967,3 +969,4 @@ int istgt_lu_disk_get_reservation(ISTGT_LU_DISK *spec);
 #endif
 
 #endif /* ISTGT_LU_H */
+
