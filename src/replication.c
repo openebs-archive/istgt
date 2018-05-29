@@ -721,7 +721,8 @@ ask_replica_status_all(spec_t *spec)
 		}
 	}
 	MTX_UNLOCK(&spec->rq_mtx);
-} 
+}
+
 static int
 update_replica_status(spec_t *spec, replica_t *replica)
 {
@@ -855,7 +856,8 @@ accept_mgmt_conns(int epfd, int sfd)
 
 		replica->mgmt_eventfd1 = eventfd(0, EFD_NONBLOCK);
 		if (replica->mgmt_eventfd1 < 0) {
-			perror("r_mgmt_eventfd1");
+			REPLICA_ERRLOG("error for replica(%s:%d) mgmt_eventfd(%d) err(%d)\n",
+			    replica->ip, replica->port, replica->mgmt_eventfd1, errno);
 			goto cleanup;
 		}
 
@@ -1110,7 +1112,7 @@ void
 close_fd(int epollfd, int fd)
 {
 	if (epoll_ctl(epollfd, EPOLL_CTL_DEL, fd, NULL) == -1) {
-		perror("epoll_ctl");
+		REPLICA_ERRLOG("epoll error for fd(%d) err(%d)\n", fd, errno);
 		return;
 	}
 	close(fd);
@@ -1407,7 +1409,7 @@ initialize_replication()
 	TAILQ_INIT(&spec_q);
 	rc = pthread_mutex_init(&specq_mtx, NULL);
 	if (rc != 0) {
-		perror("specq_init failed");
+		REPLICA_ERRLOG("Failed to init specq_mtx err(%d)\n", errno);
 		return -1;
 	}
 	return 0;
@@ -1438,13 +1440,13 @@ initialize_volume(spec_t *spec)
 
 	rc = pthread_mutex_init(&spec->rcommonq_mtx, NULL);
 	if (rc != 0) {
-		perror("rq_mtx_init failed");
+		REPLICA_ERRLOG("Failed to ini rcommonq mtx err(%d)\n", errno);
 		return -1;
 	}
 
 	rc = pthread_mutex_init(&spec->rq_mtx, NULL);
 	if (rc != 0) {
-		perror("rq_mtx_init failed");
+		REPLICA_ERRLOG("Failed to init rq_mtx err(%d)\n", errno);
 		return -1;
 	}
 

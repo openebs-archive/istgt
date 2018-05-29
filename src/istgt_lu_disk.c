@@ -937,18 +937,11 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 	int rc;
 	int i, j, k;
 	uint32_t lbPerRecord =  0;
-	pthread_condattr_t attr;
 
 	printf("LU%d HDD UNIT\n", lu->num);
 	ISTGT_NOTICELOG("lu_disk_init LU%d TargetName=%s",
 	    lu->num, lu->name);
 	
-	pthread_condattr_init(&attr);
-	if(pthread_condattr_setclock(&attr, CLOCK_MONOTONIC)) {
-		ISTGT_ERRLOG("pthread_condattr_setclock failed errno:%d\n", errno);
-		return -1;
-	}
-
 	for (i = 0; i < lu->maxlun; i++) {
 		if (lu->lun[i].type == ISTGT_LU_LUN_TYPE_NONE) {
 			ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "LU%d: LUN%d none\n",
@@ -1070,7 +1063,7 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 				return -1;
 			}
         
-			rc = pthread_cond_init(&spec->luworker_rcond[k], &attr);
+			rc = pthread_cond_init(&spec->luworker_rcond[k], NULL);
 			if (rc != 0) {
 				ISTGT_ERRLOG("LU%d: luworker %d cond_init() failed errno:%d\n", lu->num, k, errno);
 				return -1;
@@ -5772,8 +5765,7 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 		}
 
 		/* wait for 500 ms(500000000 ns) */
-		memset(&now, 0, sizeof(now));
-		clock_gettime(CLOCK_MONOTONIC, &now);
+		clock_gettime(CLOCK_REALTIME, &now);
 		nsec = 1000000000 - now.tv_nsec;
 		if (nsec > 500000000) {
 			abstime.tv_sec = now.tv_sec;
@@ -5782,7 +5774,9 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 			abstime.tv_sec = now.tv_sec + 1;
 			abstime.tv_nsec = 500000000 - nsec;
 		}
-		pthread_cond_timedwait(rcomm_cmd->cond_var, rcomm_cmd->mutex, &abstime);
+
+		rc = pthread_cond_timedwait(rcomm_cmd->cond_var,
+		    rcomm_cmd->mutex, &abstime);
 		MTX_UNLOCK(rcomm_cmd->mutex);
 	}
 

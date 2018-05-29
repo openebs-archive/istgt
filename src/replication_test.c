@@ -94,10 +94,7 @@ send_mgmtack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip, int rep
 		mgmt_ack_hdr->status = (random() % 5 == 0) ? ZVOL_OP_STATUS_FAILED : ZVOL_OP_STATUS_OK;
 		mgmt_ack_hdr->len = 0;
 	} else if (opcode == ZVOL_OPCODE_REPLICA_STATUS) {
-		if (if_healthy)
-			repl_status.state = ZVOL_STATUS_HEALTHY;
-		else
-			repl_status.state = ZVOL_STATUS_DEGRADED;
+		repl_status.state = ZVOL_STATUS_HEALTHY;
 		mgmt_ack_hdr->len = sizeof(zrepl_status_ack_t);
 		iovec_count = 4;
 		iovec[3].iov_base = &repl_status;
@@ -221,7 +218,7 @@ usage(void)
 	printf(" -I replica ip\n");
 	printf(" -P replica port\n");
 	printf(" -V volume path\n");
-	printf(" -t timeout in seconds\n");
+	printf(" -t number of IOs to serve before sleeping for 60 seconds\n");
 }
 
 
@@ -250,7 +247,7 @@ main(int argc, char **argv)
 	uint64_t recv_len = 0;
 	uint64_t total_len = 0;
 	uint64_t io_hdr_len = sizeof(zvol_io_hdr_t);
-	int io_timeout = 0;
+	int io_cnt = 0;
 	int ch;
 	int check = 1;
 
@@ -258,34 +255,34 @@ main(int argc, char **argv)
 		switch (ch) {
 			case 'i':
 				strncpy(ctrl_ip, optarg, sizeof(ctrl_ip));
-				check = 1 << 1;
+				check |= 1 << 1;
 				break;
 			case 'p':
 				ctrl_port = atoi(optarg);
-				check = 1 << 2;
+				check |= 1 << 2;
 				break;
 			case 'I':
 				strncpy(replica_ip, optarg, sizeof(replica_ip));
-				check = 1 << 3;
+				check |= 1 << 3;
 				break;
 			case 'P':
 				replica_port = atoi(optarg);
-				check = 1 << 4;
+				check |= 1 << 4;
 				break;
 			case 'V':
 				strncpy(test_vol, optarg, sizeof(test_vol));
-				check = 1 << 5;
+				check |= 1 << 5;
 				break;
 			case 't':
-				io_timeout = atoi(optarg);
+				io_cnt = atoi(optarg);
 				break;
 			default:
 				usage();
 				exit(EXIT_FAILURE);
 		}
 	}
-	
-	if(check != 32) {
+
+	if(check != 63) {
 		usage();
 	}
 
@@ -456,12 +453,12 @@ main(int argc, char **argv)
 						    open_ptr->volname, open_ptr->tgt_block_size, open_ptr->timeout);
 					}
 execute_io:
-					if ((io_timeout > 0) && (io_hdr->opcode == ZVOL_OPCODE_WRITE ||
+					if ((io_cnt > 0) && (io_hdr->opcode == ZVOL_OPCODE_WRITE ||
 							io_hdr->opcode == ZVOL_OPCODE_READ)) {
-						io_timeout --;
-						if (io_timeout == 0) {
-							REPLICA_ERRLOG("sleeping for 20 seconds\n");
-							sleep(20);
+						io_cnt --;
+						if (io_cnt == 0) {
+							REPLICA_ERRLOG("sleeping for 60 seconds\n");
+							sleep(60);
 						}
 					}
 					if(io_hdr->opcode == ZVOL_OPCODE_WRITE) {

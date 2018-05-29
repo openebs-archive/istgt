@@ -2582,7 +2582,7 @@ usage(void)
 	printf(" -H         show this usage\n");
 	printf(" -V         show version\n");
 	printf(" -P         Persist Disabled\n");
-	printf(" -R         Replica timeout in seconds\n");
+	printf(" -R         IO timeout in seconds at replicas in seconds\n");
 }
 
 #if 0
