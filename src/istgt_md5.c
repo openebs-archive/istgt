@@ -61,7 +61,7 @@ istgt_md5final(void *md5, ISTGT_MD5CTX *md5ctx)
 }
 
 int
-istgt_md5update(ISTGT_MD5CTX *md5ctx, const void *data, size_t len)
+istgt_md5update(ISTGT_MD5CTX *md5ctx, const void *data, ssize_t len)
 {
 	int rc;
 
