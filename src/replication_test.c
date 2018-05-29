@@ -78,8 +78,26 @@ send_mgmtack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip, int rep
 	iovec[2].iov_base = ((uint8_t *)mgmt_ack_hdr) + 32;
 	iovec[2].iov_len = sizeof (zvol_io_hdr_t) - 32;
 
-	if (opcode == ZVOL_OPCODE_REPLICA_STATUS) {
-		repl_status.state = ZVOL_STATUS_HEALTHY;
+	if (opcode == ZVOL_OPCODE_SNAP_DESTROY) {
+		iovec[2].iov_base = ((uint8_t *)mgmt_ack_hdr) + 32;
+		iovec[2].iov_len = 2;
+
+		iovec[3].iov_base = ((uint8_t *)mgmt_ack_hdr) + 34;
+		iovec[3].iov_len = sizeof (zvol_io_hdr_t) - 34;
+
+		iovec_count = 4;
+		mgmt_ack_hdr->status = (random() % 2) ? ZVOL_OP_STATUS_FAILED : ZVOL_OP_STATUS_OK;
+		mgmt_ack_hdr->len = 0;
+	} else if (opcode == ZVOL_OPCODE_SNAP_CREATE) {
+		iovec_count = 3;
+		sleep(random()%3 + 1);
+		mgmt_ack_hdr->status = (random() % 5 == 0) ? ZVOL_OP_STATUS_FAILED : ZVOL_OP_STATUS_OK;
+		mgmt_ack_hdr->len = 0;
+	} else if (opcode == ZVOL_OPCODE_REPLICA_STATUS) {
+		if (if_healthy)
+			repl_status.state = ZVOL_STATUS_HEALTHY;
+		else
+			repl_status.state = ZVOL_STATUS_DEGRADED;
 		mgmt_ack_hdr->len = sizeof(zrepl_status_ack_t);
 		iovec_count = 4;
 		iovec[3].iov_base = &repl_status;
@@ -274,6 +292,10 @@ main(int argc, char **argv)
 	vol_fd = open(test_vol, O_RDWR, 0666);
 	io_hdr = malloc(sizeof(zvol_io_hdr_t));
 	mgmtio = malloc(sizeof(zvol_io_hdr_t));
+	struct timespec now;
+	
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	srandom(now.tv_sec);
 
 	data = NULL;
 	epfd = epoll_create1(0);

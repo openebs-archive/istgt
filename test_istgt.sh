@@ -3,6 +3,7 @@
 DIR=$PWD
 SETUP_ISTGT=$DIR/src/setup_istgt.sh
 REPLICATION_TEST=$DIR/src/replication_test
+TEST_SNAPSHOT=$DIR/test_snapshot.sh
 MEMPOOL_TEST=$DIR/src/mempool_test
 ISCSIADM=iscsiadm
 ISTGT_PID=-1
@@ -103,6 +104,17 @@ cleanup_test_env() {
 	sudo rm -rf /mnt/store
 }
 
+wait_for_pids()
+{
+	for p in "$@"; do
+		wait $p
+		status=$?
+		if [ $status -ne 0 ] && [ $status -ne 127 ]; then
+			exit 1
+		fi
+	done
+}
+
 run_data_integrity_test() {
 	local replica1_port="6161"
 	local replica2_port="6162"
@@ -112,37 +124,49 @@ run_data_integrity_test() {
 	local replica3_ip="127.0.0.1"
 
 	setup_test_env
+	$TEST_SNAPSHOT 0
 
 	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V "/tmp/test_vol1" &
 	replica1_pid=$!
-	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V "/tmp/test_vol2" &
+	$TEST_SNAPSHOT 0
+
+	sudo $REPLICATION_TEST "$CONTROLLER_IP" "$CONTROLLER_PORT" "$replica2_ip" "$replica2_port" "/tmp/test_vol2" &
 	replica2_pid=$!
-	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V "/tmp/test_vol3" &
+	$TEST_SNAPSHOT 0
+
+	sudo $REPLICATION_TEST "$CONTROLLER_IP" "$CONTROLLER_PORT" "$replica3_ip" "$replica3_port" "/tmp/test_vol3" &
 	replica3_pid=$!
-
 	sleep 15
-	write_and_verify_data
 
-	kill -9 $replica1_pid
+	$TEST_SNAPSHOT 1 &
+	test_snapshot_pid=$!
+
+	write_and_verify_data
+	sleep 50
+	wait_for_pids $test_snapshot_pid
+
+	$TEST_SNAPSHOT 1
+
+	sudo pkill -9 -P $replica1_pid
 	sleep 5
 	write_and_verify_data
 
-	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V "/tmp/test_vol1" -t 5 &
+	#sleep is required for more than 60 seconds, as status messages are sent every 60 seconds
+	sleep 65
+	ps -auxwww
+	$TEST_SNAPSHOT 0
+
+	sudo $REPLICATION_TEST "$CONTROLLER_IP" "$CONTROLLER_PORT" "$replica1_ip" "$replica1_port" "/tmp/test_vol1" &
 	replica1_pid=$!
 	sleep 5
 	write_and_verify_data
-	sleep 5
-	# execute write_and_verify_data to make sure that replica get disconnected due to timeout
-	write_and_verify_data
-	sleep 5
-	wait $replica1_pid
-	if [ $? == 0 ]; then
-		echo "Replica timeout failed"
-		exit 1
-	else
-		echo "Replica timeout passed"
-	fi
-	kill -9 $replica2_pid $replica3_pid
+	$TEST_SNAPSHOT 1
+
+	sleep 65
+	ps -auxwww
+	$TEST_SNAPSHOT 1
+
+	sudo kill -9 $replica1_pid $replica2_pid $replica3_pid
 	cleanup_test_env
 }
 
