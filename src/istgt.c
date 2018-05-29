@@ -596,7 +596,7 @@ istgt_open_portal_group(PORTAL_GROUP *pgp)
 			    pgp->portals[i]->que,
 			    pgp->portals[i]->tag);
 			port = (int)strtol(pgp->portals[i]->port, NULL, 0);
-			sock = istgt_listen(pgp->portals[i]->host, port, pgp->portals[i]->que);
+			sock = istgt_listen("*", port, pgp->portals[i]->que);
 			if (sock < 0) {
 				ISTGT_ERRLOG("listen error %.64s:%d\n",
 				    pgp->portals[i]->host, port);
