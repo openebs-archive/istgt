@@ -1,5 +1,4 @@
 #!/bin/bash
-set -x
 DIR=$PWD
 SETUP_ISTGT=$DIR/src/setup_istgt.sh
 REPLICATION_TEST=$DIR/src/replication_test

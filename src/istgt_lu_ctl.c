@@ -2917,14 +2917,13 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
                 	spec = (ISTGT_LU_DISK *) lu->lun[j].spec;
 			if (spec == NULL)
 				continue;
-                	istgt_uctl_snprintf(uctl, "%s  IQN=%s Blockcount=%lu Blocklength=%lu "
+			istgt_uctl_snprintf(uctl, "%s  IQN=%s Blockcount=%lu Blocklength=%lu "
 				"Writes=%lu Reads=%lu TotalReadBytes=%lu TotalWriteBytes=%lu "
 				"Size=%lu\n", uctl->cmd, lu->name, spec->blockcnt, spec->blocklen,
 				 spec->writes, spec->reads, spec->readbytes, spec->writebytes, spec->size);
 			rc = istgt_uctl_writeline(uctl);
 			if (rc != UCTL_CMD_OK)
 				return rc;
-
                 }
 	}
 	istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
