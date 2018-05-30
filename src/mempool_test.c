@@ -82,7 +82,7 @@ verify_mempool_values_n_destroy(rte_smempool_t *mempool)
 }
 
 int
-main()
+main(void)
 {
 	rte_smempool_t mempool;
 
@@ -90,7 +90,7 @@ main()
 
 	if (init_mempool(&mempool, 100, sizeof (struct test_node_entry),
 	    offsetof(struct test_node_entry, node), "test_mempool",
-	    NULL, NULL, NULL)) {
+	    NULL, NULL, NULL, true)) {
 		destroy_mempool(&mempool);
 		return 0;
 	}

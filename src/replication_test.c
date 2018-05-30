@@ -11,6 +11,8 @@
 #include "istgt_integration.h"
 #include "replication_misc.h"
 
+int if_healthy = 1;
+
 cstor_conn_ops_t cstor_ops = {
 	.conn_listen = replication_listen,
 	.conn_connect = replication_connect,
@@ -78,8 +80,26 @@ send_mgmtack(int fd, zvol_op_code_t opcode, void *buf, char *replicaip, int repl
 	iovec[2].iov_base = ((uint8_t *)mgmt_ack_hdr) + 32;
 	iovec[2].iov_len = sizeof (zvol_io_hdr_t) - 32;
 
-	if (opcode == ZVOL_OPCODE_REPLICA_STATUS) {
-		repl_status.state = ZVOL_STATUS_HEALTHY;
+	if (opcode == ZVOL_OPCODE_SNAP_DESTROY) {
+		iovec[2].iov_base = ((uint8_t *)mgmt_ack_hdr) + 32;
+		iovec[2].iov_len = 2;
+
+		iovec[3].iov_base = ((uint8_t *)mgmt_ack_hdr) + 34;
+		iovec[3].iov_len = sizeof (zvol_io_hdr_t) - 34;
+
+		iovec_count = 4;
+		mgmt_ack_hdr->status = (random() % 2) ? ZVOL_OP_STATUS_FAILED : ZVOL_OP_STATUS_OK;
+		mgmt_ack_hdr->len = 0;
+	} else if (opcode == ZVOL_OPCODE_SNAP_CREATE) {
+		iovec_count = 3;
+		sleep(random()%3 + 1);
+		mgmt_ack_hdr->status = (random() % 5 == 0) ? ZVOL_OP_STATUS_FAILED : ZVOL_OP_STATUS_OK;
+		mgmt_ack_hdr->len = 0;
+	} else if (opcode == ZVOL_OPCODE_REPLICA_STATUS) {
+		if (if_healthy)
+			repl_status.state = ZVOL_STATUS_HEALTHY;
+		else
+			repl_status.state = ZVOL_STATUS_DEGRADED;
 		mgmt_ack_hdr->len = sizeof(zrepl_status_ack_t);
 		iovec_count = 4;
 		iovec[3].iov_base = &repl_status;
@@ -137,11 +157,15 @@ out:
 int
 send_io_resp(int fd, zvol_io_hdr_t *io_hdr, void *buf)
 {
-	struct iovec iovec[2];
+	struct iovec iovec[3];
 	struct zvol_io_rw_hdr io_rw_hdr;
 	int iovcnt, i, nbytes = 0;
 	int rc = 0;
 	io_hdr->status = ZVOL_OP_STATUS_OK;
+
+	if (fd < 0)
+		return -1;
+
 	if(io_hdr->opcode == ZVOL_OPCODE_READ) {
 		iovcnt = 3;
 		io_rw_hdr.io_num = 2000;
@@ -201,15 +225,18 @@ main(int argc, char **argv)
 	char *test_vol = argv[5];
 	int sleeptime = 0;
 	struct zvol_io_rw_hdr *io_rw_hdr;
+	zvol_op_open_data_t *open_ptr;
 
-	if (argv[6] != NULL)
-		sleeptime = atoi(argv[6]);
-	int iofd, mgmtfd, sfd, rc, epfd, event_count, i;
+	if (argv[6] != NULL) {
+		printf("got 6th arg.. not setting healthy\n");
+		if_healthy = 0;
+//		sleeptime = atoi(argv[6]);
+	}
+	int iofd = -1, mgmtfd, sfd, rc, epfd, event_count, i;
 	int64_t count;
 	struct epoll_event event, *events;
 	uint8_t *data, *data_ptr_cpy;
-	uint64_t data_len, nbytes = 0;
-	char *volname;
+	uint64_t nbytes = 0;
 	int vol_fd = open(test_vol, O_RDWR, 0666);
 	zvol_op_code_t opcode;
 	zvol_io_hdr_t *io_hdr = malloc(sizeof(zvol_io_hdr_t));
@@ -221,7 +248,10 @@ main(int argc, char **argv)
 	uint64_t recv_len = 0;
 	uint64_t total_len = 0;
 	uint64_t io_hdr_len = sizeof(zvol_io_hdr_t);
+	struct timespec now;
 	
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	srandom(now.tv_sec);
 
 	epfd = epoll_create1(0);
 	
@@ -273,11 +303,9 @@ main(int argc, char **argv)
 				}
 				if(mgmtio->len) {
 					data = data_ptr_cpy = malloc(mgmtio->len);
-					data_len = mgmtio->len;
 					count = test_read_data(events[i].data.fd, (uint8_t *)data, mgmtio->len);
 				}
 				opcode = mgmtio->opcode;
-				volname = (char *)data;
 				send_mgmtack(mgmtfd, opcode, data, replicaip, replica_port);
 			} else if (events[i].data.fd == sfd) {
 				struct sockaddr saddr;
@@ -355,8 +383,10 @@ main(int argc, char **argv)
 						read_rem_hdr = false;
 					}
 
-					if(io_hdr->opcode == ZVOL_OPCODE_WRITE || io_hdr->opcode == ZVOL_OPCODE_HANDSHAKE) {
-						if(io_hdr->len) {
+					if (io_hdr->opcode == ZVOL_OPCODE_WRITE ||
+					    io_hdr->opcode == ZVOL_OPCODE_HANDSHAKE ||
+					    io_hdr->opcode == ZVOL_OPCODE_OPEN) {
+						if (io_hdr->len) {
 							data = malloc(io_hdr->len);
 							nbytes = 0;
 							count = test_read_data(events[i].data.fd, (uint8_t *)data, io_hdr->len);
@@ -365,7 +395,7 @@ main(int argc, char **argv)
 								recv_len = 0;
 								total_len = io_hdr->len;
 								break;
-							} else if((uint64_t)count < io_hdr->len && errno == EAGAIN) {
+							} else if ((uint64_t)count < io_hdr->len && errno == EAGAIN) {
 								read_rem_data = true;
 								recv_len = count;
 								total_len = io_hdr->len;
@@ -373,6 +403,12 @@ main(int argc, char **argv)
 							}
 							read_rem_data = false;
 						}
+					}
+
+					if (io_hdr->opcode == ZVOL_OPCODE_OPEN) {
+						open_ptr = (zvol_op_open_data_t *)data;
+						REPLICA_LOG("Volume name:%s blocksize:%d timeout:%d\n",
+						    open_ptr->volname, open_ptr->tgt_block_size, open_ptr->timeout);
 					}
 execute_io:
 					if(io_hdr->opcode == ZVOL_OPCODE_WRITE) {

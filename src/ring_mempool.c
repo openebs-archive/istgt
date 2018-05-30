@@ -3,7 +3,7 @@
 int
 init_mempool(rte_smempool_t *obj, size_t count, size_t mem_size,
     size_t offset, const char *ring_name, mempool_constructor_t *mem_init,
-    mempool_destructor_t *mem_remove, mempool_reclaim_t *mem_reclaim)
+    mempool_destructor_t *mem_remove, mempool_reclaim_t *mem_reclaim, bool initialize)
 {
 	size_t i = 0;
 	void *mem_entry = NULL;
@@ -11,41 +11,44 @@ init_mempool(rte_smempool_t *obj, size_t count, size_t mem_size,
 
 	obj->entry_offset = offset;
 	obj->ring = rte_ring_create(ring_name, count, -1, RING_F_EXACT_SZ);
-
-	for (i = 0; i < count; i++, mem_entry = NULL) {
-		mem_entry = malloc(mem_size);
-		if (!mem_entry) {
-			printf("failed to get memory from mempool\n");
-			rc = -1;
-			break;
-		}
-
-		rc = rte_ring_enqueue(obj->ring, mem_entry);
-		if(rc) {
-			printf("failed to insert entry.. no buffer\n");
-			rc = -1;
-			break;
-		}
-	}
-
-	obj->length = i;
-
-	/*
-	 * If we are unable to get provided number of entries in mempool
-	 * then we will return
-	 *	(-1) if we couldn't add single entry in mempool
-	 *	(1)  if there are some entries in mempool that caller may use
-	 */
-	if (rc) {
-		if (i)
-			return 1;
-		else
-			return -1;
-	}
-
 	obj->create = mem_init;
 	obj->free = mem_remove;
 	obj->reclaim = mem_reclaim;
+
+	if (!initialize) {
+		obj->length = count;
+	} else {
+		for (i = 0; i < count; i++, mem_entry = NULL) {
+			mem_entry = malloc(mem_size);
+			if (!mem_entry) {
+				printf("failed to get memory from mempool\n");
+				rc = -1;
+				break;
+			}
+
+			rc = rte_ring_enqueue(obj->ring, mem_entry);
+			if(rc) {
+				printf("failed to insert entry.. no buffer\n");
+				rc = -1;
+				break;
+			}
+		}
+
+		obj->length = i;
+
+		/*
+		 * If we are unable to get provided number of entries in mempool
+		 * then we will return
+		 *	(-1) if we couldn't add single entry in mempool
+		 *	(1)  if there are some entries in mempool that caller may use
+		 */
+		if (rc) {
+			if (i)
+				rc = 1;
+			else
+				rc = -1;
+		}
+	}
 
 	return rc;
 }
@@ -112,4 +115,10 @@ put_to_mempool(rte_smempool_t *obj, void *node)
 	}
 
 	return;
+}
+
+unsigned
+get_num_entries_from_mempool(rte_smempool_t *obj)
+{
+	return rte_ring_count(obj->ring);
 }

@@ -513,6 +513,62 @@ istgt_uctl_cmd_sync(UCTL_Ptr uctl)
         }
         return UCTL_CMD_OK;
 }
+
+#define CHECK_ARG_AND_GOTO_ERROR { \
+	if (arg == NULL) { \
+		istgt_uctl_snprintf(uctl, "ERR invalid param\n"); \
+		goto error_return; \
+	} \
+}
+
+static int
+istgt_uctl_cmd_snap(UCTL_Ptr uctl)
+{
+	ISTGT_LU_Ptr lu = NULL;
+	ISTGT_LU_DISK *spec = NULL;
+	const char *delim = ARGS_DELIM;
+	char *volname, *snapname;
+	int rc = 0, ret = UCTL_CMD_ERR, io_wait_time, wait_time;
+	char *arg;
+	bool r;
+	arg = uctl->arg;
+
+	CHECK_ARG_AND_GOTO_ERROR;
+	volname = strsepq(&arg, delim);
+
+	CHECK_ARG_AND_GOTO_ERROR;
+	snapname = strsepq(&arg, delim);
+
+	CHECK_ARG_AND_GOTO_ERROR;
+	io_wait_time = atoi(strsepq(&arg, delim));
+
+	CHECK_ARG_AND_GOTO_ERROR;
+	wait_time = atoi(strsepq(&arg, delim));
+
+	lu = istgt_lu_find_target_by_volname(uctl->istgt, volname);
+	if (lu == NULL) {
+		istgt_uctl_snprintf(uctl, "ERR no target\n");
+		goto error_return;
+	}
+	spec = lu->lun[0].spec;
+	if (strcmp(uctl->cmd, "SNAPCREATE") == 0)
+		r = istgt_lu_create_snapshot(spec, snapname, io_wait_time, wait_time);
+	else
+		r = istgt_lu_destroy_snapshot(spec, snapname);
+	if (r == true) {
+		istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
+		ret = UCTL_CMD_OK;
+	}
+	else
+		istgt_uctl_snprintf(uctl, "ERR failed %s\n", uctl->cmd);
+error_return:
+	rc = istgt_uctl_writeline(uctl);
+	if (rc != UCTL_CMD_OK) {
+		return rc;
+	}
+	return ret;
+}
+
 static int
 istgt_uctl_cmd_set(UCTL_Ptr uctl)
 {
@@ -3092,6 +3148,8 @@ static ISTGT_UCTL_CMD_TABLE istgt_uctl_cmd_table[] =
 	{ "IOSTATS", istgt_uctl_cmd_iostats},
 	{ "SET", istgt_uctl_cmd_set},
 	{ "MAXTIME", istgt_uctl_cmd_maxtime},
+	{ "SNAPCREATE", istgt_uctl_cmd_snap},
+	{ "SNAPDESTROY", istgt_uctl_cmd_snap},
 	{ NULL,      NULL },
 };
 
@@ -3505,3 +3563,4 @@ istgt_uctl_shutdown(ISTGT_Ptr istgt)
 	xfree(istgt->uctl_netmasks);
 	return 0;
 }
+

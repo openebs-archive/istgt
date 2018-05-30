@@ -1153,6 +1153,56 @@ exec_stats(UCTL_Ptr uctl)
 }
 
 static int
+exec_snap(UCTL_Ptr uctl)
+{
+	const char *delim = ARGS_DELIM;
+	char *arg;
+	char *result;
+	int rc = 0, wait_time, io_wait_time;
+	char *name = uctl->setargv[0];
+	char *snapname = uctl->setargv[1];
+	if (uctl->setargcnt >= 3)
+		io_wait_time = atoi(uctl->setargv[2]);
+	else
+		io_wait_time = 10;
+	if (uctl->setargcnt >= 4)
+		wait_time = atoi(uctl->setargv[3]);
+	else
+		wait_time = 30;
+
+	uctl_snprintf(uctl, "%s \"%s\" \"%s\" \"%d\" \"%d\"\n", uctl->cmd, name, snapname, io_wait_time, wait_time);
+	rc = uctl_writeline(uctl);
+	if (rc != UCTL_CMD_OK) {
+		return rc;
+	}
+
+	/* receive result */
+	while (1) {
+		rc = uctl_readline(uctl);
+		if (rc != UCTL_CMD_OK) {
+			return rc;
+		}
+		arg = trim_string(uctl->recvbuf);
+		result = strsepq(&arg, delim);
+		strupr(result);
+		if (strcmp(result, uctl->cmd) != 0)
+			break;
+		if (uctl->iqn != NULL) {
+			printf("%s\n", arg);
+		} else {
+			printf("%s\n", arg);
+		}
+	}
+	if (strcmp(result, "OK") != 0) {
+		if (is_err_req_auth(uctl, arg))
+			return UCTL_CMD_REQAUTH;
+		fprintf(stderr, "ERROR %s\n", arg);
+		return UCTL_CMD_ERR;
+	}
+	return UCTL_CMD_OK;
+}
+
+static int
 exec_maxtime(UCTL_Ptr uctl)
 {
 	const char *delim = ARGS_DELIM;
@@ -1391,6 +1441,8 @@ static EXEC_TABLE exec_table[] =
 	{"SET", exec_set, 0, 1},
 	{"IOSTATS", exec_iostats, 0, 0 },
 	{"MAXTIME", exec_maxtime, 0, 0},
+	{"SNAPCREATE", exec_snap, 2, 0},
+	{"SNAPDESTROY", exec_snap, 2, 0},
 	{ NULL,      NULL,          0, 0 },
 };
 
@@ -2138,6 +2190,10 @@ main(int argc, char *argv[])
 		uctl->setargcnt = argc;
 	}
 	
+	if ((strcmp(cmd, "SNAPCREATE") == 0) || (strcmp(cmd, "SNAPDESTROY") == 0)) {
+		uctl->setargv = argv;
+		uctl->setargcnt = argc;
+	}
 
 	/* build parameters */
 	rc = uctl_init(uctl);
@@ -2357,3 +2413,4 @@ main(int argc, char *argv[])
 	}
 	return EXIT_SUCCESS;
 }
+
