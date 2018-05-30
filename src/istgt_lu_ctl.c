@@ -2848,8 +2848,6 @@ _verb_istat ISCSIstat_rslt[ISCSI_ARYSZ] = { {0,0,0} };
 static int
 istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 {
-        const char *delim = ARGS_DELIM;
-        char *arg;
         ISTGT_LU_Ptr lu;       
         int rc;
         int i, j;
@@ -2863,12 +2861,16 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
                 	spec = (ISTGT_LU_DISK *) lu->lun[j].spec;
 			if (spec == NULL)
 				continue;
-                	istgt_uctl_snprintf(uctl, "%s  IQN=%s Blockcount=%lu Blocklength=%lu Writes=%lu Reads=%lu TotalReadBytes=%lu TotalWriteBytes=%lu Size=%lu\n", uctl->cmd, lu->name, spec->blockcnt, spec->blocklen, spec->writes, spec->reads, spec->readbytes, spec->writebytes, spec->size);
-                	rc = istgt_uctl_writeline(uctl);
+                	istgt_uctl_snprintf(uctl, "%s  IQN=%s Blockcount=%lu Blocklength=%lu "
+				"Writes=%lu Reads=%lu TotalReadBytes=%lu TotalWriteBytes=%lu "
+				"Size=%lu\n", uctl->cmd, lu->name, spec->blockcnt, spec->blocklen,
+				 spec->writes, spec->reads, spec->readbytes, spec->writebytes, spec->size);
+			rc = istgt_uctl_writeline(uctl);
+			if (rc != UCTL_CMD_OK)
+				return rc;
+
                 }
-                if (rc != UCTL_CMD_OK)
-                     return rc;
-        }
+	}
 	istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
 	rc = istgt_uctl_writeline(uctl);
 	if (rc != UCTL_CMD_OK) {
@@ -3087,7 +3089,7 @@ static ISTGT_UCTL_CMD_TABLE istgt_uctl_cmd_table[] =
 	{ "RSV", istgt_uctl_cmd_rsv},
 	{ "QUE", istgt_uctl_cmd_que},
 	{ "STATS", istgt_uctl_cmd_stats},
-        { "IOSTATS", istgt_uctl_cmd_iostats},
+	{ "IOSTATS", istgt_uctl_cmd_iostats},
 	{ "SET", istgt_uctl_cmd_set},
 	{ "MAXTIME", istgt_uctl_cmd_maxtime},
 	{ NULL,      NULL },

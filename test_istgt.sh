@@ -1,5 +1,5 @@
 #!/bin/bash
-
+set -x
 DIR=$PWD
 SETUP_ISTGT=$DIR/src/setup_istgt.sh
 REPLICATION_TEST=$DIR/src/replication_test
@@ -7,7 +7,6 @@ MEMPOOL_TEST=$DIR/src/mempool_test
 ISCSIADM=iscsiadm
 ISTGT_PID=-1
 device_name=""
-
 CONTROLLER_IP="127.0.0.1"
 CONTROLLER_PORT="6060"
 
@@ -59,6 +58,44 @@ run_mempool_test()
 	return 0
 }
 
+run_and_verify_iostats() {
+	login_to_volume "$CONTROLLER_IP:3260"
+	sleep 5
+	get_scsi_disk
+	if [ "$device_name"!="" ]; then
+		sudo mkfs.ext2 -F /dev/$device_name
+		[[ $? -ne 0 ]] && echo "mkfs failed for $device_name" && exit 1
+
+		sudo mount /dev/$device_name /mnt/store
+		[[ $? -ne 0 ]] && echo "mount for $device_name" && exit 1
+
+		sudo dd if=/dev/urandom of=/mnt/store/file1 bs=4k count=10000 oflag=direct
+		sudo istgtcontrol iostats
+		var1="$(sudo istgtcontrol iostats |  awk '{ print $7 }' | cut -d '=' -f 2)"
+		if [ $var1 -eq 0 ]; then
+			echo "iostats command failed" && exit 1
+		fi
+
+		sudo dd if=/dev/urandom of=/mnt/store/file1 bs=4k count=10000 oflag=direct
+		sudo istgtcontrol iostats
+		var2="$(sudo istgtcontrol iostats |  awk '{ print $7 }' | cut -d '=' -f 2)"
+		if [ $var2 -eq 0 ]; then
+			echo "iostats command failed" && exit 1
+		fi
+
+		if [ "$var2" == "$var1" ]; then
+			echo "iostats command failed, both the values are same" && exit 1
+		else echo "iostats test passed"
+		fi
+
+ 		sudo umount /mnt/store
+		logout_of_volume
+		sleep 5
+	else
+		echo "Unable to detect iSCSI device, login failed"; exit 1
+	fi
+}
+
 write_and_verify_data(){
 	login_to_volume "$CONTROLLER_IP:3260"
 	sleep 5
@@ -70,7 +107,8 @@ write_and_verify_data(){
 		sudo mount /dev/$device_name /mnt/store
 		[[ $? -ne 0 ]] && echo "mount for $device_name" && exit 1
 
-		sudo dd if=/dev/urandom of=file1 bs=4k count=10000
+		sudo dd if=/dev/urandom of=file1 bs=4k count=10000  
+
 		hash1=$(sudo md5sum file1 | awk '{print $1}')
 		sudo cp file1 /mnt/store
 		hash2=$(sudo md5sum /mnt/store/file1 | awk '{print $1}')
@@ -85,6 +123,7 @@ write_and_verify_data(){
 	else
 		echo "Unable to detect iSCSI device, login failed"; exit 1
 	fi
+	sleep 10
 }
 
 setup_test_env() {
@@ -119,6 +158,9 @@ run_data_integrity_test() {
 	replica2_pid=$!
 	sudo $REPLICATION_TEST "$CONTROLLER_IP" "$CONTROLLER_PORT" "$replica3_ip" "$replica3_port" "/tmp/test_vol3" &
 	replica3_pid=$!
+
+	sleep 15
+	run_and_verify_iostats
 
 	sleep 15
 	write_and_verify_data

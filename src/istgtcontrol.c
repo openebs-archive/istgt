@@ -1070,8 +1070,8 @@ static int
 exec_iostats(UCTL_Ptr uctl)
 {
         const char *delim = ARGS_DELIM;
-        char *arg, buf[1000];
-        char *result, *var;
+        char *arg;
+        char *result;
         int rc;
 
         uctl_snprintf(uctl, "IOSTATS\n");
@@ -1080,30 +1080,28 @@ exec_iostats(UCTL_Ptr uctl)
                 return rc;
         }
         /* receive result */
-        while(1) {
-           rc = uctl_readline(uctl);
-           if (rc != UCTL_CMD_OK) {
-              return rc;
-           }
-           arg = trim_string(uctl->recvbuf);
-           result = strsepq(&arg, delim);
-           strupr(result);
-           if (strcmp(result, uctl->cmd) !=0){
-              break;
-           }
-           if (uctl->iqn != NULL) {
-		printf("%s\n", arg);
- 	   } else {
-		printf("%s\n", arg);
-	   }
-        }
-        if (strcmp(result, "OK") != 0) {
-		if (is_err_req_auth(uctl, arg))
-			return UCTL_CMD_REQAUTH;
+	while(1) {
+		rc = uctl_readline(uctl);
+		if (rc != UCTL_CMD_OK) {
+			return rc;
+		}
+		arg = trim_string(uctl->recvbuf);
+		result = strsepq(&arg, delim);
+		strupr(result);
+		if (strcmp(result, uctl->cmd) !=0){
+			break;
+		}
+		if (uctl->iqn != NULL) {
+			printf("%s\n", arg);
+		} else {
+			printf("%s\n", arg);
+		}
+	}
+	if (strcmp(result, "OK") != 0) {
 		fprintf(stderr, "ERROR %s\n", arg);
 		return UCTL_CMD_ERR;
-	}       
-        return UCTL_CMD_OK;
+	}
+	return UCTL_CMD_OK;
 }
 
 static int
@@ -1389,10 +1387,10 @@ static EXEC_TABLE exec_table[] =
 	{"LOG", exec_log, 0, 0 },
 	{"RSV", exec_rsv, 0, 0 },
 	{"QUE", exec_que, 0, 0 },
-        {"STATS", exec_stats, 0, 0 },
-        {"SET", exec_set, 0, 1},
-       	{"IOSTATS", exec_iostats, 0, 0 },
-       	{"MAXTIME", exec_maxtime, 0, 0},
+	{"STATS", exec_stats, 0, 0 },
+	{"SET", exec_set, 0, 1},
+	{"IOSTATS", exec_iostats, 0, 0 },
+	{"MAXTIME", exec_maxtime, 0, 0},
 	{ NULL,      NULL,          0, 0 },
 };
 
