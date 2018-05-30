@@ -16,68 +16,52 @@
 #define	WRITE_COMPLETED	2
 
 extern rte_smempool_t rcmd_mempool;
-
-bool unblock_cmds(replica_t *r);
-void move_to_blocked_or_ready_q(replica_t *r, rcmd_t *cmd);
-void respond_with_error_for_all_outstanding_ios(replica_t *r);
-int handle_data_conn_error(replica_t *r);
-int handle_epoll_out_event(replica_t *r);
-static ssize_t perform_read_on_fd(int fd, uint8_t *data, uint64_t len);
-rcmd_t * find_replica_cmd(replica_t *r, uint64_t ioseq);
-int read_cmd(replica_t *r);
-int write_cmd(int fd, rcmd_t *cmd);
-int handle_data_eventfd(void *arg);
-int handle_epoll_in_event(replica_t *r);
-static void inform_mgmt_conn(replica_t *r);
-static rcmd_t *dequeue_replica_cmdq(replica_t *replica);
-
 /* default timeout is set to REPLICA_DEFAULT_TIMEOUT seconds */
 int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 
-#define check_for_blockage() { \
-	uint64_t current_lba = cmd->offset; \
-	uint64_t current_lbE = current_lba + cmd->data_len; \
-	uint64_t pending_lba = pending_rcmd->offset; \
-	uint64_t pending_lbE = pending_lba + pending_rcmd->data_len; \
-	if ((current_lbE < pending_lba)  || (pending_lbE < current_lba)) { \
-		cmd_blocked = false; \
-	} else { \
-		cmd_blocked = true; \
-	} \
+#define check_for_blockage() {						\
+	uint64_t current_lba = cmd->offset;				\
+	uint64_t current_lbE = current_lba + cmd->data_len;		\
+	uint64_t pending_lba = pending_rcmd->offset;			\
+	uint64_t pending_lbE = pending_lba + pending_rcmd->data_len;	\
+	if ((current_lbE < pending_lba)  ||				\
+	    (pending_lbE < current_lba)) {				\
+		cmd_blocked = false;					\
+	} else {							\
+		cmd_blocked = true;					\
+	}								\
 }
 
-#define CHECK_BLOCKAGE_IN_Q(queue, next) { \
-	if(cmd_blocked == false) { \
-		TAILQ_FOREACH(pending_rcmd, queue, next) { \
-			check_for_blockage(); \
-			if(cmd_blocked == true) \
-				break; \
-		} \
-	} \
+#define CHECK_BLOCKAGE_IN_Q(queue, next) {				\
+	if(cmd_blocked == false) {					\
+		TAILQ_FOREACH(pending_rcmd, queue, next) {		\
+			check_for_blockage();				\
+			if(cmd_blocked == true)				\
+				break;					\
+		}							\
+	}								\
 }
 
-#define SEND_ERROR_RESPONSES(head, _mtx, _cond) { \
-	rcmd = TAILQ_FIRST(head); \
-	while (rcmd != NULL) { \
-		next_rcmd = TAILQ_NEXT(rcmd, next); \
-		TAILQ_REMOVE(head, rcmd, next); \
-		idx = rcmd->idx;		\
-		rcomm_cmd = rcmd->rcommq_ptr; 	\
-		_mtx = rcomm_cmd->mutex;	\
-		_cond = rcomm_cmd->cond_var;	\
-		if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE)	\
-			r->replica_inflight_write_io_cnt -= 1;	\
-		rcomm_cmd->resp_list[idx].io_resp_hdr.status = ZVOL_OP_STATUS_FAILED; \
-		rcomm_cmd->resp_list[idx].data_ptr = NULL; \
-		rcomm_cmd->resp_list[idx].data_len = 0; \
-		rcomm_cmd->resp_list[idx].status = 1; \
-		MTX_LOCK(_mtx);	\
-		pthread_cond_signal(_cond); \
-		MTX_UNLOCK(_mtx); \
-		free(rcmd->iov_data);	\
-		put_to_mempool(&rcmd_mempool, rcmd);	\
-		rcmd = next_rcmd; \
-	} \
+#define SEND_ERROR_RESPONSES(head, _cond) {				\
+	rcmd = TAILQ_FIRST(head);					\
+	while (rcmd != NULL) {						\
+		next_rcmd = TAILQ_NEXT(rcmd, next);			\
+		TAILQ_REMOVE(head, rcmd, next);				\
+		idx = rcmd->idx;					\
+		rcomm_cmd = rcmd->rcommq_ptr;				\
+		_cond = rcomm_cmd->cond_var;				\
+		if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE)		\
+			r->replica_inflight_write_io_cnt -= 1;		\
+		rcomm_cmd->resp_list[idx].io_resp_hdr.status =		\
+		    ZVOL_OP_STATUS_FAILED;				\
+		rcomm_cmd->resp_list[idx].data_ptr = NULL;		\
+		rcomm_cmd->resp_list[idx].status = 1;			\
+		if (rcomm_cmd->state != CMD_EXECUTION_DONE)		\
+			pthread_cond_signal(_cond);			\
+		free(rcmd->iov_data);					\
+		put_to_mempool(&rcmd_mempool, rcmd);			\
+		rcmd = next_rcmd;					\
+	}								\
 }
 
 #define	CHECK_REPLICA_TIMEOUT(_head, _diff, _ret, _exit_label, etimeout)\
@@ -105,7 +89,11 @@ int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 		}							\
 	} while (0)
 
-bool
+/*
+ * check replica's blocked command queue.
+ * if any blocked command can be unblock then add it to replica's readyq
+ */
+static bool
 unblock_cmds(replica_t *r)
 {
 	bool cmd_blocked = false;
@@ -128,7 +116,10 @@ unblock_cmds(replica_t *r)
 	return unblocked;
 }
 
-void
+/*
+ * Check if cmd can be added to replica's ready queue or blocked queue
+ */
+static void
 move_to_blocked_or_ready_q(replica_t *r, rcmd_t *cmd)
 {
 	bool cmd_blocked = false;
@@ -153,6 +144,10 @@ done:
 	return;
 }
 
+/*
+ * inform replica's management interface regarding error in
+ * replica_thread
+ */
 static void
 inform_mgmt_conn(replica_t *r)
 {
@@ -162,6 +157,9 @@ inform_mgmt_conn(replica_t *r)
 		REPLICA_NOTICELOG("Failed report err to mgmt_conn for replica(%p)\n", r);
 }
 
+/*
+ * fetch command from replica's command queue
+ */
 static rcmd_t *
 dequeue_replica_cmdq(replica_t *replica)
 {
@@ -174,24 +172,29 @@ dequeue_replica_cmdq(replica_t *replica)
 		return NULL;
 }
 
-void
+/*
+ * perform cleanup for all pending IOs in replica's queue
+ */
+static void
 respond_with_error_for_all_outstanding_ios(replica_t *r)
 {
 	rcmd_t *rcmd, *next_rcmd;
 	int idx;
 	rcommon_cmd_t *rcomm_cmd;
-	pthread_mutex_t *mtx;
 	pthread_cond_t *cond_var;
 
 	while ((rcmd = dequeue_replica_cmdq(r)) != NULL)
 		move_to_blocked_or_ready_q(r, rcmd);
 
-	SEND_ERROR_RESPONSES((&(r->waitq)), mtx, cond_var);
-	SEND_ERROR_RESPONSES((&(r->readyq)), mtx, cond_var);
-	SEND_ERROR_RESPONSES((&(r->blockedq)), mtx, cond_var);
+	SEND_ERROR_RESPONSES((&(r->waitq)), cond_var);
+	SEND_ERROR_RESPONSES((&(r->readyq)), cond_var);
+	SEND_ERROR_RESPONSES((&(r->blockedq)), cond_var);
 }
 
-int
+/*
+ * handle error in replica_thread (or data_connection)
+ */
+static int
 handle_data_conn_error(replica_t *r)
 {
 	int fd, data_eventfd, mgmt_eventfd2, epollfd;
@@ -231,7 +234,9 @@ handle_data_conn_error(replica_t *r)
 
 	MTX_UNLOCK(&spec->rq_mtx);
 
+	MTX_LOCK(&r->r_mtx);
 	if (epoll_ctl(r->epollfd, EPOLL_CTL_DEL, r->iofd, NULL) == -1) {
+		MTX_UNLOCK(&r->r_mtx);
 		REPLICA_ERRLOG("epoll error for replica(%s:%d) iofd:%d "
 		    "errno(%d)\n", r->ip, r->port, r->iofd, errno);
 		return -1;
@@ -239,17 +244,18 @@ handle_data_conn_error(replica_t *r)
 
 	fd = r->iofd;
 	r->iofd = -1;
-
-        if (r->io_resp_hdr)
-                free(r->io_resp_hdr);
-        if (r->ongoing_io_buf)
-                free(r->ongoing_io_buf);
-
 	close(fd);
 
 	data_eventfd = r->data_eventfd;
 	r->data_eventfd = -1;
 	close_fd(epollfd, data_eventfd);
+
+	MTX_UNLOCK(&r->r_mtx);
+
+	if (r->io_resp_hdr)
+		free(r->io_resp_hdr);
+	if (r->ongoing_io_buf)
+		free(r->ongoing_io_buf);
 
 	respond_with_error_for_all_outstanding_ios(r);
 
@@ -265,6 +271,7 @@ handle_data_conn_error(replica_t *r)
 	 * and mgmt_conn thread, which are consumers of mgmt_eventfd2
 	 */
 		pthread_cond_signal(&r->r_cond);
+	r->mgmt_eventfd2 = -1;
 	MTX_UNLOCK(&r->r_mtx);
 
 	/* replica might have got destroyed */
@@ -274,57 +281,10 @@ handle_data_conn_error(replica_t *r)
 	return 0;
 }
 
-int
-handle_epoll_out_event(replica_t *r)
-{
-	rcmd_t *cmd;
-	int ret;
-
-	while ((cmd = TAILQ_FIRST(&r->readyq)) != NULL) {
-		ret = write_cmd(r->iofd, cmd);
-		if (ret < 0)
-			return -1;
-		if (ret == WRITE_COMPLETED) {
-			TAILQ_REMOVE(&r->readyq, cmd, next);
-			TAILQ_INSERT_TAIL(&r->waitq, cmd, next);
-			continue;
-		}
-		else {
-			//ASSERT(ret == WRITE_PARTIAL);
-			break;
-		}
-	}
-	return 0;
-}
-
-static ssize_t
-perform_read_on_fd(int fd, uint8_t *data, uint64_t len)
-{
-	ssize_t rc, nbytes = 0;
-
-	while(1) {
-		rc = read(fd, data + nbytes, len - nbytes);
-
-		if(rc < 0) {
-			if (errno == EINTR)
-				continue;
-			if (errno == EAGAIN || errno == EWOULDBLOCK)
-				return nbytes;
-			return -1;
-		} else if (rc == 0) {
-			REPLICA_ERRLOG("received EOF on fd %d, closing it..\n", fd);
-			/* Return -1 here as entire data is not read, and, connection got closed */
-			return -1;
-		}
-
-		nbytes += rc;
-		if(nbytes == (ssize_t )len)
-			break;
-	}
-	return nbytes;
-}
-
-rcmd_t *
+/*
+ * find a command from replica's waitq according to io_sequence
+ */
+static rcmd_t *
 find_replica_cmd(replica_t *r, uint64_t ioseq)
 {
 	rcmd_t *cmd;
@@ -337,7 +297,10 @@ find_replica_cmd(replica_t *r, uint64_t ioseq)
 	return NULL;
 }
 
-int
+/*
+ * read response read on replica's data connection
+ */
+static int
 read_cmd(replica_t *r)
 {
 	int fd = r->iofd;
@@ -351,7 +314,8 @@ read_cmd(replica_t *r)
 	switch(state) {
 		case READ_IO_RESP_HDR:
 			reqlen = sizeof (zvol_io_hdr_t) - (r->io_read);
-			count = perform_read_on_fd(fd, ((uint8_t *)resp_hdr) + (r->io_read), reqlen);
+			count = perform_read_write_on_fd(fd,
+			    ((uint8_t *)resp_hdr) + (r->io_read), reqlen, state);
 			if (count == -1)
 				return -1;
 			r->io_read += count;
@@ -369,7 +333,8 @@ read_cmd(replica_t *r)
 
 			r->io_state = READ_IO_RESP_DATA;
 			r->io_read = 0;
-			if ((resp_hdr->len == 0) || (resp_hdr->opcode == ZVOL_OPCODE_WRITE)) {
+			if ((resp_hdr->len == 0) ||
+			    (resp_hdr->opcode == ZVOL_OPCODE_WRITE)) {
 				r->ongoing_io_len = 0;
 				r->ongoing_io_buf = NULL;
 			}
@@ -382,8 +347,8 @@ read_cmd(replica_t *r)
 			reqlen = r->ongoing_io_len - (r->io_read);
 			resp_data = r->ongoing_io_buf;
 			if (reqlen != 0) {
-				count = perform_read_on_fd(fd, ((uint8_t *)(resp_data)) + (r->io_read),
-				    reqlen);
+				count = perform_read_write_on_fd(fd,
+				    ((uint8_t *)(resp_data)) + (r->io_read), reqlen, state);
 
 				if (count == -1)
 					return -1;
@@ -396,7 +361,7 @@ read_cmd(replica_t *r)
 	return -1;
 }
 
-int
+static int
 write_cmd(int fd, rcmd_t *cmd)
 {
 	ssize_t rc;
@@ -436,28 +401,6 @@ start:
 }
 
 int
-handle_data_eventfd(void *arg)
-{
-	replica_t *r = (replica_t *)arg;
-	rcmd_t *cmd;
-	int ret;
-
-	while ((cmd = dequeue_replica_cmdq(r)) != NULL)
-		move_to_blocked_or_ready_q(r, cmd);
-	ret = handle_epoll_out_event(r);
-	return ret;
-}
-
-static int
-handle_mgmt_eventfd(void *arg)
-{
-	replica_t *r = (replica_t *) arg;
-	if (r->disconnect_conn > 0)
-		return -1;
-	return 0;
-}
-
-int
 do_drainfd(int data_eventfd)
 {
 	uint64_t value;
@@ -479,7 +422,30 @@ do_drainfd(int data_eventfd)
 	return 0;
 }
 
-int
+static int
+handle_epoll_out_event(replica_t *r)
+{
+	rcmd_t *cmd;
+	int ret;
+
+	while ((cmd = TAILQ_FIRST(&r->readyq)) != NULL) {
+		ret = write_cmd(r->iofd, cmd);
+		if (ret < 0)
+			return -1;
+		if (ret == WRITE_COMPLETED) {
+			TAILQ_REMOVE(&r->readyq, cmd, next);
+			TAILQ_INSERT_TAIL(&r->waitq, cmd, next);
+			continue;
+		}
+		else {
+			//ASSERT(ret == WRITE_PARTIAL);
+			break;
+		}
+	}
+	return 0;
+}
+
+static int
 handle_epoll_in_event(replica_t *r)
 {
 	int ret, idx;
@@ -502,15 +468,11 @@ start:
 
 		rcomm_cmd->resp_list[idx].io_resp_hdr = *(r->io_resp_hdr);
 		rcomm_cmd->resp_list[idx].data_ptr = r->ongoing_io_buf;
-		if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) {
-			rcomm_cmd->resp_list[idx].data_len = rcomm_cmd->data_len;
+		if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE)
 			r->replica_inflight_write_io_cnt -= 1;
-		}
-		else
-			rcomm_cmd->resp_list[idx].data_len = r->ongoing_io_len;
 		rcomm_cmd->resp_list[idx].status = 1;
 
-		if (rcomm_cmd->status != 2) {
+		if (rcomm_cmd->state != CMD_EXECUTION_DONE) {
 			pthread_cond_signal(cond_var);
 		}
 
@@ -524,10 +486,6 @@ start:
 		task_completed = true;
 		goto start;
 	}
-	else {
-		//ASSERT(ret == READ_PARTIAL);
-		//break;
-	}
 
 	ret = 0;
 	if (task_completed == true) {
@@ -537,6 +495,28 @@ start:
 	}
 
 	return ret;
+}
+
+static int
+handle_data_eventfd(void *arg)
+{
+	replica_t *r = (replica_t *)arg;
+	rcmd_t *cmd;
+	int ret;
+
+	while ((cmd = dequeue_replica_cmdq(r)) != NULL)
+		move_to_blocked_or_ready_q(r, cmd);
+	ret = handle_epoll_out_event(r);
+	return ret;
+}
+
+static int
+handle_mgmt_eventfd(void *arg)
+{
+	replica_t *r = (replica_t *) arg;
+	if (r->disconnect_conn > 0)
+		return -1;
+	return 0;
 }
 
 void *
