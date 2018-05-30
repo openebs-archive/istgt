@@ -603,11 +603,6 @@ replica_thread(void *arg)
 	prctl(PR_SET_NAME, "replica", 0, 0, 0);
 
 	while (1) {
-		/*
-		 * set epoll timeout to minimum of replica_io_timeout/3 or minimum of last
-		 * queued IO time diff in all queues (waitq, readyq and blocked queue)
-		 */
-		epoll_timeout = (epoll_timeout > polling_timeout) ? polling_timeout : epoll_timeout;
 		nfds = epoll_wait(r_epollfd, events, MAXEVENTS, epoll_timeout);
 		if (nfds == -1) {
 			if (errno == EINTR)
@@ -654,7 +649,11 @@ replica_thread(void *arg)
 				goto exit;
 		}
 
-		/* check for replica IO timeout */
+		/*
+		 * set epoll timeout to minimum of replica_io_timeout/3 or minimum of last
+		 * queued IO time diff in all queues (waitq, readyq and blocked queue)
+		 */
+		epoll_timeout = polling_timeout;
 		CHECK_REPLICA_TIMEOUT(&r->readyq, diff_wq, ret, exit, epoll_timeout);
 		CHECK_REPLICA_TIMEOUT(&r->waitq, diff_rq, ret, exit, epoll_timeout);
 		CHECK_REPLICA_TIMEOUT(&r->blockedq, diff_bq, ret, exit, epoll_timeout);

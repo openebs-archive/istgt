@@ -155,8 +155,8 @@ extern void * replica_thread(void *);
 extern int do_drainfd(int );
 void close_fd(int epollfd, int fd);
 
-/* Replica default timeout is 60 seconds */
-#define	REPLICA_DEFAULT_TIMEOUT	60
+/* Replica default timeout is 200 seconds */
+#define	REPLICA_DEFAULT_TIMEOUT	200
 
 #define REPLICA_LOG(fmt, ...)	syslog(LOG_NOTICE, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
 #define REPLICA_NOTICELOG(fmt, ...)	syslog(LOG_NOTICE, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
