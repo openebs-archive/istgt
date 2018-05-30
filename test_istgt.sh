@@ -177,10 +177,6 @@ run_data_integrity_test() {
 	replica3_pid=$!
 	sleep 15
 
-	run_and_verify_iostats
-
-	sleep 15
-
 	$TEST_SNAPSHOT 1 &
 	test_snapshot_pid=$!
 
@@ -189,7 +185,7 @@ run_data_integrity_test() {
 	wait_for_pids $test_snapshot_pid
 
 	$TEST_SNAPSHOT 1
-
+        
 	sudo pkill -9 -P $replica1_pid
 	sleep 5
 	write_and_verify_data
@@ -208,6 +204,10 @@ run_data_integrity_test() {
 	sleep 65
 	ps -auxwww
 	$TEST_SNAPSHOT 1
+	
+	run_and_verify_iostats
+
+	sleep 15
 
 	sudo kill -9 $replica1_pid $replica2_pid $replica3_pid
 	cleanup_test_env
