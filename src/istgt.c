@@ -88,6 +88,7 @@
 #define PORTNUMLEN 32
 
 ISTGT g_istgt;
+extern int replica_timeout;
 
 /*
  * Global - number of luworker threads per lun
@@ -2580,7 +2581,8 @@ usage(void)
 	printf(" -D         don't detach from tty\n");
 	printf(" -H         show this usage\n");
 	printf(" -V         show version\n");
-	printf(" -P         Persist Disabled\n");	
+	printf(" -P         Persist Disabled\n");
+	printf(" -R         IO timeout in seconds at replicas in seconds\n");
 }
 
 #if 0
@@ -2690,7 +2692,7 @@ main(int argc, char **argv)
 	pthread_set_name_np(pthread_self(), tinfo);
 #endif
 
-	while ((ch = getopt(argc, argv, "c:p:l:m:t:N:qDHVFOP")) != -1) {
+	while ((ch = getopt(argc, argv, "c:p:l:m:t:N:qDHVFOPR:")) != -1) {
 		switch (ch) {
 		case 'c':
 			config_file = optarg;
@@ -2777,6 +2779,14 @@ main(int argc, char **argv)
 			exit(EXIT_SUCCESS);
 		case 'P':
 			persist = 0;
+			break;
+		case 'R':
+                        replica_timeout = strtol(optarg, NULL, 10);
+			if (replica_timeout <= 0) {
+				fprintf(stderr, "Incorrect timeout for replica\n");
+				usage();
+				exit(EXIT_FAILURE);
+			}
 			break;
 		case 'H':
 		default:

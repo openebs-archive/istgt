@@ -5696,8 +5696,8 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	rcmd_t *rcmd = NULL;
 	int iovcnt = cmd->iobufindx + 1;
 	bool cmd_sent = false;
-	struct timespec abstime;
-	time_t now;
+	struct timespec abstime, now;
+	int nsec;
 
 	MTX_LOCK(&spec->rq_mtx);
 	if(spec->ready == false) {
@@ -5747,7 +5747,7 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 
 	// now wait for command to complete
 	while (1) {
-		MTX_LOCK(&spec->luworker_rmutex[cmd->luworkerindx]);
+		MTX_LOCK(rcomm_cmd->mutex);
 		// check for status of rcomm_cmd
 		if (check_for_command_completion(spec, rcomm_cmd, cmd)) {
 			if (rcomm_cmd->status == -1)
@@ -5760,16 +5760,24 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 			TAILQ_REMOVE(&spec->rcommon_waitq, rcomm_cmd, wait_cmd_next);
 			MTX_UNLOCK(&spec->rq_mtx);
 
-			MTX_UNLOCK(&spec->luworker_rmutex[cmd->luworkerindx]);
+			MTX_UNLOCK(rcomm_cmd->mutex);
 			break;
 		}
-		now = time(NULL);
-		abstime.tv_sec = now + 1;
-		abstime.tv_nsec = 0;
 
-		pthread_cond_timedwait(&spec->luworker_rcond[cmd->luworkerindx], &spec->luworker_rmutex[cmd->luworkerindx],
-			&abstime); //timedwait
-		MTX_UNLOCK(&spec->luworker_rmutex[cmd->luworkerindx]);
+		/* wait for 500 ms(500000000 ns) */
+		clock_gettime(CLOCK_REALTIME, &now);
+		nsec = 1000000000 - now.tv_nsec;
+		if (nsec > 500000000) {
+			abstime.tv_sec = now.tv_sec;
+			abstime.tv_nsec = now.tv_nsec + 500000000;
+		} else {
+			abstime.tv_sec = now.tv_sec + 1;
+			abstime.tv_nsec = 500000000 - nsec;
+		}
+
+		rc = pthread_cond_timedwait(rcomm_cmd->cond_var,
+		    rcomm_cmd->mutex, &abstime);
+		MTX_UNLOCK(rcomm_cmd->mutex);
 	}
 
 	return rc;

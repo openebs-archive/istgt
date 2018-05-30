@@ -6,6 +6,7 @@
 #include "zrepl_prot.h"
 #include "istgt_integration.h"
 #include "replication.h"
+#include "replication_misc.h"
 #include "ring_mempool.h"
 
 #define	READ_PARTIAL	1
@@ -29,6 +30,9 @@ int handle_data_eventfd(void *arg);
 int handle_epoll_in_event(replica_t *r);
 static void inform_mgmt_conn(replica_t *r);
 static rcmd_t *dequeue_replica_cmdq(replica_t *replica);
+
+/* default timeout is set to REPLICA_DEFAULT_TIMEOUT seconds */
+int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 
 #define check_for_blockage() { \
 	uint64_t current_lba = cmd->offset; \
@@ -76,6 +80,31 @@ static rcmd_t *dequeue_replica_cmdq(replica_t *replica);
 	} \
 }
 
+#define	CHECK_REPLICA_TIMEOUT(_head, _diff, _ret, _exit_label, etimeout)\
+	do {								\
+		struct timespec now;					\
+		rcmd_t *pending_cmd;					\
+		int ms;							\
+		pending_cmd = TAILQ_FIRST(_head);			\
+		if (pending_cmd != NULL) {				\
+			clock_gettime(CLOCK_MONOTONIC, &now);		\
+			timesdiff(pending_cmd->queued_time, now, _diff);\
+			if (_diff.tv_sec >= replica_timeout) {		\
+				REPLICA_ERRLOG("timeout happened for "	\
+				    "replica(%s:%d)..time(%lu)\n", 	\
+				    r->ip, r->port, _diff.tv_sec); 	\
+				_ret = -1;				\
+				goto _exit_label;			\
+			} else {					\
+				ms = _diff.tv_sec * 1000;		\
+				ms += _diff.tv_nsec / 1000000;		\
+				ms = (replica_timeout * 1000) - ms;	\
+				if (ms < etimeout)			\
+					etimeout = ms;			\
+			}						\
+		}							\
+	} while (0)
+
 bool
 unblock_cmds(replica_t *r)
 {
@@ -109,11 +138,13 @@ move_to_blocked_or_ready_q(replica_t *r, rcmd_t *cmd)
 		r->replica_inflight_write_io_cnt += 1;
 
 	if (!TAILQ_EMPTY(&r->blockedq)) {
+		clock_gettime(CLOCK_MONOTONIC, &cmd->queued_time);
 		TAILQ_INSERT_TAIL(&r->blockedq, cmd, next);
 		goto done;
 	}
 	CHECK_BLOCKAGE_IN_Q(&r->readyq, next);
 	CHECK_BLOCKAGE_IN_Q(&r->waitq, next);
+	clock_gettime(CLOCK_MONOTONIC, &cmd->queued_time);
 	if (cmd_blocked == true)
 		TAILQ_INSERT_TAIL(&r->blockedq, cmd, next);
 	else
@@ -180,7 +211,8 @@ handle_data_conn_error(replica_t *r)
 			break;
 
 	if (r1 == NULL) {
-		REPLICA_ERRLOG("replica %s %d not part of rqlist..\n", r->ip, r->port);
+		REPLICA_ERRLOG("replica %s %d not part of rqlist..\n",
+		    r->ip, r->port);
 		MTX_UNLOCK(&spec->rq_mtx);
 		return -1;
 	}
@@ -200,7 +232,8 @@ handle_data_conn_error(replica_t *r)
 	MTX_UNLOCK(&spec->rq_mtx);
 
 	if (epoll_ctl(r->epollfd, EPOLL_CTL_DEL, r->iofd, NULL) == -1) {
-		perror("epoll_ctl");
+		REPLICA_ERRLOG("epoll error for replica(%s:%d) iofd:%d "
+		    "errno(%d)\n", r->ip, r->port, r->iofd, errno);
 		return -1;
 	}
 
@@ -237,7 +270,6 @@ handle_data_conn_error(replica_t *r)
 	/* replica might have got destroyed */
 	/* shouldn't access any replica related variables */
 	close_fd(epollfd, mgmt_eventfd2);
-
 	close(epollfd);
 	return 0;
 }
@@ -454,7 +486,6 @@ handle_epoll_in_event(replica_t *r)
 	rcommon_cmd_t *rcomm_cmd;
 	bool task_completed = false;
 	bool unblocked = false;
-	pthread_mutex_t *mtx;
 	pthread_cond_t *cond_var;
 
 start:
@@ -467,7 +498,6 @@ start:
 		TAILQ_REMOVE(&r->waitq, r->ongoing_io, next);
 		rcomm_cmd = r->ongoing_io->rcommq_ptr;
 
-		mtx = rcomm_cmd->mutex;
 		cond_var = rcomm_cmd->cond_var;
 
 		rcomm_cmd->resp_list[idx].io_resp_hdr = *(r->io_resp_hdr);
@@ -480,11 +510,9 @@ start:
 			rcomm_cmd->resp_list[idx].data_len = r->ongoing_io_len;
 		rcomm_cmd->resp_list[idx].status = 1;
 
-		MTX_LOCK(mtx);
 		if (rcomm_cmd->status != 2) {
 			pthread_cond_signal(cond_var);
 		}
-		MTX_UNLOCK(mtx);
 
 		free(r->ongoing_io->iov_data);
 		put_to_mempool(&rcmd_mempool, r->ongoing_io);
@@ -518,36 +546,44 @@ replica_thread(void *arg)
 	struct epoll_event ev, events[MAXEVENTS];
 	int i, nfds, fd, ret = 0;
 	void *ptr;
+	struct timespec diff_rq, diff_bq, diff_wq;
 	replica_t *r = (replica_t *)arg;
+	int polling_timeout = (replica_timeout / 3) * 1000;
+	int epoll_timeout = polling_timeout;
 
 	r->data_eventfd = r_data_eventfd = eventfd(0, EFD_NONBLOCK);
 	if (r_data_eventfd < 0) {
-		perror("r_data_eventfd");
+		REPLICA_ERRLOG("error for replica(%s:%d) data_eventfd:%d\n",
+		    r->ip, r->port, r_data_eventfd);
 		return NULL;
 	}
 
 	r->epollfd = r_epollfd = epoll_create1(0);
 	if (r_epollfd < 0) {
-		perror("epoll_create");
+		REPLICA_ERRLOG("epoll_create error for replica(%s:%d) "
+		    "errno(%d)\n", r->ip, r->port, errno);
 		return NULL;
 	}
 
 	ev.events = EPOLLIN;
 	ev.data.fd = r_data_eventfd;
 	if (epoll_ctl(r_epollfd, EPOLL_CTL_ADD, r_data_eventfd, &ev) == -1) {
-		perror("epoll_ctl_data_eventfd");
+		REPLICA_ERRLOG("epoll error for replica(%s:%d) errno(%d)\n",
+		    r->ip, r->port, errno);
 		return NULL;
 	}
 
 	r->mgmt_eventfd2 = r_mgmt_eventfd = eventfd(0, EFD_NONBLOCK);
 	if (r_mgmt_eventfd < 0) {
-		perror("r_mgmt_eventfd");
+		REPLICA_ERRLOG("epoll error for replica(%s:%d) errno(%d)\n",
+		    r->ip, r->port, errno);
 		return NULL;
 	}
 
 	ev.data.fd = r_mgmt_eventfd;
 	if (epoll_ctl(r_epollfd, EPOLL_CTL_ADD, r_mgmt_eventfd, &ev) == -1) {
-		perror("epoll_ctl_mgmt_eventfd");
+		REPLICA_ERRLOG("epoll error for replica(%s:%d) errno(%d)\n",
+		    r->ip, r->port, errno);
 		return NULL;
 	}
 
@@ -555,9 +591,11 @@ replica_thread(void *arg)
 	ev.data.ptr = NULL;
 
 	MTX_LOCK(&r->r_mtx);
-	if ((r->iofd == -1) || (epoll_ctl(r_epollfd, EPOLL_CTL_ADD, r->iofd, &ev) == -1)) {
+	if ((r->iofd == -1) ||
+	    (epoll_ctl(r_epollfd, EPOLL_CTL_ADD, r->iofd, &ev) == -1)) {
 		MTX_UNLOCK(&r->r_mtx);
-		perror("epoll_ctl_data_eventfd");
+		REPLICA_ERRLOG("epoll error for replica(%s:%d) errno(%d)\n",
+		    r->ip, r->port, errno);
 		return NULL;
 	}
 	MTX_UNLOCK(&r->r_mtx);
@@ -565,11 +603,12 @@ replica_thread(void *arg)
 	prctl(PR_SET_NAME, "replica", 0, 0, 0);
 
 	while (1) {
-		nfds = epoll_wait(r_epollfd, events, MAXEVENTS, -1);
+		nfds = epoll_wait(r_epollfd, events, MAXEVENTS, epoll_timeout);
 		if (nfds == -1) {
 			if (errno == EINTR)
 				continue;
-			perror("epoll_wait");
+			REPLICA_ERRLOG("epoll_wait error for replica(%s:%d) "
+			    "errno(%d)\n", r->ip, r->port, errno);
 			ret = -1;
 			goto exit;
 		}
@@ -609,13 +648,18 @@ replica_thread(void *arg)
 			if (ret == -1)
 				goto exit;
 		}
-		/* Need to handle wait IOs that are taking more than IO timeout */
-		// handle_data_conn_error(r);
-		// return -1;
+
+		/*
+		 * set epoll timeout to minimum of replica_io_timeout/3 or minimum of last
+		 * queued IO time diff in all queues (waitq, readyq and blocked queue)
+		 */
+		epoll_timeout = polling_timeout;
+		CHECK_REPLICA_TIMEOUT(&r->readyq, diff_wq, ret, exit, epoll_timeout);
+		CHECK_REPLICA_TIMEOUT(&r->waitq, diff_rq, ret, exit, epoll_timeout);
+		CHECK_REPLICA_TIMEOUT(&r->blockedq, diff_bq, ret, exit, epoll_timeout);
 	}
 exit:
 	if (ret == -1)
 		handle_data_conn_error(r);
 	return NULL;
 }
-
