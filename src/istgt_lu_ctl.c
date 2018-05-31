@@ -306,8 +306,9 @@ istgt_uctl_cmd_auth(UCTL_Ptr uctl)
 		istgt_md5update(&md5ctx, uctl->auth.secret,
 		    strlen(uctl->auth.secret));
 		/* followed by Challenge Value */
-		istgt_md5update(&md5ctx, uctl->auth.chap_challenge,
-		    uctl->auth.chap_challenge_len);
+		if(uctl->auth.chap_challenge_len > 0)
+			istgt_md5update(&md5ctx, uctl->auth.chap_challenge,
+		    	uctl->auth.chap_challenge_len);
 		/* tgtmd5 is expecting Response Value */
 		istgt_md5final(tgtmd5, &md5ctx);
 
@@ -350,8 +351,9 @@ istgt_uctl_cmd_auth(UCTL_Ptr uctl)
 			istgt_md5update(&md5ctx, uctl->auth.msecret,
 			    strlen(uctl->auth.msecret));
 			/* followed by Challenge Value */
-			istgt_md5update(&md5ctx, uctl->auth.chap_mchallenge,
-			    uctl->auth.chap_mchallenge_len);
+			if(uctl->auth.chap_mchallenge_len > 0)
+				istgt_md5update(&md5ctx, uctl->auth.chap_mchallenge,
+			    	uctl->auth.chap_mchallenge_len);
 			/* tgtmd5 is Response Value */
 			istgt_md5final(tgtmd5, &md5ctx);
 
