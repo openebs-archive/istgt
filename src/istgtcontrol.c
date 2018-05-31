@@ -1526,7 +1526,7 @@ do_auth(UCTL_Ptr uctl)
 		istgt_md5update(&md5ctx, uctl->auth.msecret,
 		    strlen(uctl->auth.msecret));
 		/* followed by Challenge Value */
-		if(uctl->auth.chap_mchallenge_len)
+		if(uctl->auth.chap_mchallenge_len > 0)
 			istgt_md5update(&md5ctx, uctl->auth.chap_mchallenge,
 		    	uctl->auth.chap_mchallenge_len);
 		/* uctlmd5 is expecting Response Value */
