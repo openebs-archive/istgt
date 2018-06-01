@@ -5,6 +5,7 @@ SETUP_ISTGT=$DIR/src/setup_istgt.sh
 REPLICATION_TEST=$DIR/src/replication_test
 TEST_SNAPSHOT=$DIR/test_snapshot.sh
 MEMPOOL_TEST=$DIR/src/mempool_test
+ISTGT_INTEGRATION=$DIR/src/istgt_integration
 ISCSIADM=iscsiadm
 ISTGT_PID=-1
 device_name=""
@@ -57,6 +58,13 @@ run_mempool_test()
 {
 	$MEMPOOL_TEST
 	[[ $? -ne 0 ]] && echo "mempool test failed" && exit 1
+	return 0
+}
+
+run_istgt_integration()
+{
+	$ISTGT_INTEGRATION
+	[[ $? -ne 0 ]] && echo "istgt integration test failed" && exit 1
 	return 0
 }
 
@@ -172,4 +180,8 @@ run_data_integrity_test() {
 
 run_data_integrity_test
 run_mempool_test
+run_istgt_integration
+
+tail -20 /var/log/syslog
+
 exit 0
