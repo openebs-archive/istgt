@@ -49,7 +49,7 @@ start_istgt() {
 
 stop_istgt() {
 	if [ $ISTGT_PID -ne -1 ]; then
-		sudo pkill -SIGKILL $ISTGT_PID
+		sudo pkill -SIGKILL -P $ISTGT_PID
 	fi
 
 }
@@ -174,7 +174,9 @@ run_data_integrity_test() {
 	ps -auxwww
 	$TEST_SNAPSHOT 1
 
-	sudo pkill -9 $replica1_pid $replica2_pid $replica3_pid
+	sudo pkill -9 -P $replica1_pid
+	sudo pkill -9 -P $replica2_pid
+	sudo pkill -9 -P $replica3_pid
 	cleanup_test_env
 }
 
