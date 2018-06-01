@@ -1319,7 +1319,7 @@ init_replication(void *arg __attribute__((__unused__)))
 
 	//Create a listener for management connections from replica
 	const char* externalIP = getenv("externalIP");
-	if((sfd = cstor_ops.conn_listen(externalIP, 6060, 32)) < 0) {
+	if((sfd = cstor_ops.conn_listen(externalIP, 6060, 32, 1)) < 0) {
 		REPLICA_LOG("conn_listen() failed, errorno:%d sfd:%d", errno, sfd);
 		exit(EXIT_FAILURE);
 	}
@@ -1426,6 +1426,9 @@ initialize_replication()
 	return 0;
 }
 
+void create_mock_replicas(int, char *);
+void create_mock_client(spec_t *);
+
 int
 initialize_volume(spec_t *spec)
 {
@@ -1471,6 +1474,10 @@ initialize_volume(spec_t *spec)
 	MTX_LOCK(&specq_mtx);
 	TAILQ_INSERT_TAIL(&spec_q, spec, spec_next);
 	MTX_UNLOCK(&specq_mtx);
+
+	create_mock_replicas(spec->replication_factor, spec->lu->volname);
+	create_mock_client(spec);
+
 	return 0;
 }
 

@@ -6,7 +6,7 @@
 #include "istgt_sock.h"
 #include "ring_mempool.h"
 
-typedef int (*cstor_listen)(const char *, int, int);
+typedef int (*cstor_listen)(const char *, int, int, int);
 typedef int (*cstor_connect)(const char *, int);
 
 TAILQ_HEAD(, istgt_lu_disk_t) spec_q;
