@@ -14,7 +14,7 @@
 #include "istgt_integration.h"
 #include "replication_misc.h"
 
-__thread char tinfo[20] = {0};
+__thread char tinfo[50] = {0};
 int g_trace_flag = 0;
 
 typedef struct rargs_s {

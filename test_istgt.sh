@@ -49,7 +49,7 @@ start_istgt() {
 
 stop_istgt() {
 	if [ $ISTGT_PID -ne -1 ]; then
-		sudo kill -SIGKILL $ISTGT_PID
+		sudo pkill -SIGKILL $ISTGT_PID
 	fi
 
 }
@@ -63,8 +63,10 @@ run_mempool_test()
 
 run_istgt_integration()
 {
+	echo $externalIP
 	$ISTGT_INTEGRATION
 	[[ $? -ne 0 ]] && echo "istgt integration test failed" && exit 1
+	sudo rm -f /tmp/test_vol*
 	return 0
 }
 
@@ -107,8 +109,6 @@ setup_test_env() {
 
 cleanup_test_env() {
 	stop_istgt
-	sudo rm -f /tmp/test_vol*
-	sudo rm -f /tmp/test_vol*
 	sudo rm -rf /mnt/store
 }
 
@@ -174,7 +174,7 @@ run_data_integrity_test() {
 	ps -auxwww
 	$TEST_SNAPSHOT 1
 
-	sudo kill -9 $replica1_pid $replica2_pid $replica3_pid
+	sudo pkill -9 $replica1_pid $replica2_pid $replica3_pid
 	cleanup_test_env
 }
 

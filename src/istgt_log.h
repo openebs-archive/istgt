@@ -57,7 +57,7 @@
 #define ISTGT_TRACE_PROFX   0x02000000U
 #define ISTGT_TRACE_CMD		0x04000000U
 
-extern __thread char tinfo[20];
+extern __thread char tinfo[50];
 #define ISTGT_LOG(fmt, ...)  syslog(LOG_NOTICE, 	 "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
 #define ISTGT_NOTICELOG(fmt, ...) syslog(LOG_NOTICE, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
 #define ISTGT_ERRLOG(fmt, ...) syslog(LOG_ERR,  	 "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)

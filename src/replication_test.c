@@ -17,7 +17,7 @@ cstor_conn_ops_t cstor_ops = {
 	.conn_listen = replication_listen,
 	.conn_connect = replication_connect,
 };
-__thread char  tinfo[20] =  {0};
+__thread char  tinfo[50] =  {0};
 #define build_mgmt_ack_hdr {\
 	mgmt_ack_hdr = (zvol_io_hdr_t *)malloc(sizeof(zvol_io_hdr_t));\
 	mgmt_ack_hdr->opcode = opcode;\
