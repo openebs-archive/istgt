@@ -67,9 +67,9 @@
 #include "replication.h"
 #include "ring_mempool.h"
 
-#ifdef REPLICATION
-#include "replication.h"
-#endif
+//#ifdef REPLICATION
+//#include "replication.h"
+//#endif
 
 #ifdef __FreeBSD__
 #include <sys/disk.h>
@@ -87,57 +87,6 @@
 #endif
 
 extern clockid_t clockid;
-
-#define	RCOMMON_CMD_MEMPOOL_ENTRIES	100000
-rte_smempool_t rcommon_cmd_mempool;
-size_t rcommon_cmd_mempool_count = RCOMMON_CMD_MEMPOOL_ENTRIES;
-
-#define build_rcomm_cmd 						\
-	do {								\
-		rcomm_cmd = get_from_mempool(&rcommon_cmd_mempool);	\
-		rcomm_cmd->total = 0;					\
-		rcomm_cmd->copies_sent = 0;				\
-		rcomm_cmd->total_len = 0;				\
-		rcomm_cmd->offset = offset;				\
-		rcomm_cmd->data_len = nbytes;				\
-		rcomm_cmd->state = CMD_CREATED;				\
-		rcomm_cmd->luworker_id = cmd->luworkerindx;		\
-		rcomm_cmd->mutex = 					\
-		    &spec->luworker_rmutex[cmd->luworkerindx];		\
-		rcomm_cmd->cond_var = 					\
-		    &spec->luworker_rcond[cmd->luworkerindx];		\
-		rcomm_cmd->healthy_count = spec->healthy_rcount;	\
-		rcomm_cmd->status = 0;					\
-		rcomm_cmd->completed = false;				\
-		rcomm_cmd->io_seq = ++spec->io_seq;			\
-		rcomm_cmd->state = CMD_ENQUEUED_TO_WAITQ;		\
-		switch (cmd->cdb0) {					\
-			case SBC_WRITE_6:				\
-			case SBC_WRITE_10:				\
-			case SBC_WRITE_12:				\
-			case SBC_WRITE_16:				\
-				cmd_write = true;			\
-				break;					\
-			default:					\
-				break;					\
-		}							\
-		if (cmd_write) {						\
-			rcomm_cmd->opcode = ZVOL_OPCODE_WRITE;		\
-			rcomm_cmd->iovcnt = cmd->iobufindx+1;		\
-		} else {						\
-			rcomm_cmd->opcode = ZVOL_OPCODE_READ;		\
-			rcomm_cmd->iovcnt = 0;				\
-		}							\
-		if (cmd_write) {						\
-			for (i=1; i < iovcnt + 1; i++) {		\
-				rcomm_cmd->iov[i].iov_base =		\
-				    cmd->iobuf[i-1].iov_base;		\
-				rcomm_cmd->iov[i].iov_len =		\
-				    cmd->iobuf[i-1].iov_len;		\
-			}						\
-			rcomm_cmd->total_len += cmd->iobufsize;		\
-		}							\
-	} while (0)
 
 //#define ISTGT_TRACE_DISK
 
@@ -283,7 +232,7 @@ static int istgt_lu_disk_queue_abort_ITL(ISTGT_LU_DISK *spec, const char *initia
 istgt_get_disktype_by_ext(const char *file);
 static int istgt_lu_disk_unmap(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, uint8_t *data, int pllen);
 int istgt_lu_disk_copy_reservation(ISTGT_LU_DISK *spec_bkp, ISTGT_LU_DISK *spec);
-int initialize_volume(ISTGT_LU_DISK *);
+int initialize_volume(ISTGT_LU_DISK *, int, int);
 /**
  * find_first_bit - find the first set bit in a memory region
  * @addr: The address to start the search at
@@ -959,12 +908,14 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 		spec = xmalloc(sizeof *spec);
 		memset(spec, 0, sizeof *spec);
 		spec->lu = lu;
+		spec->volname = xstrdup(spec->lu->volname);
 		spec->num = lu->num;
 		spec->lun = i;
 		spec->do_avg = 0;
 		spec->inflight = 0;
 		spec->fd = -1;
 		spec->ludsk_ref = 0;
+		spec->quiesce = 0;
 		spec->max_unmap_sectors = 4096;
 		spec->persist = is_persist_enabled();
 		spec->luworkers = lu->luworkers;
@@ -1082,7 +1033,7 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 		}
 		istgt_queue_init(&spec->blocked_queue);
 #ifdef REPLICATION
-		rc = initialize_volume(spec);
+		rc = initialize_volume(spec, spec->lu->replication_factor, spec->lu->consistency_factor);
 		if (rc != 0) {
 			ISTGT_ERRLOG("LU%d: persistent reservation mutex_init() failed errno:%d\n", lu->num, errno);
 			return -1;
@@ -5563,219 +5514,6 @@ istgt_lu_disk_scsi_reserve(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr 
 	return 0;
 }
 
-#ifdef REPLICATION
-extern rte_smempool_t rcmd_mempool;
-
-#define build_rcmd() 							\
-	do {								\
-		uint8_t *ldata = malloc(sizeof(zvol_io_hdr_t) + 	\
-		    sizeof(struct zvol_io_rw_hdr));			\
-		zvol_io_hdr_t *rio = (zvol_io_hdr_t *)ldata;		\
-		struct zvol_io_rw_hdr *rio_rw_hdr =			\
-		    (struct zvol_io_rw_hdr *)(ldata +			\
-		    sizeof(zvol_io_hdr_t));				\
-		rcmd = get_from_mempool(&rcmd_mempool);			\
-		memset(rcmd, 0, sizeof(*rcmd));				\
-		rcmd->opcode = rcomm_cmd->opcode;			\
-		rcmd->offset = rcomm_cmd->offset;			\
-		rcmd->data_len = rcomm_cmd->data_len;			\
-		rcmd->io_seq = rcomm_cmd->io_seq;			\
-		rcmd->idx = rcomm_cmd->copies_sent - 1;			\
-		rcmd->healthy_count = spec->healthy_rcount;		\
-		rcmd->rcommq_ptr = rcomm_cmd;				\
-		rcmd->status = 0;					\
-		rcmd->iovcnt = rcomm_cmd->iovcnt;			\
-		for (i=1; i < rcomm_cmd->iovcnt + 1; i++) {		\
-			rcmd->iov[i].iov_base = 			\
-			     rcomm_cmd->iov[i].iov_base;		\
-			rcmd->iov[i].iov_len = 				\
-			    rcomm_cmd->iov[i].iov_len;			\
-		}							\
-		rio->opcode = rcmd->opcode;				\
-		rio->version = REPLICA_VERSION;				\
-		rio->io_seq = rcmd->io_seq;				\
-		rio->offset = rcmd->offset;				\
-		if (rcmd->opcode == ZVOL_OPCODE_WRITE) {		\
-			rio->len = rcmd->data_len +			\
-			    sizeof(struct zvol_io_rw_hdr);		\
-			rio->checkpointed_io_seq = 0;			\
-		} else							\
-			rio->len = rcmd->data_len;			\
-		rcmd->iov_data = ldata;					\
-		rio_rw_hdr->io_num = rcmd->io_seq;			\
-		rio_rw_hdr->len = rcmd->data_len;			\
-		rcmd->iov[0].iov_base = rio;				\
-		if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE)		\
-			rcmd->iov[0].iov_len = sizeof(zvol_io_hdr_t) +	\
-			    sizeof(struct zvol_io_rw_hdr);		\
-		else							\
-			rcmd->iov[0].iov_len = sizeof(zvol_io_hdr_t);	\
-		rcmd->iovcnt++;						\
-	} while (0);							\
-
-void
-clear_rcomm_cmd(rcommon_cmd_t *rcomm_cmd)
-{
-	int i;
-	for (i=1; i<rcomm_cmd->iovcnt + 1; i++)
-		xfree(rcomm_cmd->iov[i].iov_base);
-	put_to_mempool(&rcommon_cmd_mempool, rcomm_cmd);
-}
-
-//extern void get_all_read_resp_data_chunk(void *data, struct io_data_chunk_list_t *io_data_chunk);
-//extern uint8_t * process_chunk_read_resp(struct io_data_chunk_list_t  *io_chunk_list, uint64_t len);
-
-static uint8_t *
-handle_read_consistency(rcommon_cmd_t *rcomm_cmd)
-{
-	int i;
-	uint8_t *dataptr = NULL;
-	struct io_data_chunk_list_t io_data_chunk_list;
-
-	TAILQ_INIT(&(io_data_chunk_list));
-
-	for (i = 0; i < rcomm_cmd->copies_sent; i++) {
-		if (rcomm_cmd->resp_list[i].status == 1) {
-			get_all_read_resp_data_chunk(&rcomm_cmd->resp_list[i], &io_data_chunk_list);
-		}
-	}
-
-	dataptr = process_chunk_read_resp(&io_data_chunk_list, rcomm_cmd->data_len);
-
-	return dataptr;
-}
-
-static int
-check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CMD_Ptr cmd)
-{
-	int i, rc = 0;
-	uint8_t *data = NULL;
-	int success = 0, failure = 0;
-
-	for (i = 0; i < rcomm_cmd->copies_sent; i++) {
-		if (rcomm_cmd->resp_list[i].status == 1) {
-			success++;
-		} else if (rcomm_cmd->resp_list[i].status == -1) {
-			failure++;
-		}
-	}
-
-	if (rcomm_cmd->opcode == ZVOL_OPCODE_READ) {
-		if ((rcomm_cmd->copies_sent != (success + failure))) {
-			rc = 0;
-		} else if (rcomm_cmd->copies_sent == failure) {
-			rc = -1;
-		} else {
-			data = handle_read_consistency(rcomm_cmd);
-			cmd->data = data;
-			cmd->data_len = rcomm_cmd->data_len;
-			rc = 1;
-		}
-	} else if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) {
-		if (success >= spec->consistency_factor) {
-			rc = 1;
-			rcomm_cmd->status = 2;
-			cmd->data_len = rcomm_cmd->data_len;
-		} else if ((success + failure) == rcomm_cmd->copies_sent) {
-			rc = -1;
-			rcomm_cmd->status = -1;
-		}
-
-	}
-
-	return rc;
-}
-
-int64_t
-replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t nbytes)
-{
-	int rc = -1, i;
-	bool cmd_write = false;
-	replica_t *replica;
-	rcommon_cmd_t *rcomm_cmd;
-	rcmd_t *rcmd = NULL;
-	int iovcnt = cmd->iobufindx + 1;
-	bool cmd_sent = false;
-	struct timespec abstime;
-	time_t now;
-
-	MTX_LOCK(&spec->rq_mtx);
-	if(spec->ready == false) {
-		REPLICA_LOG("SPEC is not ready\n");
-		MTX_UNLOCK(&spec->rq_mtx);
-		return -1;
-	}
-
-	build_rcomm_cmd;
-
-	TAILQ_FOREACH(replica, &spec->rq, r_next) {
-		if(replica == NULL) {
-			REPLICA_LOG("Replica not present");
-			MTX_UNLOCK(&spec->rq_mtx);
-			exit(EXIT_FAILURE);
-		}
-
-		/*
-		 * If there are some healthy replica then send read command
-		 * to all healthy replica else send read command to all
-		 * degraded replica.
-		 */
-		if (spec->healthy_rcount &&
-		    rcomm_cmd->opcode == ZVOL_OPCODE_READ) {
-			/*
-			 * If there are some healthy replica then don't send
-			 * a read command to degraded replica
-			 */
-			if (replica->state == ZVOL_STATUS_DEGRADED)
-				continue;
-			else
-				cmd_sent = true;
-		}
-
-		rcomm_cmd->copies_sent++;
-		build_rcmd();
-		put_to_mempool(&replica->cmdq, rcmd);
-		eventfd_write(replica->data_eventfd, 1);
-
-		if (cmd_sent)
-			break;
-	}
-
-	TAILQ_INSERT_TAIL(&spec->rcommon_waitq, rcomm_cmd, wait_cmd_next);
-
-	MTX_UNLOCK(&spec->rq_mtx);
-
-	// now wait for command to complete
-	while (1) {
-		MTX_LOCK(&spec->luworker_rmutex[cmd->luworkerindx]);
-		// check for status of rcomm_cmd
-		if (check_for_command_completion(spec, rcomm_cmd, cmd)) {
-			if (rcomm_cmd->status == -1)
-				rc = -1;
-			else
-				rc = cmd->data_len = rcomm_cmd->data_len;
-			put_to_mempool(&spec->rcommon_deadlist, rcomm_cmd);
-
-			MTX_LOCK(&spec->rq_mtx);
-			TAILQ_REMOVE(&spec->rcommon_waitq, rcomm_cmd, wait_cmd_next);
-			MTX_UNLOCK(&spec->rq_mtx);
-
-			MTX_UNLOCK(&spec->luworker_rmutex[cmd->luworkerindx]);
-			break;
-		}
-		now = time(NULL);
-		abstime.tv_sec = now + 1;
-		abstime.tv_nsec = 0;
-
-		pthread_cond_timedwait(&spec->luworker_rcond[cmd->luworkerindx], &spec->luworker_rmutex[cmd->luworkerindx],
-			&abstime); //timedwait
-		MTX_UNLOCK(&spec->luworker_rmutex[cmd->luworkerindx]);
-	}
-
-	return rc;
-}
-#endif
-
 static int
 istgt_lu_disk_lbread(ISTGT_LU_DISK *spec, CONN_Ptr conn __attribute__((__unused__)), ISTGT_LU_CMD_Ptr lu_cmd, uint64_t lba, uint32_t len)
 {
@@ -5917,7 +5655,7 @@ istgt_lu_disk_lbwrite(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cm
 		iov[i].iov_len = lu_cmd->iobuf[i].iov_len;
 	}
 
-	while (spec->lu->quiesce) {
+	while (spec->quiesce) {
 		ISTGT_ERRLOG("c#%d LU%d: quiescing write IOs\n", conn->id, spec->lu->num);
 		sleep(1);
 	}

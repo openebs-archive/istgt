@@ -8,9 +8,14 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+#include "istgt_misc.h"
+#include "istgt_proto.h"
 #include "replication.h"
 #include "istgt_integration.h"
 #include "replication_misc.h"
+
+__thread char tinfo[20] = {0};
+int g_trace_flag = 0;
 
 typedef struct rargs_s {
 	char replica_ip[MAX_IP_LEN];
@@ -138,10 +143,9 @@ mock_repl(void *args)
 	pthread_t io_receiver, io_sender, io_worker1, io_worker2, io_worker3;
 	struct sockaddr saddr;
 	socklen_t slen;
-	char tname[50];
 
-	snprintf(tname, 50, "mock%d", rargs->replica_port);
-	prctl(PR_SET_NAME, tname, 0, 0, 0);
+	snprintf(tinfo, 50, "mock%d", rargs->replica_port);
+	prctl(PR_SET_NAME, tinfo, 0, 0, 0);
 
 	rargs->file_fd = file_fd = open(rargs->file_path, O_RDWR, 0666);
 //	clock_gettime(CLOCK_MONOTONIC, &now);
@@ -149,7 +153,7 @@ mock_repl(void *args)
 
 	//Create listener for io connections from controller and add to epoll
 	if((sfd = cstor_ops.conn_listen(rargs->replica_ip, rargs->replica_port, 32, 0)) < 0) {
-		REPLICA_LOG("conn_listen() failed, errorno:%d", errno);
+		REPLICA_ERRLOG("conn_listen() failed, errorno:%d", errno);
 		exit(EXIT_FAILURE);
         }
 
@@ -229,7 +233,8 @@ void handle_open(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 	zvol_io_hdr_t *hdr = &(zio_cmd->hdr);
 	zvol_op_open_data_t *data = zio_cmd->buf;
 
-	REPLICA_ERRLOG("%d %s %d %d %d %s\n", rargs->replica_port, rargs->file_path, rargs->file_fd, data->timeout, data->tgt_block_size, data->volname);
+	REPLICA_ERRLOG("%d %s %d %d %d %s\n", rargs->replica_port, rargs->file_path, rargs->file_fd,
+	    data->timeout, data->tgt_block_size, data->volname);
 	free(zio_cmd->buf);
 	hdr->len = 0;
 	zio_cmd->buf = NULL;
@@ -298,10 +303,9 @@ void *mock_repl_mgmt_sender(void *args)
 	rargs_t *rargs = (rargs_t *)args;
 	zvol_io_cmd_t *zio_cmd;
 	int rc;
-	char tname[50];
 
-	snprintf(tname, 50, "mocksend%d", rargs->replica_port);
-	prctl(PR_SET_NAME, tname, 0, 0, 0);
+	snprintf(tinfo, 50, "mocksend%d", rargs->replica_port);
+	prctl(PR_SET_NAME, tinfo, 0, 0, 0);
 
 	while (1) {
 		MTX_LOCK(&rargs->mgmt_send_mtx);
@@ -331,10 +335,9 @@ void *mock_repl_io_sender(void *args)
 	zvol_io_cmd_t *zio_cmd;
 	int rc;
 
-	char tname[50];
 
-	snprintf(tname, 50, "mockiosend%d", rargs->replica_port);
-	prctl(PR_SET_NAME, tname, 0, 0, 0);
+	snprintf(tinfo, 50, "mockiosend%d", rargs->replica_port);
+	prctl(PR_SET_NAME, tinfo, 0, 0, 0);
 
 	while (1) {
 		MTX_LOCK(&rargs->io_send_mtx);
@@ -376,7 +379,7 @@ void handle_read(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 				sleep(1);
 				continue;
 			}
-			REPLICA_LOG("pread failed, errorno:%d", errno);
+			REPLICA_ERRLOG("pread failed, errorno:%d", errno);
 			exit(EXIT_FAILURE);
 		}
 		nbytes += rc;
@@ -390,7 +393,6 @@ void handle_read(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 	hdr->status = ZVOL_OP_STATUS_OK;
 	hdr->len = len + sizeof (struct zvol_io_rw_hdr);
 	zio_cmd->buf = orig_data;
-	REPLICA_ERRLOG("read opcode %d: %lu %lu %lu retlen: %lu chunklen: %lu\n", rargs->replica_port, hdr->io_seq, offset, len, hdr->len, io_rw_hdr->len);
 }
 
 void handle_write(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
@@ -408,7 +410,7 @@ void handle_write(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 				sleep(1);
 				continue;
 			}
-			REPLICA_LOG("pwrite failed, errorno:%d", errno);
+			REPLICA_ERRLOG("pwrite failed, errorno:%d", errno);
 			exit(EXIT_FAILURE);
 		}
 		nbytes += rc;
@@ -417,7 +419,6 @@ void handle_write(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 		}
 	}
 	hdr->status = ZVOL_OP_STATUS_OK;
-	REPLICA_ERRLOG("write opcode %d: %lu %lu %lu\n", rargs->replica_port, hdr->io_seq, hdr->offset, io_rw_hdr->len);
 	free(zio_cmd->buf);
 	zio_cmd->buf = NULL;
 }
@@ -428,11 +429,10 @@ void *mock_repl_io_worker(void *args)
 	zvol_io_cmd_t *zio_cmd;
 	zvol_io_hdr_t *hdr;
 	int read_count = 0, write_count = 0;
-	char tname[50];
 	struct timespec now, prev;
 
-	snprintf(tname, 50, "mockiowork%d", rargs->replica_port);
-	prctl(PR_SET_NAME, tname, 0, 0, 0);
+	snprintf(tinfo, 50, "mockiowork%d", rargs->replica_port);
+	prctl(PR_SET_NAME, tinfo, 0, 0, 0);
 
 	clock_gettime(CLOCK_MONOTONIC, &prev);
 	while (1) {
@@ -463,7 +463,7 @@ void *mock_repl_io_worker(void *args)
 		clock_gettime(CLOCK_MONOTONIC, &now);
 		if (now.tv_sec - prev.tv_sec > 1) {
 			prev = now;
-			printf("read %d wrote %d from %s\n", read_count, write_count, tname);
+			REPLICA_ERRLOG("read %d wrote %d from %s\n", read_count, write_count, tinfo);
 		}
 		MTX_LOCK(&rargs->io_send_mtx);
 		TAILQ_INSERT_TAIL(&rargs->io_send_list, zio_cmd, next);
@@ -479,10 +479,9 @@ void *mock_repl_mgmt_worker(void *args)
 	zvol_io_cmd_t *zio_cmd;
 	zvol_io_hdr_t *hdr;
 
-	char tname[50];
 
-	snprintf(tname, 50, "mockwork%d", rargs->replica_port);
-	prctl(PR_SET_NAME, tname, 0, 0, 0);
+	snprintf(tinfo, 50, "mockwork%d", rargs->replica_port);
+	prctl(PR_SET_NAME, tinfo, 0, 0, 0);
 
 	while (1) {
 		MTX_LOCK(&rargs->mgmt_recv_mtx);
@@ -520,10 +519,9 @@ void *mock_repl_mgmt_receiver(void *args)
 	zvol_io_cmd_t *zio_cmd;
 	zvol_io_hdr_t *hdr = malloc(sizeof (zvol_io_hdr_t));
 	memset(hdr, 0, sizeof (zvol_io_hdr_t));
-	char tname[50];
 
-	snprintf(tname, 50, "mockmgmt%d", rargs->replica_port);
-	prctl(PR_SET_NAME, tname, 0, 0, 0);
+	snprintf(tinfo, 50, "mockmgmt%d", rargs->replica_port);
+	prctl(PR_SET_NAME, tinfo, 0, 0, 0);
 
 	while (1) {
 		rc = uzfs_zvol_socket_read(rargs->mgmtfd, (char *)hdr,
@@ -567,10 +565,8 @@ void *mock_repl_io_receiver(void *args)
 	zvol_io_hdr_t *hdr = malloc(sizeof (zvol_io_hdr_t));
 	memset(hdr, 0, sizeof (zvol_io_hdr_t));
 
-	char tname[50];
-
-	snprintf(tname, 50, "mockiorecv%d", rargs->replica_port);
-	prctl(PR_SET_NAME, tname, 0, 0, 0);
+	snprintf(tinfo, 50, "mockiorecv%d", rargs->replica_port);
+	prctl(PR_SET_NAME, tinfo, 0, 0, 0);
 
 	while (1) {
 		rc = uzfs_zvol_socket_read(rargs->iofd, (char *)hdr,
@@ -599,5 +595,96 @@ void *mock_repl_io_receiver(void *args)
 	}
 end:
 	return NULL;
+}
+
+pthread_mutexattr_t mutex_attr;
+void create_mock_replicas(int, char *);
+void create_mock_client(spec_t *);
+uint64_t blocklen;
+uint64_t volsize;
+int initialize_spec(spec_t *spec);
+
+int
+initialize_spec(spec_t *spec)
+{
+	int k, rc;
+	memset(spec, 0, sizeof (spec_t));
+	spec->volname = xstrdup("vol1");
+	spec->blocklen = blocklen;
+	spec->blockcnt = (volsize / spec->blocklen);
+
+	for(k = 0; k < ISTGT_MAX_NUM_LUWORKERS; k++) {
+		rc = pthread_cond_init(&spec->luworker_rcond[k], NULL);
+		if (rc != 0) {
+			REPLICA_ERRLOG("luworker %d rcond_init() failed errno:%d\n", k, errno);
+			return -1;
+		}
+
+		rc = pthread_mutex_init(&spec->luworker_rmutex[k], &mutex_attr);
+		if (rc != 0) {
+			REPLICA_ERRLOG("luworker %d mutex_init() failed errno:%d\n", k, errno);
+			return -1;
+		}
+	}
+	return 0;
+}
+
+int initialize_volume(spec_t *spec, int, int);
+
+int
+main()
+{
+	int rc;
+	spec_t *spec = (spec_t *)malloc(sizeof (spec_t));
+	int replication_factor = 3, consistency_factor = 2;
+	pthread_t replica_thread;
+
+	rc = pthread_mutexattr_init(&mutex_attr);
+	if (rc != 0) {
+		REPLICA_ERRLOG("mutexattr_init() failed\n");
+		return 1;
+	}
+
+#ifdef HAVE_PTHREAD_MUTEX_ADAPTIVE_NP
+	rc = pthread_mutexattr_settype(&mutex_attr, PTHREAD_MUTEX_ADAPTIVE_NP);
+#else
+	rc = pthread_mutexattr_settype(&mutex_attr, PTHREAD_MUTEX_ERRORCHECK);
+#endif
+
+	blocklen = 512;
+	volsize = (2 * 1024ULL * 1024ULL * 10240ULL);
+
+	/* Initialize mempool needed for replication*/
+	if (initialize_replication_mempool(false)) {
+		REPLICA_ERRLOG("Failed to initialize mempool\n");
+		return 1;
+	}
+
+	initialize_replication();
+
+	rc = initialize_spec(spec);
+	if (rc != 0) {
+		REPLICA_ERRLOG("error in initializing spec..\n");
+		return 1;
+	}
+
+	spec->ready = false;
+
+	initialize_volume(spec, replication_factor, consistency_factor);
+
+	spec->ready = false;
+
+	pthread_create(&replica_thread, NULL, &init_replication, (void *)NULL);
+
+	spec->ready = false;
+
+	create_mock_replicas(spec->replication_factor, spec->volname);
+	create_mock_client(spec);
+/*
+	while(1) {
+		sleep(1);
+	}
+*/
+	return 0;
 }
 
