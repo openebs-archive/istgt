@@ -81,5 +81,5 @@ truncate -s 1G /tmp/ztest1.0a
 service rsyslog start
 /usr/local/bin/istgt &
 child=$!
-
+echo "child PID from init script: "$child
 wait
