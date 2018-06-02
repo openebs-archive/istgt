@@ -1432,8 +1432,9 @@ istgt_iscsi_auth_params(CONN_Ptr conn, ISCSI_PARAM *params, const char *method, 
 		istgt_md5update(&md5ctx, conn->auth.secret,
 		    strlen(conn->auth.secret));
 		/* followed by Challenge Value */
-		istgt_md5update(&md5ctx, conn->auth.chap_challenge,
-		    conn->auth.chap_challenge_len);
+		if(conn->auth.chap_challenge_len > 0)
+			istgt_md5update(&md5ctx, conn->auth.chap_challenge,
+		    	conn->auth.chap_challenge_len);
 		/* tgtmd5 is expecting Response Value */
 		istgt_md5final(tgtmd5, &md5ctx);
 
@@ -1494,8 +1495,9 @@ istgt_iscsi_auth_params(CONN_Ptr conn, ISCSI_PARAM *params, const char *method, 
 			istgt_md5update(&md5ctx, conn->auth.msecret,
 			    strlen(conn->auth.msecret));
 			/* followed by Challenge Value */
-			istgt_md5update(&md5ctx, conn->auth.chap_mchallenge,
-			    conn->auth.chap_mchallenge_len);
+			if(conn->auth.chap_mchallenge_len > 0)
+				istgt_md5update(&md5ctx, conn->auth.chap_mchallenge,
+			    	conn->auth.chap_mchallenge_len);
 			/* tgtmd5 is Response Value */
 			istgt_md5final(tgtmd5, &md5ctx);
 
