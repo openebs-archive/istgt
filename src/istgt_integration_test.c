@@ -18,17 +18,27 @@ __thread char tinfo[50] = {0};
 int g_trace_flag = 0;
 
 typedef struct rargs_s {
+	/* IP:Port on which replica is listening */
 	char replica_ip[MAX_IP_LEN];
 	uint16_t replica_port;
 
+	/* IP:Port on which controller is listening */
 	char ctrl_ip[MAX_IP_LEN];
 	uint16_t ctrl_port;
 
+	/* fd for management connection from replica to tgt */
 	int mgmtfd;
+
+	/* fd for data connection from tgt to replica */
 	int iofd;
+
+	/* fd of sparse file to write data for replica */
 	int file_fd;
 
+	/* mtx to change mgmt_send_list */
 	pthread_mutex_t mgmt_send_mtx;
+
+	/* mtx to change mgmt_recv_list */
 	pthread_mutex_t mgmt_recv_mtx;
 
 	pthread_cond_t mgmt_send_cv;
@@ -37,7 +47,10 @@ typedef struct rargs_s {
 	TAILQ_HEAD(, zvol_io_cmd_s) mgmt_recv_list;
 	TAILQ_HEAD(, zvol_io_cmd_s) mgmt_send_list;
 
+	/* mtx to change io_send_list */
 	pthread_mutex_t io_send_mtx;
+
+	/* mtx to change io_recv_list */
 	pthread_mutex_t io_recv_mtx;
 
 	pthread_cond_t io_send_cv;
@@ -49,6 +62,7 @@ typedef struct rargs_s {
 	char volname[MAX_NAME_LEN];
 	char file_path[MAX_NAME_LEN];
 
+	/* flag to stop replica threads once this is set to 1 */
 	int kill_replica;
 } rargs_t;
 
@@ -59,23 +73,13 @@ typedef struct zvol_io_cmd_s {
 	void		*buf;
 } zvol_io_cmd_t;
 
-zvol_io_cmd_t *zio_cmd_alloc(zvol_io_hdr_t *hdr);
-void zio_cmd_free(zvol_io_cmd_t **cmd);
-
-void handle_handshake(rargs_t *rargs, zvol_io_cmd_t *zio_cmd);
-int uzfs_zvol_socket_write(int fd, char *buf, uint64_t nbytes);
-void *mock_repl_mgmt_sender(void *args);
-void *mock_repl_mgmt_worker(void *args);
-void *mock_repl_mgmt_receiver(void *rargs);
-void *mock_repl(void *rargs);
-void handle_write(rargs_t *rargs, zvol_io_cmd_t *zio_cmd);
-void handle_read(rargs_t *rargs, zvol_io_cmd_t *zio_cmd);
+int initialize_volume(spec_t *spec, int, int);
 
 /*
  * Allocate zio command along with
  * buffer needed for IO completion.
  */
-zvol_io_cmd_t *
+static zvol_io_cmd_t *
 zio_cmd_alloc(zvol_io_hdr_t *hdr)
 {
 	zvol_io_cmd_t *zio_cmd = malloc(
@@ -96,7 +100,7 @@ zio_cmd_alloc(zvol_io_hdr_t *hdr)
 /*
  * Free zio command along with buffer.
  */
-void
+static void
 zio_cmd_free(zvol_io_cmd_t **cmd)
 {
 	zvol_io_cmd_t *zio_cmd = *cmd;
@@ -107,9 +111,10 @@ zio_cmd_free(zvol_io_cmd_t **cmd)
 	*cmd = NULL;
 }
 
-int uzfs_zvol_socket_read(int fd, char *buf, uint64_t nbytes);
-
-int
+/*
+ * blocks to read from the wire
+ */
+static int
 uzfs_zvol_socket_read(int fd, char *buf, uint64_t nbytes)
 {
 	ssize_t count = 0;
@@ -127,108 +132,14 @@ uzfs_zvol_socket_read(int fd, char *buf, uint64_t nbytes)
 }
 
 extern cstor_conn_ops_t cstor_ops;
-void *mock_repl_io_receiver(void *args);
-void *mock_repl_io_worker(void *args);
-void *mock_repl_io_sender(void *args);
-void handle_replica_status(zvol_io_cmd_t *zio_cmd);
-void handle_open(rargs_t *rargs, zvol_io_cmd_t *zio_cmd);
-void create_mock_replicas(int replication_factor, char *volname);
-
-void *
-mock_repl(void *args)
-{
-	rargs_t *rargs = (rargs_t *)args;
-	int file_fd, sfd, mgmtfd;
-	pthread_t mgmt_receiver, mgmt_sender, mgmt_worker;
-	pthread_t io_receiver, io_sender, io_worker1, io_worker2, io_worker3;
-	struct sockaddr saddr;
-	socklen_t slen;
-
-	snprintf(tinfo, 50, "mock%d", rargs->replica_port);
-	prctl(PR_SET_NAME, tinfo, 0, 0, 0);
-
-	rargs->file_fd = file_fd = open(rargs->file_path, O_RDWR, 0666);
-//	clock_gettime(CLOCK_MONOTONIC, &now);
-//	srandom(now.tv_sec);
-
-	//Create listener for io connections from controller and add to epoll
-	if((sfd = cstor_ops.conn_listen(rargs->replica_ip, rargs->replica_port, 32, 0)) < 0) {
-		REPLICA_ERRLOG("conn_listen() failed, errorno:%d", errno);
-		exit(EXIT_FAILURE);
-        }
-
-	//Connect to controller to start handshake and connect to epoll
-	while((rargs->mgmtfd = mgmtfd = cstor_ops.conn_connect(rargs->ctrl_ip, rargs->ctrl_port)) < 0) {
-		REPLICA_ERRLOG("conn_connect() failed errno:%d\n", errno);
-		sleep(1);
-	}
-
-	pthread_mutex_init(&rargs->mgmt_recv_mtx, NULL);
-	pthread_mutex_init(&rargs->mgmt_send_mtx, NULL);
-
-	pthread_cond_init(&rargs->mgmt_recv_cv, NULL);
-	pthread_cond_init(&rargs->mgmt_send_cv, NULL);
-
-	TAILQ_INIT(&rargs->mgmt_recv_list);
-	TAILQ_INIT(&rargs->mgmt_send_list);
-
-	pthread_mutex_init(&rargs->io_recv_mtx, NULL);
-	pthread_mutex_init(&rargs->io_send_mtx, NULL);
-
-	pthread_cond_init(&rargs->io_recv_cv, NULL);
-	pthread_cond_init(&rargs->io_send_cv, NULL);
-
-	TAILQ_INIT(&rargs->io_recv_list);
-	TAILQ_INIT(&rargs->io_send_list);
-
-	pthread_create(&mgmt_receiver, NULL, &mock_repl_mgmt_receiver, args);
-	pthread_create(&mgmt_sender, NULL, &mock_repl_mgmt_sender, args);
-	pthread_create(&mgmt_worker, NULL, &mock_repl_mgmt_worker, args);
-
-	while (1) {
-		rargs->iofd = accept(sfd, &saddr, &slen);
-		pthread_create(&io_receiver, NULL, &mock_repl_io_receiver, args);
-		pthread_create(&io_sender, NULL, &mock_repl_io_sender, args);
-		pthread_create(&io_worker1, NULL, &mock_repl_io_worker, args);
-		pthread_create(&io_worker2, NULL, &mock_repl_io_worker, args);
-		pthread_create(&io_worker3, NULL, &mock_repl_io_worker, args);
-	}
-
-	return NULL;
-}
 
 rargs_t *all_rargs;
 pthread_t *all_rthrds;
 
-void
-create_mock_replicas(int replication_factor, char *volname)
-{
-	all_rargs = (rargs_t *)malloc(sizeof (rargs_t) * replication_factor);
-	all_rthrds = (pthread_t *)malloc(sizeof (pthread_t) * replication_factor);
-	rargs_t *rargs;
-	char filepath[50];
-	int i;
-
-	memset(all_rargs, 0, sizeof (rargs_t) * replication_factor);
-
-	for (i = 0; i < replication_factor; i++) {
-		rargs = &(all_rargs[i]);
-		strncpy(rargs->replica_ip, "127.0.0.1", MAX_IP_LEN);
-		rargs->replica_port = 6161 + i;
-
-		strncpy(rargs->ctrl_ip, "127.0.0.1", MAX_IP_LEN);
-		rargs->ctrl_port = 6060;
-
-		strncpy(rargs->volname, volname, MAX_NAME_LEN);
-
-		snprintf(filepath, 45, "/tmp/test_vol%d", (i+1));
-		strncpy(rargs->file_path, filepath, MAX_NAME_LEN);
-
-		pthread_create(&all_rthrds[i], NULL, &mock_repl, rargs);
-	}
-}
-
-void handle_open(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
+/*
+ * Handles ZVOL_OPCODE_OPEN mgmt command
+ */
+static void handle_open(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 {
 	zvol_io_hdr_t *hdr = &(zio_cmd->hdr);
 	zvol_op_open_data_t *data = zio_cmd->buf;
@@ -241,7 +152,10 @@ void handle_open(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 	hdr->status = ZVOL_OP_STATUS_OK;
 }
 
-void handle_replica_status(zvol_io_cmd_t *zio_cmd)
+/*
+ * Handles ZVOL_OPCODE_REPLICA_STATUS mgmt command
+ */
+static void handle_replica_status(zvol_io_cmd_t *zio_cmd)
 {
 	zvol_io_hdr_t *hdr = &(zio_cmd->hdr);
 	zrepl_status_ack_t *zrepl_status;
@@ -257,7 +171,10 @@ void handle_replica_status(zvol_io_cmd_t *zio_cmd)
 	hdr->status = ZVOL_OP_STATUS_OK;
 }
 
-void handle_handshake(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
+/*
+ * Handles ZVOL_OPCODE_HANDSHAKE mgmt command
+ */
+static void handle_handshake(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 {
 	zvol_io_hdr_t *hdr = &(zio_cmd->hdr);
 
@@ -281,7 +198,10 @@ void handle_handshake(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 	zio_cmd->buf = mgmt_ack;
 }
 
-int
+/*
+ * blocks to write on the wire
+ */
+static int
 uzfs_zvol_socket_write(int fd, char *buf, uint64_t nbytes)
 {
 	ssize_t count = 0;
@@ -298,7 +218,10 @@ uzfs_zvol_socket_write(int fd, char *buf, uint64_t nbytes)
 	return (0);
 }
 
-void *mock_repl_mgmt_sender(void *args)
+/*
+ * This thread takes mgmt commands from mgmt_send_list and writes to mgmtfd
+ */
+static void *mock_repl_mgmt_sender(void *args)
 {
 	rargs_t *rargs = (rargs_t *)args;
 	zvol_io_cmd_t *zio_cmd;
@@ -329,7 +252,10 @@ end:
 	return NULL;
 }
 
-void *mock_repl_io_sender(void *args)
+/*
+ * This thread takes IOs from io_send_list and writes to iofd
+ */
+static void *mock_repl_io_sender(void *args)
 {
 	rargs_t *rargs = (rargs_t *)args;
 	zvol_io_cmd_t *zio_cmd;
@@ -361,7 +287,7 @@ end:
 	return NULL;
 }
 
-void handle_read(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
+static void handle_read(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 {
 	zvol_io_hdr_t *hdr = &(zio_cmd->hdr);
 	uint64_t offset = hdr->offset;
@@ -395,7 +321,7 @@ void handle_read(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 	zio_cmd->buf = orig_data;
 }
 
-void handle_write(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
+static void handle_write(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 {
 	int rc;
 	uint64_t nbytes = 0;
@@ -423,7 +349,11 @@ void handle_write(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 	zio_cmd->buf = NULL;
 }
 
-void *mock_repl_io_worker(void *args)
+/*
+ * This thread takes IOs from io_recv_list, executes them, and,
+ * adds responses to io_send_list
+ */
+static void *mock_repl_io_worker(void *args)
 {
 	rargs_t *rargs = (rargs_t *)args;
 	zvol_io_cmd_t *zio_cmd;
@@ -473,7 +403,11 @@ void *mock_repl_io_worker(void *args)
 	return NULL;
 }
 
-void *mock_repl_mgmt_worker(void *args)
+/*
+ * This thread takes mgmt commands from mgmt_recv_list
+ * executes them and adds to mgmt_send_list
+ */
+static void *mock_repl_mgmt_worker(void *args)
 {
 	rargs_t *rargs = (rargs_t *)args;
 	zvol_io_cmd_t *zio_cmd;
@@ -512,7 +446,10 @@ end:
 	return NULL;
 }
 
-void *mock_repl_mgmt_receiver(void *args)
+/*
+ * This thread reads mgmt commands from mgmtfd and adds to mgmt_recv_list
+ */
+static void *mock_repl_mgmt_receiver(void *args)
 {
 	rargs_t *rargs = (rargs_t *)args;
 	int rc;
@@ -557,7 +494,10 @@ end:
 	return NULL;
 }
 
-void *mock_repl_io_receiver(void *args)
+/*
+ * This thread reads IOs from iofd and adds to io_recv_list
+ */
+static void *mock_repl_io_receiver(void *args)
 {
 	rargs_t *rargs = (rargs_t *)args;
 	int rc;
@@ -598,13 +538,14 @@ end:
 }
 
 pthread_mutexattr_t mutex_attr;
-void create_mock_replicas(int, char *);
-void create_mock_client(spec_t *);
+extern void create_mock_client(spec_t *);
 uint64_t blocklen;
 uint64_t volsize;
-int initialize_spec(spec_t *spec);
 
-int
+/*
+ * Initialize mutex, cv variables in spec which are required for repliation
+ */
+static int
 initialize_spec(spec_t *spec)
 {
 	int k, rc;
@@ -629,7 +570,110 @@ initialize_spec(spec_t *spec)
 	return 0;
 }
 
-int initialize_volume(spec_t *spec, int, int);
+/*
+ * main replica thread to accept for data connections
+ * creates other worker threads for reading/writing/executing
+ */
+static void *
+mock_repl(void *args)
+{
+	rargs_t *rargs = (rargs_t *)args;
+	int file_fd, sfd, mgmtfd;
+	pthread_t mgmt_receiver, mgmt_sender, mgmt_worker;
+	pthread_t io_receiver, io_sender, io_worker1, io_worker2, io_worker3;
+	struct sockaddr saddr;
+	socklen_t slen;
+
+	snprintf(tinfo, 50, "mock%d", rargs->replica_port);
+	prctl(PR_SET_NAME, tinfo, 0, 0, 0);
+
+	rargs->file_fd = file_fd = open(rargs->file_path, O_RDWR, 0666);
+
+	//Create listener for io connections from controller and add to epoll
+	if((sfd = cstor_ops.conn_listen(rargs->replica_ip, rargs->replica_port, 32, 0)) < 0) {
+		REPLICA_ERRLOG("conn_listen() failed, errorno:%d", errno);
+		exit(EXIT_FAILURE);
+        }
+
+	//Connect to controller to start handshake and connect to epoll
+	while((rargs->mgmtfd = mgmtfd = cstor_ops.conn_connect(rargs->ctrl_ip, rargs->ctrl_port)) < 0) {
+		REPLICA_ERRLOG("conn_connect() failed errno:%d\n", errno);
+		sleep(1);
+	}
+
+	pthread_mutex_init(&rargs->mgmt_recv_mtx, NULL);
+	pthread_mutex_init(&rargs->mgmt_send_mtx, NULL);
+
+	pthread_cond_init(&rargs->mgmt_recv_cv, NULL);
+	pthread_cond_init(&rargs->mgmt_send_cv, NULL);
+
+	TAILQ_INIT(&rargs->mgmt_recv_list);
+	TAILQ_INIT(&rargs->mgmt_send_list);
+
+	pthread_mutex_init(&rargs->io_recv_mtx, NULL);
+	pthread_mutex_init(&rargs->io_send_mtx, NULL);
+
+	pthread_cond_init(&rargs->io_recv_cv, NULL);
+	pthread_cond_init(&rargs->io_send_cv, NULL);
+
+	TAILQ_INIT(&rargs->io_recv_list);
+	TAILQ_INIT(&rargs->io_send_list);
+
+	pthread_create(&mgmt_receiver, NULL, &mock_repl_mgmt_receiver, args);
+	pthread_create(&mgmt_sender, NULL, &mock_repl_mgmt_sender, args);
+	pthread_create(&mgmt_worker, NULL, &mock_repl_mgmt_worker, args);
+
+	while (1) {
+		rargs->iofd = accept(sfd, &saddr, &slen);
+		pthread_create(&io_receiver, NULL, &mock_repl_io_receiver, args);
+		pthread_create(&io_sender, NULL, &mock_repl_io_sender, args);
+		pthread_create(&io_worker1, NULL, &mock_repl_io_worker, args);
+		pthread_create(&io_worker2, NULL, &mock_repl_io_worker, args);
+		pthread_create(&io_worker3, NULL, &mock_repl_io_worker, args);
+	}
+
+	return NULL;
+}
+
+/*
+ * Create mock replicas given the replica count
+ * rargs stores variables, locks, fds needed for replica
+ * Each replica will have following threads:
+ * - one replica main thread that listens for connections from target
+ * - one thread to read mgmt commands requests
+ * - one thread to send mgmt commands responses
+ * - one thread to work on mgmt commands
+ * - one thread to read IOs after connection is established from target
+ * - one thread to send IOs response
+ * - three threads to work on IOs
+ */
+static void
+create_mock_replicas(int replication_factor, char *volname)
+{
+	all_rargs = (rargs_t *)malloc(sizeof (rargs_t) * replication_factor);
+	all_rthrds = (pthread_t *)malloc(sizeof (pthread_t) * replication_factor);
+	rargs_t *rargs;
+	char filepath[50];
+	int i;
+
+	memset(all_rargs, 0, sizeof (rargs_t) * replication_factor);
+
+	for (i = 0; i < replication_factor; i++) {
+		rargs = &(all_rargs[i]);
+		strncpy(rargs->replica_ip, "127.0.0.1", MAX_IP_LEN);
+		rargs->replica_port = 6161 + i;
+
+		strncpy(rargs->ctrl_ip, "127.0.0.1", MAX_IP_LEN);
+		rargs->ctrl_port = 6060;
+
+		strncpy(rargs->volname, volname, MAX_NAME_LEN);
+
+		snprintf(filepath, 45, "/tmp/test_vol%d", (i+1));
+		strncpy(rargs->file_path, filepath, MAX_NAME_LEN);
+
+		pthread_create(&all_rthrds[i], NULL, &mock_repl, rargs);
+	}
+}
 
 int
 main()
@@ -668,11 +712,7 @@ main()
 		return 1;
 	}
 
-	spec->ready = false;
-
 	initialize_volume(spec, replication_factor, consistency_factor);
-
-	spec->ready = false;
 
 	pthread_create(&replica_thread, NULL, &init_replication, (void *)NULL);
 
@@ -680,11 +720,7 @@ main()
 
 	create_mock_replicas(spec->replication_factor, spec->volname);
 	create_mock_client(spec);
-/*
-	while(1) {
-		sleep(1);
-	}
-*/
+
 	return 0;
 }
 

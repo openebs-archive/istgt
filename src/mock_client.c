@@ -55,6 +55,9 @@ build_cmd(cargs_t *cargs, ISTGT_LU_CMD_Ptr cmd, int opcode,
 	}
 }
 
+/*
+ * Checks for settings on 'spec' to continue IOs
+ */
 void check_settings(spec_t *spec)
 {
 	while (spec->ready != true)
@@ -63,6 +66,10 @@ void check_settings(spec_t *spec)
 	return;
 }
 
+/*
+ * Adds write IOs to replication module
+ * Increments '*count' variable to set the completion of reader thread
+ */
 void *
 writer(void *args)
 {
@@ -125,6 +132,10 @@ end:
 	return NULL;
 }
 
+/*
+ * Adds read IOs to replication module
+ * Increments '*count' variable to set the completion of reader thread
+ */
 void *
 reader(void *args)
 {
@@ -191,6 +202,11 @@ end:
 	return NULL;
 }
 
+/*
+ * creates client threads that are needed to send read/write IOs to replication module.
+ * cargs_t stores details that are sent to reader/writer threads
+ * which isends IOs to replication module.
+ */
 void
 create_mock_client(spec_t *spec)
 {
