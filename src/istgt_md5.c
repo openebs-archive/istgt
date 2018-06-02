@@ -67,6 +67,7 @@ istgt_md5update(ISTGT_MD5CTX *md5ctx, const void *data, size_t len)
 
 	if (md5ctx == NULL)
 		return -1;
+	// Caller of this function needs to ensure that len is not negative.
 	if (data == NULL || len == 0)
 		return 0;
 	rc = MD5_Update(&md5ctx->md5ctx, data, len);
