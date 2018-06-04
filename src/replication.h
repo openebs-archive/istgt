@@ -19,12 +19,18 @@
 #include "istgt_integration.h"
 #include "istgt_lu.h"
 
-#define MAXREPLICA 64
+#define MAXREPLICA 10
 #define MAXEVENTS 64
 #define BUFSIZE 1024
 #define MAXIPLEN 56
 #define MAXNAMELEN 256
-#define RCMD_MEMPOOL_ENTRIES    100000
+
+#define RCOMMON_CMD_MEMPOOL_ENTRIES     100000
+
+/*
+ * NOTE : RCMD_MEMPOOL_ENTRIES depends on number of replicas ISGT can support
+ */
+#define RCMD_MEMPOOL_ENTRIES    (3 * RCOMMON_CMD_MEMPOOL_ENTRIES)
 
 #define MAX(a,b) (((a)>(b))?(a):(b))
 
@@ -48,7 +54,6 @@ typedef struct resp_data {
 struct replica_rcomm_resp {
 	zvol_io_hdr_t io_resp_hdr;
 	uint8_t *data_ptr;
-	uint64_t data_len;
 	int64_t status;
 } __attribute__((packed));
 
@@ -58,6 +63,8 @@ typedef struct rcommon_cmd_s {
 	TAILQ_ENTRY(rcommon_cmd_s)  wait_cmd_next; /* for rcommon_waitq */
 	int luworker_id;
 	int copies_sent;
+	uint8_t replication_factor;
+	uint8_t consistency_factor;
 	zvol_op_code_t opcode;
 	int healthy_count;	/* number of healthy replica when cmd queued */
 	uint64_t io_seq;
@@ -65,14 +72,11 @@ typedef struct rcommon_cmd_s {
 	uint64_t offset;
 	uint64_t data_len;
 	uint64_t total_len;
-	int status;
-	bool completed;
 	cmd_state_t state;
 	void *data;
 	pthread_mutex_t *mutex;
 	pthread_cond_t *cond_var;
 	replica_rcomm_resp_t resp_list[MAXREPLICA];   /* array of response received from replica */
-	uint64_t total;
 	int64_t iovcnt;
 	struct iovec iov[41];
 } rcommon_cmd_t;
@@ -154,6 +158,8 @@ uint8_t *process_chunk_read_resp(struct io_data_chunk_list_t  *io_chunk_list, ui
 extern void * replica_thread(void *);
 extern int do_drainfd(int );
 void close_fd(int epollfd, int fd);
+int64_t perform_read_write_on_fd(int fd, uint8_t *data, uint64_t len, int state);
+int initialize_volume(spec_t *spec);
 
 /* Replica default timeout is 200 seconds */
 #define	REPLICA_DEFAULT_TIMEOUT	200

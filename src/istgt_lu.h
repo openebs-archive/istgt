@@ -327,8 +327,8 @@ typedef struct istgt_lu_t {
 	ISTGT_LU_MAP map[MAX_LU_MAP];
 	int conns;
 #ifdef REPLICATION
-	int replication_factor;
-	int consistency_factor;
+	uint8_t replication_factor;
+	uint8_t consistency_factor;
 #endif
 } ISTGT_LU;
 typedef ISTGT_LU *ISTGT_LU_Ptr;

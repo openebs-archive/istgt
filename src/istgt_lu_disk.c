@@ -87,15 +87,11 @@
 #endif
 
 extern clockid_t clockid;
-
-#define	RCOMMON_CMD_MEMPOOL_ENTRIES	100000
-rte_smempool_t rcommon_cmd_mempool;
-size_t rcommon_cmd_mempool_count = RCOMMON_CMD_MEMPOOL_ENTRIES;
+extern rte_smempool_t rcommon_cmd_mempool;
 
 #define build_rcomm_cmd 						\
 	do {								\
 		rcomm_cmd = get_from_mempool(&rcommon_cmd_mempool);	\
-		rcomm_cmd->total = 0;					\
 		rcomm_cmd->copies_sent = 0;				\
 		rcomm_cmd->total_len = 0;				\
 		rcomm_cmd->offset = offset;				\
@@ -107,9 +103,11 @@ size_t rcommon_cmd_mempool_count = RCOMMON_CMD_MEMPOOL_ENTRIES;
 		rcomm_cmd->cond_var = 					\
 		    &spec->luworker_rcond[cmd->luworkerindx];		\
 		rcomm_cmd->healthy_count = spec->healthy_rcount;	\
-		rcomm_cmd->status = 0;					\
-		rcomm_cmd->completed = false;				\
 		rcomm_cmd->io_seq = ++spec->io_seq;			\
+		rcomm_cmd->replication_factor = 			\
+		    spec->replication_factor;				\
+		rcomm_cmd->consistency_factor =				\
+		    spec->consistency_factor;				\
 		rcomm_cmd->state = CMD_ENQUEUED_TO_WAITQ;		\
 		switch (cmd->cdb0) {					\
 			case SBC_WRITE_6:				\
@@ -283,7 +281,6 @@ static int istgt_lu_disk_queue_abort_ITL(ISTGT_LU_DISK *spec, const char *initia
 istgt_get_disktype_by_ext(const char *file);
 static int istgt_lu_disk_unmap(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, uint8_t *data, int pllen);
 int istgt_lu_disk_copy_reservation(ISTGT_LU_DISK *spec_bkp, ISTGT_LU_DISK *spec);
-int initialize_volume(ISTGT_LU_DISK *);
 /**
  * find_first_bit - find the first set bit in a memory region
  * @addr: The address to start the search at
@@ -5622,9 +5619,6 @@ clear_rcomm_cmd(rcommon_cmd_t *rcomm_cmd)
 	put_to_mempool(&rcommon_cmd_mempool, rcomm_cmd);
 }
 
-//extern void get_all_read_resp_data_chunk(void *data, struct io_data_chunk_list_t *io_data_chunk);
-//extern uint8_t * process_chunk_read_resp(struct io_data_chunk_list_t  *io_chunk_list, uint64_t len);
-
 static uint8_t *
 handle_read_consistency(rcommon_cmd_t *rcomm_cmd)
 {
@@ -5668,17 +5662,13 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 		} else {
 			data = handle_read_consistency(rcomm_cmd);
 			cmd->data = data;
-			cmd->data_len = rcomm_cmd->data_len;
 			rc = 1;
 		}
 	} else if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) {
-		if (success >= spec->consistency_factor) {
+		if (success >= rcomm_cmd->consistency_factor) {
 			rc = 1;
-			rcomm_cmd->status = 2;
-			cmd->data_len = rcomm_cmd->data_len;
 		} else if ((success + failure) == rcomm_cmd->copies_sent) {
 			rc = -1;
-			rcomm_cmd->status = -1;
 		}
 
 	}
@@ -5697,7 +5687,7 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	int iovcnt = cmd->iobufindx + 1;
 	bool cmd_sent = false;
 	struct timespec abstime, now;
-	int nsec;
+	int nsec, err_num = 0;
 
 	MTX_LOCK(&spec->rq_mtx);
 	if(spec->ready == false) {
@@ -5709,12 +5699,6 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	build_rcomm_cmd;
 
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
-		if(replica == NULL) {
-			REPLICA_LOG("Replica not present");
-			MTX_UNLOCK(&spec->rq_mtx);
-			exit(EXIT_FAILURE);
-		}
-
 		/*
 		 * If there are some healthy replica then send read command
 		 * to all healthy replica else send read command to all
@@ -5749,18 +5733,24 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	while (1) {
 		MTX_LOCK(rcomm_cmd->mutex);
 		// check for status of rcomm_cmd
-		if (check_for_command_completion(spec, rcomm_cmd, cmd)) {
-			if (rcomm_cmd->status == -1)
-				rc = -1;
-			else
+		rc = check_for_command_completion(spec, rcomm_cmd, cmd);
+		if (rc) {
+			if (rc == 1)
 				rc = cmd->data_len = rcomm_cmd->data_len;
+			rcomm_cmd->state = CMD_EXECUTION_DONE;
 			put_to_mempool(&spec->rcommon_deadlist, rcomm_cmd);
+			MTX_UNLOCK(rcomm_cmd->mutex);
+
+			/*
+			 * NOTE: This is for debugging purpose only
+			 */
+			if (err_num == ETIMEDOUT)
+				fprintf(stderr,"last errno(%d) opcode(%d)\n",
+				    errno, rcomm_cmd->opcode);
 
 			MTX_LOCK(&spec->rq_mtx);
 			TAILQ_REMOVE(&spec->rcommon_waitq, rcomm_cmd, wait_cmd_next);
 			MTX_UNLOCK(&spec->rq_mtx);
-
-			MTX_UNLOCK(rcomm_cmd->mutex);
 			break;
 		}
 
@@ -5777,6 +5767,7 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 
 		rc = pthread_cond_timedwait(rcomm_cmd->cond_var,
 		    rcomm_cmd->mutex, &abstime);
+		err_num = errno;
 		MTX_UNLOCK(rcomm_cmd->mutex);
 	}
 
