@@ -938,7 +938,7 @@ write_io_data(replica_t *replica, io_event_t *wevent)
 	void **data = wevent->io_data;
 	int *write_count = wevent->byte_count;
 	uint64_t reqlen;
-	int count;
+	ssize_t count;
 	int donecount = 0;
 	(void)replica;
 
@@ -986,7 +986,8 @@ read_io_resp(spec_t *spec, replica_t *replica, io_event_t *revent, mgmt_cmd_t *m
 	void **resp_data = revent->io_data;
 	int *read_count = revent->byte_count;
 	uint64_t reqlen;
-	int count, rc = 0;
+	ssize_t count;
+	int rc = 0;
 	int donecount = 0;
 
 	switch(*state) {

@@ -104,6 +104,10 @@ extern rte_smempool_t rcommon_cmd_mempool;
 		    &spec->luworker_rcond[cmd->luworkerindx];		\
 		rcomm_cmd->healthy_count = spec->healthy_rcount;	\
 		rcomm_cmd->io_seq = ++spec->io_seq;			\
+		rcomm_cmd->replication_factor = 			\
+		    spec->replication_factor;				\
+		rcomm_cmd->consistency_factor =				\
+		    spec->consistency_factor;				\
 		rcomm_cmd->state = CMD_ENQUEUED_TO_WAITQ;		\
 		switch (cmd->cdb0) {					\
 			case SBC_WRITE_6:				\
@@ -5661,7 +5665,7 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 			rc = 1;
 		}
 	} else if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) {
-		if (success >= spec->consistency_factor) {
+		if (success >= rcomm_cmd->consistency_factor) {
 			rc = 1;
 		} else if ((success + failure) == rcomm_cmd->copies_sent) {
 			rc = -1;
@@ -5683,7 +5687,7 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	int iovcnt = cmd->iobufindx + 1;
 	bool cmd_sent = false;
 	struct timespec abstime, now;
-	int nsec;
+	int nsec, err_num = 0;
 
 	MTX_LOCK(&spec->rq_mtx);
 	if(spec->ready == false) {
@@ -5740,7 +5744,7 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 			/*
 			 * NOTE: This is for debugging purpose only
 			 */
-			if (errno == ETIMEDOUT)
+			if (err_num == ETIMEDOUT)
 				fprintf(stderr,"last errno(%d) opcode(%d)\n",
 				    errno, rcomm_cmd->opcode);
 
@@ -5763,6 +5767,7 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 
 		rc = pthread_cond_timedwait(rcomm_cmd->cond_var,
 		    rcomm_cmd->mutex, &abstime);
+		err_num = errno;
 		MTX_UNLOCK(rcomm_cmd->mutex);
 	}
 
