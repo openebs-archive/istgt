@@ -79,7 +79,8 @@ truncate -s $size $path/sdisk.img
 touch /tmp/ztest1.0a
 truncate -s 1G /tmp/ztest1.0a
 service rsyslog start
-/usr/local/bin/istgt &
+#setting replica timeout to 20 seconds
+/usr/local/bin/istgt -R 20 &
 child=$!
 echo "child PID from init script: "$child
 wait
