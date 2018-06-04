@@ -159,7 +159,7 @@ extern void * replica_thread(void *);
 extern int do_drainfd(int );
 void close_fd(int epollfd, int fd);
 int64_t perform_read_write_on_fd(int fd, uint8_t *data, uint64_t len, int state);
-int initialize_volume(spec_t *spec);
+int initialize_volume(spec_t *spec, int, int);
 
 /* Replica default timeout is 200 seconds */
 #define	REPLICA_DEFAULT_TIMEOUT	200

@@ -5,8 +5,9 @@ SETUP_ISTGT=$DIR/src/setup_istgt.sh
 REPLICATION_TEST=$DIR/src/replication_test
 TEST_SNAPSHOT=$DIR/test_snapshot.sh
 MEMPOOL_TEST=$DIR/src/mempool_test
+ISTGT_INTEGRATION=$DIR/src/istgt_integration
 ISCSIADM=iscsiadm
-ISTGT_PID=-1
+SETUP_PID=-1
 device_name=""
 
 CONTROLLER_IP="127.0.0.1"
@@ -31,6 +32,7 @@ get_scsi_disk() {
 		i=`expr $i + 1`
 		if [ $i -eq 10 ]; then
 			echo "scsi disk not found";
+			tail -20 /var/log/syslog
 			exit;
 		else
 			continue;
@@ -41,14 +43,16 @@ get_scsi_disk() {
 start_istgt() {
 	cd $DIR/src
 	sudo sh $SETUP_ISTGT &
-	ISTGT_PID=$!
+	SETUP_PID=$!
+	echo $SETUP_PID
 	sleep 5
 	cd ..
 }
 
 stop_istgt() {
-	if [ $ISTGT_PID -ne -1 ]; then
-		sudo kill -SIGKILL $ISTGT_PID
+	if [ $SETUP_PID -ne -1 ]; then
+		kill -9 $(list_descendants $SETUP_PID)
+		kill -9 $SETUP_PID
 	fi
 
 }
@@ -56,7 +60,17 @@ stop_istgt() {
 run_mempool_test()
 {
 	$MEMPOOL_TEST
-	[[ $? -ne 0 ]] && echo "mempool test failed" && exit 1
+	[[ $? -ne 0 ]] && echo "mempool test failed" && tail -20 /var/log/syslog && exit 1
+	return 0
+}
+
+run_istgt_integration()
+{
+	export externalIP=127.0.0.1
+	echo $externalIP
+	$ISTGT_INTEGRATION
+	[[ $? -ne 0 ]] && echo "istgt integration test failed" && tail -20 /var/log/syslog && exit 1
+	sudo rm -f /tmp/test_vol*
 	return 0
 }
 
@@ -66,10 +80,10 @@ write_and_verify_data(){
 	get_scsi_disk
 	if [ "$device_name"!="" ]; then
 		sudo mkfs.ext2 -F /dev/$device_name
-		[[ $? -ne 0 ]] && echo "mkfs failed for $device_name" && exit 1
+		[[ $? -ne 0 ]] && echo "mkfs failed for $device_name" && tail -20 /var/log/syslog && exit 1
 
 		sudo mount /dev/$device_name /mnt/store
-		[[ $? -ne 0 ]] && echo "mount for $device_name" && exit 1
+		[[ $? -ne 0 ]] && echo "mount for $device_name" && tail -20 /var/log/syslog && exit 1
 
 		sudo dd if=/dev/urandom of=file1 bs=4k count=10000
 		hash1=$(sudo md5sum file1 | awk '{print $1}')
@@ -77,14 +91,18 @@ write_and_verify_data(){
 		hash2=$(sudo md5sum /mnt/store/file1 | awk '{print $1}')
 		if [ $hash1 == $hash2 ]; then echo "DI Test: PASSED"
 		else
-			echo "DI Test: FAILED"; exit 1
+			echo "DI Test: FAILED";
+			tail -20 /var/log/syslog
+			exit 1
 		fi
 
 		sudo umount /mnt/store
 		logout_of_volume
 		sleep 5
 	else
-		echo "Unable to detect iSCSI device, login failed"; exit 1
+		echo "Unable to detect iSCSI device, login failed";
+		tail -20 /var/log/syslog
+		exit 1
 	fi
 }
 
@@ -99,8 +117,6 @@ setup_test_env() {
 
 cleanup_test_env() {
 	stop_istgt
-	sudo rm -f /tmp/test_vol*
-	sudo rm -f /tmp/test_vol*
 	sudo rm -rf /mnt/store
 }
 
@@ -110,9 +126,22 @@ wait_for_pids()
 		wait $p
 		status=$?
 		if [ $status -ne 0 ] && [ $status -ne 127 ]; then
+			tail -20 /var/log/syslog
 			exit 1
 		fi
 	done
+}
+
+list_descendants ()
+{
+	local children=$(ps -o pid= --ppid "$1")
+
+	for pid in $children
+	do
+		list_descendants "$pid"
+	done
+
+	echo "$children"
 }
 
 run_data_integrity_test() {
@@ -148,12 +177,14 @@ run_data_integrity_test() {
 	$TEST_SNAPSHOT 1
 
 	sudo pkill -9 -P $replica1_pid
+	sudo kill -SIGKILL $replica1_pid
 	sleep 5
 	write_and_verify_data
 
 	#sleep is required for more than 60 seconds, as status messages are sent every 60 seconds
 	sleep 65
 	ps -auxwww
+	ps -o pid,ppid,command
 	$TEST_SNAPSHOT 0
 
 	sudo $REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V "/tmp/test_vol1" &
@@ -164,18 +195,19 @@ run_data_integrity_test() {
 
 	sleep 65
 	ps -auxwww
+	ps -o pid,ppid,command
 	$TEST_SNAPSHOT 1
 
 	sudo pkill -9 -P $replica1_pid
 
 	# test replica IO timeout
 	sudo $REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V "/tmp/test_vol1" -t 500&
-	replica1_pid=$!
+	replica1_pid1=$!
 	sleep 5
 	write_and_verify_data
 	sleep 5
 	write_and_verify_data
-	wait $replica1_pid
+	wait $replica1_pid1
 	if [ $? == 0 ]; then
 		echo "Replica timeout failed"
 		exit 1
@@ -183,10 +215,26 @@ run_data_integrity_test() {
 		echo "Replica timeout passed"
 	fi
 
-	sudo kill -9 $replica2_pid $replica3_pid
+	sudo pkill -9 -P $replica1_pid1
+	sudo pkill -9 -P $replica2_pid
+	sudo pkill -9 -P $replica3_pid
+
+	sudo kill -SIGKILL $replica1_pid
+	sudo kill -SIGKILL $replica1_pid1
+	sudo kill -SIGKILL $replica2_pid
+	sudo kill -SIGKILL $replica3_pid
+
 	cleanup_test_env
+
+	ps -auxwww
+	ps -o pid,ppid,command
+
 }
 
 run_data_integrity_test
 run_mempool_test
+run_istgt_integration
+
+tail -20 /var/log/syslog
+
 exit 0

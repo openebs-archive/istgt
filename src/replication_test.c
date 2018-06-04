@@ -15,7 +15,7 @@ cstor_conn_ops_t cstor_ops = {
 	.conn_listen = replication_listen,
 	.conn_connect = replication_connect,
 };
-__thread char  tinfo[20] =  {0};
+__thread char  tinfo[50] =  {0};
 #define build_mgmt_ack_hdr {\
 	mgmt_ack_hdr = (zvol_io_hdr_t *)malloc(sizeof(zvol_io_hdr_t));\
 	mgmt_ack_hdr->opcode = opcode;\
@@ -298,7 +298,7 @@ main(int argc, char **argv)
 	epfd = epoll_create1(0);
 	
 	//Create listener for io connections from controller and add to epoll
-	if((sfd = cstor_ops.conn_listen(replica_ip, replica_port, 32)) < 0) {
+	if((sfd = cstor_ops.conn_listen(replica_ip, replica_port, 32, 1)) < 0) {
                 REPLICA_LOG("conn_listen() failed, errorno:%d", errno);
                 exit(EXIT_FAILURE);
         }

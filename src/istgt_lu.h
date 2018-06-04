@@ -311,7 +311,6 @@ typedef struct istgt_lu_t {
 	int type;
 	int online;
 	int readonly;
-	int quiesce;
 	int blocklen;
 	int recordsize;
 	int rshift;
@@ -747,7 +746,8 @@ typedef struct istgt_lu_disk_t {
 	int num;
 	int lun;
 	int inflight;
-	int persist;	
+	int persist;
+	char *volname;
 	int fd;
 	const char *file;
 	const char *disktype;
@@ -896,6 +896,7 @@ typedef struct istgt_lu_disk_t {
 	uint8_t percent_val[32];
 	uint8_t percent_latency[32];
 	uint64_t io_seq;
+	int quiesce;
 
 	/* entry */
 	int (*open)(struct istgt_lu_disk_t *spec, int flags, int mode);

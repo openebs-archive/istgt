@@ -43,7 +43,7 @@ int g_trace_flag = 0;
 int g_warn_flag = 1;
 static int g_log_facility = ISTGT_LOG_FACILITY;
 static int g_log_priority = ISTGT_LOG_PRIORITY;
-__thread char  tinfo[20] =  {0};
+__thread char  tinfo[50] =  {0};
 int
 istgt_set_log_facility(const char *facility)
 {

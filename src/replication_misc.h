@@ -2,7 +2,7 @@
 #define	_REPLICATION_MISC_H
 
 int replication_connect(const char *, int);
-int replication_listen(const char *, int, int);
+int replication_listen(const char *, int, int, int);
 
 /* MACRO from istgt_lu_disk.c */
 #define timesdiff(_st, _now, _re)                                       \
