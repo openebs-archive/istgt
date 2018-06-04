@@ -298,7 +298,7 @@ main(int argc, char **argv)
 	epfd = epoll_create1(0);
 	
 	//Create listener for io connections from controller and add to epoll
-	if((sfd = cstor_ops.conn_listen(replicaip, replica_port, 32, 1)) < 0) {
+	if((sfd = cstor_ops.conn_listen(replica_ip, replica_port, 32, 1)) < 0) {
                 REPLICA_LOG("conn_listen() failed, errorno:%d", errno);
                 exit(EXIT_FAILURE);
         }

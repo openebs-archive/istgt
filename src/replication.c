@@ -1335,7 +1335,7 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 			rc = 1;
 		}
 	} else if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) {
-		if (success >= spec->consistency_factor) {
+		if (success >= rcomm_cmd->consistency_factor) {
 			rc = 1;
 		} else if ((success + failure) == rcomm_cmd->copies_sent) {
 			rc = -1;
@@ -1356,8 +1356,8 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	rcmd_t *rcmd = NULL;
 	int iovcnt = cmd->iobufindx + 1;
 	bool cmd_sent = false;
-	struct timespec abstime;
-	time_t now;
+	struct timespec abstime, now;
+	int nsec, err_num = 0;
 
 	MTX_LOCK(&spec->rq_mtx);
 	if(spec->ready == false) {

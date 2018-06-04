@@ -199,16 +199,15 @@ run_data_integrity_test() {
 	$TEST_SNAPSHOT 1
 
 	sudo pkill -9 -P $replica1_pid
-	sudo kill -SIGKILL $replica1_pid
 
 	# test replica IO timeout
 	sudo $REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V "/tmp/test_vol1" -t 500&
-	replica1_pid=$!
+	replica1_pid1=$!
 	sleep 5
 	write_and_verify_data
 	sleep 5
 	write_and_verify_data
-	wait $replica1_pid
+	wait $replica1_pid1
 	if [ $? == 0 ]; then
 		echo "Replica timeout failed"
 		exit 1
@@ -216,11 +215,12 @@ run_data_integrity_test() {
 		echo "Replica timeout passed"
 	fi
 
-	sudo pkill -9 -P $replica1_pid
+	sudo pkill -9 -P $replica1_pid1
 	sudo pkill -9 -P $replica2_pid
 	sudo pkill -9 -P $replica3_pid
 
 	sudo kill -SIGKILL $replica1_pid
+	sudo kill -SIGKILL $replica1_pid1
 	sudo kill -SIGKILL $replica2_pid
 	sudo kill -SIGKILL $replica3_pid
 

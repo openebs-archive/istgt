@@ -67,10 +67,6 @@
 #include "replication.h"
 #include "ring_mempool.h"
 
-//#ifdef REPLICATION
-//#include "replication.h"
-//#endif
-
 #ifdef __FreeBSD__
 #include <sys/disk.h>
 #endif
