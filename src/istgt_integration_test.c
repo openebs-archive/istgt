@@ -7,6 +7,7 @@
 #include <sys/epoll.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <math.h>
 
 #include "istgt_misc.h"
 #include "istgt_proto.h"
@@ -541,6 +542,9 @@ pthread_mutexattr_t mutex_attr;
 extern void create_mock_client(spec_t *);
 uint64_t blocklen;
 uint64_t volsize;
+char *vol_name;
+int total_time_in_sec;
+int test_id;
 
 /*
  * Initialize mutex, cv variables in spec which are required for repliation
@@ -675,14 +679,120 @@ create_mock_replicas(int replication_factor, char *volname)
 	}
 }
 
+static void usage()
+{
+	printf("istgt_integration -b <blocklen> -s <volsize> -t <total_time_in_sec> -v <volname> -T <testid>\n");
+	exit(1);
+}
+
+static int
+str2shift(const char *buf)
+{
+	const char *ends = "BKMGTPEZ";
+	uint64_t i;
+
+	if (buf[0] == '\0')
+		return (0);
+	for (i = 0; i < strlen(ends); i++) {
+		if (toupper(buf[0]) == ends[i])
+			break;
+	}
+	if (i == strlen(ends)) {
+		printf("istgt_it: invalid bytes suffix: %s\n", buf);
+		usage();
+	}
+	if (buf[1] == '\0' || (toupper(buf[1]) == 'B' && buf[2] == '\0')) {
+		return (10*i);
+	}
+	printf("istgt_it: invalid bytes suffix: %s\n", buf);
+	usage();
+	return (-1);
+}
+
+static uint64_t
+nicenumtoull(const char *buf)
+{
+	char *end;
+	uint64_t val;
+
+	val = strtoull(buf, &end, 0);
+	if (end == buf) {
+		printf("istgt_it: bad numeric value: %s\n", buf);
+		usage();
+	} else if (end[0] == '.') {
+		double fval = strtod(buf, &end);
+		fval *= pow(2, str2shift(end));
+		if (fval > UINT64_MAX) {
+			printf("istgt_it: value too large: %s\n", buf);
+			usage();
+		}
+		val = (uint64_t)fval;
+	} else {
+		int shift = str2shift(end);
+		if (shift >= 64 || (val << shift) >> shift != val) {
+			printf("istgt_it: value too large: %s\n", buf);
+			usage();
+		}
+		val <<= shift;
+	}
+	return (val);
+}
+
+static void process_options(int argc, char **argv)
+{
+	int opt;
+	uint64_t val = 0;
+
+	while ((opt = getopt(argc, argv, "b:s:t:T:v:"))
+	    != EOF) {
+		switch (opt) {
+			case 'v':
+				break;
+			default:
+				if (optarg != NULL)
+					val = nicenumtoull(optarg);
+				break;
+		}
+
+		switch (opt) {
+			case 'b':
+				blocklen = val;
+				break;
+			case 's':
+				volsize = val;
+				break;
+			case 't':
+				total_time_in_sec = val;
+				break;
+			case 'T':
+				test_id = val;
+				break;
+			case 'v':
+				vol_name = optarg;
+				break;
+			default:
+				usage();
+		}
+	}
+
+	if (volsize == 0)
+		volsize = 2*1024ULL*1024ULL*1024ULL;
+
+	printf("vol name: %s volsize: %lu blocklen: %lu\n",
+	    vol_name, volsize, blocklen);
+	printf("total run time in seconds: %d for test_id: %d\n",
+	    total_time_in_sec, test_id);
+}
+
 int
-main()
+main(int argc, char **argv)
 {
 	int rc;
 	spec_t *spec = (spec_t *)malloc(sizeof (spec_t));
 	int replication_factor = 3, consistency_factor = 2;
 	pthread_t replica_thread;
 
+	process_options(argc, argv);
 	rc = pthread_mutexattr_init(&mutex_attr);
 	if (rc != 0) {
 		REPLICA_ERRLOG("mutexattr_init() failed\n");
