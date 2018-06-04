@@ -39,11 +39,6 @@ static void respond_with_error_for_all_outstanding_mgmt_ios(replica_t *r);
 static void inform_data_conn(replica_t *r);
 static void free_replica(replica_t *r);
 static int handle_mgmt_event_fd(replica_t *replica);
-int initialize_volume(spec_t *spec, int, int);
-
-#define	RCOMMON_CMD_MEMPOOL_ENTRIES	100000
-rte_smempool_t rcommon_cmd_mempool;
-size_t rcommon_cmd_mempool_count = RCOMMON_CMD_MEMPOOL_ENTRIES;
 
 #define build_rcomm_cmd 						\
 	do {								\
