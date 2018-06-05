@@ -105,7 +105,6 @@ typedef struct io_data_chunk {
 	TAILQ_ENTRY(io_data_chunk) io_data_chunk_next;
 	uint64_t io_num;
 	uint8_t *data;
-	uint64_t len;
 } io_data_chunk_t;
 
 TAILQ_HEAD(io_data_chunk_list_t, io_data_chunk);
@@ -153,12 +152,11 @@ int initialize_replication_mempool(bool should_fail);
 int destroy_relication_mempool(void);
 void clear_rcomm_cmd(rcommon_cmd_t *);
 void ask_replica_status(spec_t *spec, replica_t *replica);
-void get_all_read_resp_data_chunk(replica_rcomm_resp_t *, struct io_data_chunk_list_t *);
-uint8_t *process_chunk_read_resp(struct io_data_chunk_list_t  *io_chunk_list, uint64_t len);
 extern void * replica_thread(void *);
 extern int do_drainfd(int );
 void close_fd(int epollfd, int fd);
-int64_t perform_read_write_on_fd(int fd, uint8_t *data, uint64_t len, int state);
+int64_t perform_read_write_on_fd(int fd, uint8_t *data, uint64_t len,
+    int state);
 int initialize_volume(spec_t *spec, int, int);
 
 /* Replica default timeout is 200 seconds */

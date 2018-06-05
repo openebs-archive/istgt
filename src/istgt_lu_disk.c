@@ -228,7 +228,6 @@ static int istgt_lu_disk_queue_abort_ITL(ISTGT_LU_DISK *spec, const char *initia
 istgt_get_disktype_by_ext(const char *file);
 static int istgt_lu_disk_unmap(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, uint8_t *data, int pllen);
 int istgt_lu_disk_copy_reservation(ISTGT_LU_DISK *spec_bkp, ISTGT_LU_DISK *spec);
-int initialize_volume(ISTGT_LU_DISK *, int, int);
 /**
  * find_first_bit - find the first set bit in a memory region
  * @addr: The address to start the search at
