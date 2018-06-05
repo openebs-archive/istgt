@@ -62,6 +62,7 @@ enum zvol_op_code {
 	ZVOL_OPCODE_SYNC,
 	// Following commands apply to mgmt connection
 	ZVOL_OPCODE_UNMAP,
+	ZVOL_OPCODE_REPLICA_STATUS,
 	ZVOL_OPCODE_PREPARE_FOR_REBUILD,
 	ZVOL_OPCODE_START_REBUILD,
 	ZVOL_OPCODE_REBUILD_STEP,
@@ -69,7 +70,6 @@ enum zvol_op_code {
 	ZVOL_OPCODE_REBUILD_COMPLETE,
 	ZVOL_OPCODE_SNAP_CREATE,
 	ZVOL_OPCODE_SNAP_DESTROY,
-	ZVOL_OPCODE_REPLICA_STATUS,
 } __attribute__((packed));
 
 typedef enum zvol_op_code zvol_op_code_t;
