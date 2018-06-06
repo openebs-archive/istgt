@@ -625,7 +625,8 @@ istgt_lu_disk_open(ISTGT_LU_Ptr lu, int i)
 	spec->luworkersActive = lu->luworkersActive;
 	spec->file = lu->lun[i].u.storage.file;
 	spec->size = lu->lun[i].u.storage.size;
-	spec->rsize = lu->lun[i].u.storage.rsize;
+
+  spec->rsize = lu->lun[i].u.storage.rsize;
 	spec->disktype = istgt_get_disktype_by_ext(spec->file);
 	spec->blocklen = 0;
 	spec->blockcnt = 0;

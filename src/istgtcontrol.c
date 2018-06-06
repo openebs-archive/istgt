@@ -1067,6 +1067,40 @@ exec_dump(UCTL_Ptr uctl)
 }
 
 static int
+exec_iostats(UCTL_Ptr uctl)
+{
+        const char *delim = ARGS_DELIM;
+        char *arg;
+        char *result;
+        int rc;
+
+        uctl_snprintf(uctl, "IOSTATS\n");
+        rc = uctl_writeline(uctl);
+        if (rc != UCTL_CMD_OK) {
+                return rc;
+        }
+        /* receive result */
+	while(1) {
+		rc = uctl_readline(uctl);
+		if (rc != UCTL_CMD_OK) {
+			return rc;
+		}
+		arg = trim_string(uctl->recvbuf);
+		result = strsepq(&arg, delim);
+		strupr(result);
+		if (strcmp(result, uctl->cmd) !=0){
+			break;
+		}
+		fprintf(stdout, "%s\n", arg);
+	}
+	if (strcmp(result, "OK") != 0) {
+		fprintf(stderr, "ERROR %s\n", arg);
+		return UCTL_CMD_ERR;
+	}
+	return UCTL_CMD_OK;
+}
+
+static int
 exec_stats(UCTL_Ptr uctl)
 {
 	const char *delim = ARGS_DELIM;
@@ -1401,6 +1435,7 @@ static EXEC_TABLE exec_table[] =
 	{"QUE", exec_que, 0, 0 },
 	{"STATS", exec_stats, 0, 0 },
 	{"SET", exec_set, 0, 1},
+	{"IOSTATS", exec_iostats, 0, 0 },
 	{"MAXTIME", exec_maxtime, 0, 0},
 	{"SNAPCREATE", exec_snap, 2, 0},
 	{"SNAPDESTROY", exec_snap, 2, 0},
@@ -1882,6 +1917,7 @@ usage(void)
 	printf(" info       show connections of target\n");
 	printf(" maxtime    list the IOs which took maximum time to process\n");
 	printf(" set        set values for variables:\n");
+        printf(" iostats    displays iostats of volume\n");
 	printf("            Syntax: istgtcontrol -t <iqn(ALL to set globally)> set <variable number> <value>\n");
 	printf("            Variables :\n");
 	printf("            1\tsend_abrt_resp(Yes->1 No->0)\n");
