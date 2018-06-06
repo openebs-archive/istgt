@@ -91,6 +91,7 @@ static int handle_mgmt_event_fd(replica_t *replica);
 #define BUILD_REPLICA_MGMT_HDR(_mgmtio_hdr, _mgmt_opcode, _data_len)	\
 	do {								\
 		_mgmtio_hdr = malloc(sizeof(zvol_io_hdr_t));		\
+		memset(_mgmtio_hdr, 0, sizeof(zvol_io_hdr_t));		\
 		_mgmtio_hdr->opcode = _mgmt_opcode;			\
 		_mgmtio_hdr->version = REPLICA_VERSION;			\
 		_mgmtio_hdr->len    = _data_len;			\
@@ -337,6 +338,7 @@ create_replica_entry(spec_t *spec, int epfd, int mgmt_fd)
 
 	replica->initial_checkpointed_io_seq = 0;
 	replica->mgmt_io_resp_hdr = malloc(sizeof(zvol_io_hdr_t));
+	memset(replica->mgmt_io_resp_hdr, 0, sizeof (zvol_io_hdr_t));
 	replica->mgmt_io_resp_data = NULL;
 
 	MTX_LOCK(&spec->rq_mtx);
@@ -401,10 +403,12 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 
 	replica->spec = spec;
 	replica->io_resp_hdr = (zvol_io_hdr_t *) malloc(sizeof (zvol_io_hdr_t));
+	memset(replica->io_resp_hdr, 0, sizeof (zvol_io_hdr_t));
 	replica->io_state = READ_IO_RESP_HDR;
 	replica->io_read = 0;
 
 	rio_hdr = (zvol_io_hdr_t *) malloc(sizeof (zvol_io_hdr_t));
+	memset(rio_hdr, 0, sizeof (zvol_io_hdr_t));
 	rio_hdr->opcode = ZVOL_OPCODE_OPEN;
 	rio_hdr->io_seq = 0;
 	rio_hdr->offset = 0;
@@ -519,6 +523,7 @@ send_replica_handshake_query(replica_t *replica, spec_t *spec)
 	mgmt_cmd->io_bytes = 0;
 	mgmt_cmd->data = data;
 	mgmt_cmd->mgmt_cmd_state = WRITE_IO_SEND_HDR;
+	mgmt_cmd->rcomm_mgmt = NULL;
 
 	MTX_LOCK(&replica->r_mtx);
 	TAILQ_INSERT_TAIL(&replica->mgmt_cmd_queue, mgmt_cmd, mgmt_cmd_next);
@@ -789,6 +794,7 @@ send_replica_status_query(replica_t *replica, spec_t *spec)
 	mgmt_cmd->io_bytes = 0;
 	mgmt_cmd->data = data;
 	mgmt_cmd->mgmt_cmd_state = WRITE_IO_SEND_HDR;
+	mgmt_cmd->rcomm_mgmt = NULL;
 
 	MTX_LOCK(&replica->r_mtx);
 	TAILQ_INSERT_TAIL(&replica->mgmt_cmd_queue, mgmt_cmd, mgmt_cmd_next);
@@ -901,7 +907,6 @@ accept_mgmt_conns(int epfd, int sfd)
 	struct epoll_event event;
 	int rc, rcount=0;
 	spec_t *spec;
-	char *buf = malloc(BUFSIZE);
 	int mgmt_fd;
 	mgmt_event_t *mevent1, *mevent2;
 
@@ -1006,7 +1011,6 @@ cleanup:
 		replica->m_event2 = mevent2;
 		send_replica_handshake_query(replica, spec);
 	}
-	free(buf);
 }
 
 /*
@@ -1089,6 +1093,7 @@ read_io_resp_hdr:
 				resp_hdr->len = 0;
 			if (resp_hdr->len != 0) {
 				(*resp_data) = malloc(resp_hdr->len);
+				memset(*resp_data, 0, resp_hdr->len);
 			}
 			*state = READ_IO_RESP_DATA;
 
@@ -1274,6 +1279,10 @@ respond_with_error_for_all_outstanding_mgmt_ios(replica_t *r)
 		struct zvol_io_rw_hdr *rio_rw_hdr =			\
 		    (struct zvol_io_rw_hdr *)(ldata +			\
 		    sizeof(zvol_io_hdr_t));				\
+		memset(ldata, 0, sizeof(zvol_io_hdr_t) +		\
+		    sizeof(struct zvol_io_rw_hdr));			\
+		if (!spec->healthy_rcount)				\
+			rio->flags |= ZVOL_OP_FLAG_READ_METADATA;	\
 		rcmd = get_from_mempool(&rcmd_mempool);			\
 		memset(rcmd, 0, sizeof(*rcmd));				\
 		rcmd->opcode = rcomm_cmd->opcode;			\

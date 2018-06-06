@@ -111,10 +111,12 @@ read_metadata(off_t offset)
 }
 
 static uint64_t
-fetch_update_io_buf(uint64_t offset, size_t len, uint8_t *user_data,
+fetch_update_io_buf(zvol_io_hdr_t *io_hdr, uint8_t *user_data,
     uint8_t **resp_data)
 {
 	int count = 0;
+	uint64_t len = io_hdr->len;
+	uint64_t offset = io_hdr->offset;
 	uint64_t start = offset;
 	uint64_t end = offset + len;
 	uint64_t resp_index, data_index;
@@ -133,6 +135,9 @@ fetch_update_io_buf(uint64_t offset, size_t len, uint8_t *user_data,
 	if (!count)
 		count = 1;
 
+	if (!(io_hdr->flags & ZVOL_OP_FLAG_READ_METADATA))
+		count = 1;
+
 	total_payload_len = len + count * sizeof(struct zvol_io_rw_hdr);
 	*resp_data = malloc(total_payload_len);
 	memset(*resp_data, 0, total_payload_len);
@@ -140,12 +145,13 @@ fetch_update_io_buf(uint64_t offset, size_t len, uint8_t *user_data,
 
 	md_io_num = read_metadata(start);
 	last_io_rw_hdr = (struct zvol_io_rw_hdr *)*resp_data;
-	last_io_rw_hdr->io_num = md_io_num;
+	last_io_rw_hdr->io_num = (io_hdr->flags & ZVOL_OP_FLAG_READ_METADATA) ?
+	    md_io_num : 0;
 	resp_index = sizeof (struct zvol_io_rw_hdr);
 	resp = *resp_data;
 	data_index = 0;
 	count = 0;
-	while (start < end) {
+	while ((io_hdr->flags & ZVOL_OP_FLAG_READ_METADATA) && (start < end)) {
 		if (md_io_num != read_metadata(start)) {
 			last_io_rw_hdr->len = count * 512;
 			memcpy(resp + resp_index, user_data + data_index,
@@ -161,7 +167,8 @@ fetch_update_io_buf(uint64_t offset, size_t len, uint8_t *user_data,
 		count++;
 		start += 512;
 	}
-	last_io_rw_hdr->len = count * 512;
+	last_io_rw_hdr->len = (io_hdr->flags & ZVOL_OP_FLAG_READ_METADATA) ?
+	    (count * 512) : len;
 	memcpy(resp + resp_index, user_data + data_index, last_io_rw_hdr->len);
 	return total_payload_len;
 }
@@ -690,7 +697,7 @@ execute_io:
 							goto error;
 						}
 
-						nbytes = fetch_update_io_buf(io_hdr->offset, io_hdr->len, user_data, &data);
+						nbytes = fetch_update_io_buf(io_hdr, user_data, &data);
 						if (user_data)
 							free(user_data);
 						io_hdr->len = nbytes;

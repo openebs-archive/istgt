@@ -51,6 +51,7 @@ extern "C" {
 #define	TARGET_PORT	6060
 
 #define	ZVOL_OP_FLAG_REBUILD 0x01
+#define	ZVOL_OP_FLAG_READ_METADATA 0x02
 
 enum zvol_op_code {
 	// Used to obtain info about a zvol on mgmt connection
