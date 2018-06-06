@@ -71,14 +71,16 @@ run_and_verify_iostats() {
 
 		sudo dd if=/dev/urandom of=/mnt/store/file1 bs=4k count=10000 oflag=direct
 		sudo istgtcontrol iostats
-		var1="$(sudo istgtcontrol iostats |  awk '{ print $7 }' | cut -d '=' -f 2)"
+		#var1="$(sudo istgtcontrol iostats |  awk '{ print $7 }' | cut -d '=' -f 2)"
+		var1="$(sudo istgtcontrol iostats | grep -oP "(?<=totalwritebytes\": \")[^ ]+" | cut -d '"' -f 1)"
 		if [ $var1 -eq 0 ]; then
 			echo "iostats command failed" && exit 1
 		fi
 
 		sudo dd if=/dev/urandom of=/mnt/store/file1 bs=4k count=10000 oflag=direct
 		sudo istgtcontrol iostats
-		var2="$(sudo istgtcontrol iostats |  awk '{ print $7 }' | cut -d '=' -f 2)"
+		#var2="$(sudo istgtcontrol iostats |  awk '{ print $7 }' | cut -d '=' -f 2)"
+		var2="$(sudo istgtcontrol iostats | grep -oP "(?<=totalwritebytes\": \")[^ ]+" | cut -d '"' -f 1)"
 		if [ $var2 -eq 0 ]; then
 			echo "iostats command failed" && exit 1
 		fi
