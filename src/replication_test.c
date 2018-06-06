@@ -11,13 +11,11 @@
 #include "istgt_integration.h"
 #include "replication_misc.h"
 
-int if_healthy = 1;
-
 cstor_conn_ops_t cstor_ops = {
 	.conn_listen = replication_listen,
 	.conn_connect = replication_connect,
 };
-__thread char  tinfo[20] =  {0};
+__thread char  tinfo[50] =  {0};
 #define build_mgmt_ack_hdr {\
 	mgmt_ack_hdr = (zvol_io_hdr_t *)malloc(sizeof(zvol_io_hdr_t));\
 	mgmt_ack_hdr->opcode = opcode;\
@@ -29,7 +27,7 @@ __thread char  tinfo[20] =  {0};
 
 #define build_mgmt_ack_data {\
 	mgmt_ack_data = (mgmt_ack_t *)malloc(sizeof(mgmt_ack_t));\
-	strcpy(mgmt_ack_data->ip, replicaip);\
+	strcpy(mgmt_ack_data->ip, replica_ip);\
 	strcpy(mgmt_ack_data->volname, buf);\
 	mgmt_ack_data->port = replica_port;\
 	mgmt_ack_data->pool_guid = 100;\
@@ -59,7 +57,7 @@ test_read_data(int fd, uint8_t *data, uint64_t len) {
 }
 
 int
-send_mgmtack(int fd, zvol_op_code_t opcode, void *buf, char *replicaip, int replica_port)
+send_mgmtack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip, int replica_port)
 {
 	zvol_io_hdr_t *mgmt_ack_hdr = NULL;
 	int i, nbytes = 0;
@@ -96,10 +94,7 @@ send_mgmtack(int fd, zvol_op_code_t opcode, void *buf, char *replicaip, int repl
 		mgmt_ack_hdr->status = (random() % 5 == 0) ? ZVOL_OP_STATUS_FAILED : ZVOL_OP_STATUS_OK;
 		mgmt_ack_hdr->len = 0;
 	} else if (opcode == ZVOL_OPCODE_REPLICA_STATUS) {
-		if (if_healthy)
-			repl_status.state = ZVOL_STATUS_HEALTHY;
-		else
-			repl_status.state = ZVOL_STATUS_DEGRADED;
+		repl_status.state = ZVOL_STATUS_HEALTHY;
 		mgmt_ack_hdr->len = sizeof(zrepl_status_ack_t);
 		iovec_count = 4;
 		iovec[3].iov_base = &repl_status;
@@ -212,51 +207,98 @@ send_io_resp(int fd, zvol_io_hdr_t *io_hdr, void *buf)
 	return 0;
 
 }
+
+static void
+usage(void)
+{
+	printf("replica_test [options]\n");
+	printf("options:\n");
+	printf(" -i target ip\n");
+	printf(" -p target port\n");
+	printf(" -I replica ip\n");
+	printf(" -P replica port\n");
+	printf(" -V volume path\n");
+	printf(" -t number of IOs to serve before sleeping for 60 seconds\n");
+}
+
+
 int
 main(int argc, char **argv)
 {
-	if(argc < 5) {
-		exit(EXIT_FAILURE);
-	}
-	char *ctrl_ip = argv[1];
-	int ctrl_port = atoi(argv[2]);
-	char *replicaip = argv[3];
-	int replica_port = atoi(argv[4]);
-	char *test_vol = argv[5];
+	char ctrl_ip[MAX_IP_LEN];
+	int ctrl_port = 0;
+	char replica_ip[MAX_IP_LEN];
+	int replica_port = 0;
+	char test_vol[1024];
 	int sleeptime = 0;
 	struct zvol_io_rw_hdr *io_rw_hdr;
 	zvol_op_open_data_t *open_ptr;
-
-	if (argv[6] != NULL) {
-		printf("got 6th arg.. not setting healthy\n");
-		if_healthy = 0;
-//		sleeptime = atoi(argv[6]);
-	}
 	int iofd = -1, mgmtfd, sfd, rc, epfd, event_count, i;
 	int64_t count;
 	struct epoll_event event, *events;
 	uint8_t *data, *data_ptr_cpy;
 	uint64_t nbytes = 0;
-	int vol_fd = open(test_vol, O_RDWR, 0666);
+	int vol_fd;
 	zvol_op_code_t opcode;
-	zvol_io_hdr_t *io_hdr = malloc(sizeof(zvol_io_hdr_t));
-	zvol_io_hdr_t *mgmtio = malloc(sizeof(zvol_io_hdr_t));
-	
-	data = NULL;
+	zvol_io_hdr_t *io_hdr;
+	zvol_io_hdr_t *mgmtio;
 	bool read_rem_data = false;
 	bool read_rem_hdr = false;
 	uint64_t recv_len = 0;
 	uint64_t total_len = 0;
 	uint64_t io_hdr_len = sizeof(zvol_io_hdr_t);
+	int io_cnt = 0;
+	int ch;
+	int check = 1;
+
+	while ((ch = getopt(argc, argv, "i:p:I:P:V:t:")) != -1) {
+		switch (ch) {
+			case 'i':
+				strncpy(ctrl_ip, optarg, sizeof(ctrl_ip));
+				check |= 1 << 1;
+				break;
+			case 'p':
+				ctrl_port = atoi(optarg);
+				check |= 1 << 2;
+				break;
+			case 'I':
+				strncpy(replica_ip, optarg, sizeof(replica_ip));
+				check |= 1 << 3;
+				break;
+			case 'P':
+				replica_port = atoi(optarg);
+				check |= 1 << 4;
+				break;
+			case 'V':
+				strncpy(test_vol, optarg, sizeof(test_vol));
+				check |= 1 << 5;
+				break;
+			case 't':
+				io_cnt = atoi(optarg);
+				break;
+			default:
+				usage();
+				exit(EXIT_FAILURE);
+		}
+	}
+
+	if(check != 63) {
+		usage();
+	}
+
+	vol_fd = open(test_vol, O_RDWR, 0666);
+	io_hdr = malloc(sizeof(zvol_io_hdr_t));
+	mgmtio = malloc(sizeof(zvol_io_hdr_t));
 	struct timespec now;
 	
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	srandom(now.tv_sec);
 
+	data = NULL;
 	epfd = epoll_create1(0);
 	
 	//Create listener for io connections from controller and add to epoll
-	if((sfd = cstor_ops.conn_listen(replicaip, replica_port, 32)) < 0) {
+	if((sfd = cstor_ops.conn_listen(replica_ip, replica_port, 32, 1)) < 0) {
                 REPLICA_LOG("conn_listen() failed, errorno:%d", errno);
                 exit(EXIT_FAILURE);
         }
@@ -306,7 +348,7 @@ main(int argc, char **argv)
 					count = test_read_data(events[i].data.fd, (uint8_t *)data, mgmtio->len);
 				}
 				opcode = mgmtio->opcode;
-				send_mgmtack(mgmtfd, opcode, data, replicaip, replica_port);
+				send_mgmtack(mgmtfd, opcode, data, replica_ip, replica_port);
 			} else if (events[i].data.fd == sfd) {
 				struct sockaddr saddr;
 				socklen_t slen;
@@ -411,6 +453,14 @@ main(int argc, char **argv)
 						    open_ptr->volname, open_ptr->tgt_block_size, open_ptr->timeout);
 					}
 execute_io:
+					if ((io_cnt > 0) && (io_hdr->opcode == ZVOL_OPCODE_WRITE ||
+							io_hdr->opcode == ZVOL_OPCODE_READ)) {
+						io_cnt --;
+						if (io_cnt == 0) {
+							REPLICA_ERRLOG("sleeping for 60 seconds\n");
+							sleep(60);
+						}
+					}
 					if(io_hdr->opcode == ZVOL_OPCODE_WRITE) {
 						io_rw_hdr = (struct zvol_io_rw_hdr *)data;
 						data += sizeof(struct zvol_io_rw_hdr);

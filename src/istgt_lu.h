@@ -311,7 +311,6 @@ typedef struct istgt_lu_t {
 	int type;
 	int online;
 	int readonly;
-	int quiesce;
 	int blocklen;
 	int recordsize;
 	int rshift;
@@ -327,8 +326,8 @@ typedef struct istgt_lu_t {
 	ISTGT_LU_MAP map[MAX_LU_MAP];
 	int conns;
 #ifdef REPLICATION
-	int replication_factor;
-	int consistency_factor;
+	uint8_t replication_factor;
+	uint8_t consistency_factor;
 #endif
 } ISTGT_LU;
 typedef ISTGT_LU *ISTGT_LU_Ptr;
@@ -747,7 +746,8 @@ typedef struct istgt_lu_disk_t {
 	int num;
 	int lun;
 	int inflight;
-	int persist;	
+	int persist;
+	char *volname;
 	int fd;
 	const char *file;
 	const char *disktype;
@@ -899,6 +899,7 @@ typedef struct istgt_lu_disk_t {
 	uint8_t percent_val[32];
 	uint8_t percent_latency[32];
 	uint64_t io_seq;
+	int quiesce;
 
 	/* entry */
 	int (*open)(struct istgt_lu_disk_t *spec, int flags, int mode);

@@ -93,7 +93,7 @@ retry:
 	return sock;
 }
 int
-replication_listen(const char *ip, int port, int que)
+replication_listen(const char *ip, int port, int que, int non_blocking)
 {
 	char buf[MAX_TMPBUF];
 	char portnum[PORTNUMLEN];
@@ -165,7 +165,8 @@ retry:
 			sock = -1;
 			continue;
 		}
-		make_socket_non_blocking(sock);
+		if (non_blocking == 1)
+			make_socket_non_blocking(sock);
 		rc = listen(sock, que);
 		if (rc != 0) {
 			close(sock);
