@@ -147,6 +147,9 @@ dist: $(DISTFILES)
 	fi
 
 depend:
+	wget -O ${srcdir}/zrepl_prot.h https://raw.githubusercontent.com/openebs/zfs/zfs-0.7-release/include/zrepl_prot.h >> /dev/null 2>&1
+	#As of now openebs/zfs/zfs-0.7-release doesn't support ZVOL_OP_FLAG_READ_METADATA. We need to modify zrepl_prot.h to support ZVOL_OP_FLAG_READ_METADATA.
+	cat  ${srcdir}/zrepl_prot.h | grep ZVOL_OP_FLAG_READ_METADATA >> /dev/null 2>&1 || sed -i '/ZVOL_OP_FLAG_REBUILD/ a #define ZVOL_OP_FLAG_READ_METADATA 0x02' ${srcdir}/zrepl_prot.h
 	if [ "x$(MKDEP)" != "x" ]; then \
 		$(MKDEP) -MM $(DEFS) $(CFLAGS) $(CPPFLAGS) $(source); \
 	fi
