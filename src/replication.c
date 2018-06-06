@@ -1323,7 +1323,7 @@ clear_rcomm_cmd(rcommon_cmd_t *rcomm_cmd)
 }
 
 /*
- * This function will check response recieved for read command
+ * This function will check response received for read command
  * from all replica and process it according to io number
  */
 static uint8_t *
@@ -1362,7 +1362,7 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 {
 	int i, rc = 0;
 	uint8_t *data = NULL;
-	int success = 0, failure = 0, response_recieved;
+	int success = 0, failure = 0, response_received;
 	int min_response;
 
 	for (i = 0; i < rcomm_cmd->copies_sent; i++) {
@@ -1373,15 +1373,15 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 		}
 	}
 
-	response_recieved = success + failure;
-	min_response = MAX(spec->replication_factor -
-	    spec->consistency_factor + 1, spec->consistency_factor);
+	response_received = success + failure;
+	min_response = MAX(rcomm_cmd->replication_factor -
+	    rcomm_cmd->consistency_factor + 1, rcomm_cmd->consistency_factor);
 
 	if (rcomm_cmd->opcode == ZVOL_OPCODE_READ) {
-		response_recieved = success + failure;
+		response_received = success + failure;
 
 		if (rcomm_cmd->copies_sent >= min_response) {
-			if (response_recieved < min_response) {
+			if (response_received < min_response) {
 				rc = 0;
 			} else {
 				if (failure >= min_response ||
@@ -1409,7 +1409,7 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 	} else if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) {
 		if (success >= min_response) {
 			rc = 1;
-		} else if (response_recieved == rcomm_cmd->copies_sent) {
+		} else if (response_received == rcomm_cmd->copies_sent) {
 			rc = -1;
 		}
 
@@ -1926,7 +1926,7 @@ exit:
 }
 
 /*
- * destroy response recieved from replica for a rcommon_cmd
+ * destroy response received from replica for a rcommon_cmd
  */
 static void
 destroy_resp_list(rcommon_cmd_t *rcomm_cmd)

@@ -63,7 +63,7 @@ init_mdlist(char *vol_name)
 		create = true;
 	}
 
-	mdlist_fd = open(mdpath, O_CREAT|O_RDWR);
+	mdlist_fd = open(mdpath, O_CREAT|O_RDWR, 0666);
 	if (mdlist_fd < 0) {
 		REPLICA_ERRLOG("Failed to open metadata file %s err(%d)\n",
 		    mdpath, errno);

@@ -332,6 +332,7 @@ run_read_consistency_test ()
 
 	kill -9 $replica1_pid $replica2_pid $replica3_pid
 	rm -rf ${replica1_vdev}* ${replica2_vdev}* ${replica3_vdev}*
+	logout_of_volume
 	stop_istgt
 }
 
