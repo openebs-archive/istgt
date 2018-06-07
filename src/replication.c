@@ -1290,9 +1290,11 @@ respond_with_error_for_all_outstanding_mgmt_ios(replica_t *r)
 		rcmd->data_len = rcomm_cmd->data_len;			\
 		rcmd->io_seq = rcomm_cmd->io_seq;			\
 		rcmd->idx = rcomm_cmd->copies_sent - 1;			\
+		rcomm_cmd->resp_list[rcmd->idx].status |= 		\
+		    (replica->state == ZVOL_STATUS_HEALTHY) ? 		\
+		    SENT_TO_HEALTHY : SENT_TO_DEGRADED;			\
 		rcmd->healthy_count = spec->healthy_rcount;		\
 		rcmd->rcommq_ptr = rcomm_cmd;				\
-		rcmd->status = 0;					\
 		rcmd->iovcnt = rcomm_cmd->iovcnt;			\
 		for (i=1; i < rcomm_cmd->iovcnt + 1; i++) {		\
 			rcmd->iov[i].iov_base = 			\
@@ -1346,7 +1348,7 @@ handle_read_consistency(rcommon_cmd_t *rcomm_cmd, ssize_t block_len,
 	TAILQ_INIT(&(io_data_chunk_list));
 
 	for (i = 0; i < rcomm_cmd->copies_sent; i++) {
-		if (rcomm_cmd->resp_list[i].status == 1) {
+		if (rcomm_cmd->resp_list[i].status & RECEIVED_OK) {
 			if (check_all) {
 				get_all_read_resp_data_chunk(
 				    &rcomm_cmd->resp_list[i], block_len,
@@ -1371,57 +1373,87 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 {
 	int i, rc = 0;
 	uint8_t *data = NULL;
-	int success = 0, failure = 0, response_received;
+	int success = 0, failure = 0, healthy_response = 0, response_received;
 	int min_response;
+	int healthy_replica = 0;
 
 	for (i = 0; i < rcomm_cmd->copies_sent; i++) {
-		if (rcomm_cmd->resp_list[i].status == 1) {
+		if (rcomm_cmd->resp_list[i].status & RECEIVED_OK) {
 			success++;
-		} else if (rcomm_cmd->resp_list[i].status == -1) {
+			if (rcomm_cmd->resp_list[i].status & SENT_TO_HEALTHY)
+				healthy_response++;
+		} else if (rcomm_cmd->resp_list[i].status & RECEIVED_ERR) {
 			failure++;
 		}
+
+		if (rcomm_cmd->resp_list[i].status & SENT_TO_HEALTHY)
+			healthy_replica++;
 	}
 
 	response_received = success + failure;
 	min_response = MAX(rcomm_cmd->replication_factor -
 	    rcomm_cmd->consistency_factor + 1, rcomm_cmd->consistency_factor);
 
+	rc = 0;
 	if (rcomm_cmd->opcode == ZVOL_OPCODE_READ) {
-		response_received = success + failure;
-
-		if (rcomm_cmd->copies_sent >= min_response) {
-			if (response_received < min_response) {
-				rc = 0;
-			} else {
-				if (failure >= min_response ||
-				    success < min_response) {
-					rc = -1;
-				} else {
-					data = handle_read_consistency(
-					    rcomm_cmd, spec->blocklen,
-					    true);
-					cmd->data = data;
-					rc = 1;
-				}
-			}
-		} else {
-			if (rcomm_cmd->copies_sent == success) {
-				data = handle_read_consistency(rcomm_cmd,
-				    spec->blocklen, false);
-				cmd->data = data;
-				rc = 1;
-			}
-
-			if (rcomm_cmd->copies_sent == failure)
-				rc = -1;
+		/*
+		 * If the command is sent to single replica only then
+		 * min_response should be set to 1.
+		 */
+		min_response = (rcomm_cmd->copies_sent == 1) ? 1 : min_response;
+		if (success >= min_response) {
+			/*
+			 * we got the successful response from the required
+			 * number of the replica. So, we can reply back to the
+			 * client with success
+			 */
+			data = handle_read_consistency(rcomm_cmd,
+			    spec->blocklen, (rcomm_cmd->copies_sent == 1) ?
+			    false : true);
+			cmd->data = data;
+			rc = 1;
+		} else if (response_received == rcomm_cmd->copies_sent) {
+			/*
+			 * we have received the response from all the replicas
+			 * to whom we have sent a command, but we didn't get
+			 * enough number of successful response. So, we will
+			 * reply to the client with an error.
+			 */
+			rc = -1;
+			REPLICA_ERRLOG("didn't receive success from replica.."
+			    " cmd:read io(%lu) cs(%d)\n", rcomm_cmd->io_seq,
+			    rcomm_cmd->copies_sent);
+		} else if ((rcomm_cmd->copies_sent - failure) < min_response) {
+			/*
+			 * In this case, we will avoid waiting for replicas
+			 * which haven't sent response yet.
+			 */
+			REPLICA_ERRLOG("got error from %d replicas.. io(%lu)"
+			    "cs(%d)\n", failure, rcomm_cmd->io_seq,
+			    rcomm_cmd->copies_sent);
+			rc = -1;
 		}
 	} else if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) {
-		if (success >= min_response) {
+		if (healthy_replica >= rcomm_cmd->consistency_factor &&
+		    healthy_response >= rcomm_cmd->consistency_factor) {
+			/*
+			 * We got the successful response from required healthy
+			 * replicas.
+			 */
+			rc = 1;
+		} else if (success >= min_response) {
+			/*
+			 * If we didn't get the required number of response
+			 * from healthy replica's but success response matches
+			 * with min_response.
+			 */
 			rc = 1;
 		} else if (response_received == rcomm_cmd->copies_sent) {
 			rc = -1;
+			REPLICA_ERRLOG("didn't receive success from replica.."
+			    " cmd:write io(%lu) cs(%d)\n", rcomm_cmd->io_seq,
+			    rcomm_cmd->copies_sent);
 		}
-
 	}
 
 	return rc;
@@ -1967,7 +1999,8 @@ cleanup_deadlist(void *arg)
 			rcomm_cmd = get_from_mempool(&spec->rcommon_deadlist);
 
 			for (i = 0; i < rcomm_cmd->copies_sent; i++) {
-				if (rcomm_cmd->resp_list[i].status)
+				if (rcomm_cmd->resp_list[i].status &
+				    (RECEIVED_OK|RECEIVED_ERR))
 					count++;
 			}
 

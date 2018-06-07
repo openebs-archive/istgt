@@ -55,7 +55,7 @@ int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 		rcomm_cmd->resp_list[idx].io_resp_hdr.status =		\
 		    ZVOL_OP_STATUS_FAILED;				\
 		rcomm_cmd->resp_list[idx].data_ptr = NULL;		\
-		rcomm_cmd->resp_list[idx].status = 1;			\
+		rcomm_cmd->resp_list[idx].status |= RECEIVED_ERR;	\
 		if (rcomm_cmd->state != CMD_EXECUTION_DONE)		\
 			pthread_cond_signal(_cond);			\
 		free(rcmd->iov_data);					\
@@ -470,7 +470,7 @@ start:
 		rcomm_cmd->resp_list[idx].data_ptr = r->ongoing_io_buf;
 		if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE)
 			r->replica_inflight_write_io_cnt -= 1;
-		rcomm_cmd->resp_list[idx].status = 1;
+		rcomm_cmd->resp_list[idx].status |= RECEIVED_OK;
 
 		if (rcomm_cmd->state != CMD_EXECUTION_DONE) {
 			pthread_cond_signal(cond_var);

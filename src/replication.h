@@ -39,12 +39,19 @@ typedef enum zvol_cmd_type_e {
 	CND_MGMT,
 } zvol_cmd_type_t;
 
-typedef enum cmd_state_s {
+typedef enum rcomm_cmd_state_s {
 	CMD_CREATED = 1,
 	CMD_ENQUEUED_TO_WAITQ,
 	CMD_ENQUEUED_TO_PENDINGQ,
 	CMD_EXECUTION_DONE,
-} cmd_state_t;
+} rcomm_cmd_state_t;
+
+typedef enum rcmd_state_s {
+	RECEIVED_OK = 1 << 0,
+	RECEIVED_ERR = 1 << 1,
+	SENT_TO_HEALTHY = 1 << 2,
+	SENT_TO_DEGRADED = 1 << 3,
+} rcmd_state_t;
 
 typedef struct resp_data {
 	void *data;
@@ -54,7 +61,7 @@ typedef struct resp_data {
 struct replica_rcomm_resp {
 	zvol_io_hdr_t io_resp_hdr;
 	uint8_t *data_ptr;
-	int64_t status;
+	rcmd_state_t status;
 } __attribute__((packed));
 
 typedef struct replica_rcomm_resp replica_rcomm_resp_t;
@@ -72,7 +79,7 @@ typedef struct rcommon_cmd_s {
 	uint64_t offset;
 	uint64_t data_len;
 	uint64_t total_len;
-	cmd_state_t state;
+	rcomm_cmd_state_t state;
 	void *data;
 	pthread_mutex_t *mutex;
 	pthread_cond_t *cond_var;
@@ -88,7 +95,6 @@ typedef struct rcmd_s {
 	void *rcommq_ptr;
 	uint8_t *iov_data;	/* for header to be sent to replica */
 	int healthy_count;	/* number of healthy replica when cmd queued */
-	int status;
 	int idx;		/* index for rcommon_cmd in resp_list */
 	int64_t iovcnt;
 	uint64_t offset;

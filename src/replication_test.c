@@ -114,7 +114,7 @@ static uint64_t
 fetch_update_io_buf(zvol_io_hdr_t *io_hdr, uint8_t *user_data,
     uint8_t **resp_data)
 {
-	int count = 0;
+	uint32_t count = 0;
 	uint64_t len = io_hdr->len;
 	uint64_t offset = io_hdr->offset;
 	uint64_t start = offset;
