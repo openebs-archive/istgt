@@ -74,10 +74,6 @@ touch $path/$volname
 truncate -s $size $path/$volname
 export externalIP=$externalIP
 echo $external
-touch $path/sdisk.img
-truncate -s $size $path/sdisk.img
-touch /tmp/ztest1.0a
-truncate -s 1G /tmp/ztest1.0a
 service rsyslog start
 #setting replica timeout to 20 seconds
 /usr/local/bin/istgt -R 20 &

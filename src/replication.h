@@ -155,7 +155,7 @@ int zvol_handshake(spec_t *, replica_t *);
 void accept_mgmt_conns(int, int);
 int send_io_resp(int fd, zvol_io_hdr_t *, void *);
 int initialize_replication_mempool(bool should_fail);
-int destroy_relication_mempool(void);
+int destroy_replication_mempool(void);
 void clear_rcomm_cmd(rcommon_cmd_t *);
 void ask_replica_status(spec_t *spec, replica_t *replica);
 extern void * replica_thread(void *);
@@ -172,6 +172,12 @@ int initialize_volume(spec_t *spec, int, int);
 #define REPLICA_NOTICELOG(fmt, ...)	syslog(LOG_NOTICE, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
 #define REPLICA_ERRLOG(fmt, ...)	syslog(LOG_ERR, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
 #define REPLICA_WARNLOG(fmt, ...)	syslog(LOG_ERR, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
+
+#ifdef	DEBUG
+#define REPLICA_DEBUGLOG(fmt, ...)	syslog(LOG_NOTICE, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
+#else
+#define REPLICA_DEBUGLOG(fmt, ...)
+#endif
 
 #endif /* _REPLICATION_H */
 

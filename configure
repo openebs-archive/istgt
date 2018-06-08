@@ -622,7 +622,9 @@ ac_includes_default="\
 
 ac_subst_vars='LTLIBOBJS
 ALLOW_SYMLINK_DEVICE
+REPLICATION
 DEBUG
+TRACEDUMP
 mediadir
 configdir
 MKDEP
@@ -699,11 +701,12 @@ enable_largefile
 with_configdir
 with_mediadir
 with_rcdir
+enable_tracedump
 enable_debug
+enable_replication
 enable_symlink_device
 with_logfacility
 with_logpriority
-with_replication
 with_vbox
 with_vboxlib
 '
@@ -1333,7 +1336,9 @@ Optional Features:
   --disable-FEATURE       do not include FEATURE (same as --enable-FEATURE=no)
   --enable-FEATURE[=ARG]  include FEATURE [ARG=yes]
   --disable-largefile     omit support for large files
-  --enable-debug          enable debug(logging)
+  --enable-tracedump      enable tracedump(logging)
+  --enable-debug          enable debug
+  --enable-replication    enable replication feature
   --enable-symlink-device allow symlink device
 
 Optional Packages:
@@ -3390,14 +3395,6 @@ case $host_os in *\ *) host_os=`echo "$host_os" | sed 's/ /-/g'`;; esac
 
 case "$host_os" in
 *linux*)
-# Check whether --with-replication was given.
-if test "${with_replication+set}" = set; then :
- cat >>confdefs.h <<_ACEOF
-#define REPLICATION
-_ACEOF
-LIBS="-lm $LIBS"
-fi
-
 	tmp="/usr/src/virtualbox/*/include"
 	if test -d "`echo $tmp`"; then
 	    vboxinc=$tmp
@@ -4751,14 +4748,46 @@ rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
 CFLAGS="$saved_CFLAGS"
 
 # check enable features
-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether to use debug mode" >&5
-$as_echo_n "checking whether to use debug mode... " >&6; }
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether to dump packet data (tracedump mode)" >&5
+$as_echo_n "checking whether to dump packet data (tracedump mode)... " >&6; }
+# Check whether --enable-tracedump was given.
+if test "${enable_tracedump+set}" = set; then :
+  enableval=$enable_tracedump; { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+$as_echo "yes" >&6; };
+$as_echo "#define TRACEDUMP 1" >>confdefs.h
+
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+fi
+
+
+
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether to enable debug mode" >&5
+$as_echo_n "checking whether to enable debug mode... " >&6; }
 # Check whether --enable-debug was given.
 if test "${enable_debug+set}" = set; then :
   enableval=$enable_debug; { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 $as_echo "yes" >&6; };
 $as_echo "#define DEBUG 1" >>confdefs.h
 
+  CFLAGS="-DDEBUG -Werror -ggdb3 -fstack-check"
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+fi
+
+
+
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether to enable replication mode" >&5
+$as_echo_n "checking whether to enable replication mode... " >&6; }
+# Check whether --enable-replication was given.
+if test "${enable_replication+set}" = set; then :
+  enableval=$enable_replication; { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+$as_echo "yes" >&6; };
+$as_echo "#define REPLICATION 1" >>confdefs.h
+
+  LIBS="$LIBS -lm"
 else
   { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
 $as_echo "no" >&6; }

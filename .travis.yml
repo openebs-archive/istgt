@@ -10,7 +10,7 @@ before_install:
     - sudo unlink /usr/bin/gcc && sudo ln -s /usr/bin/gcc-6 /usr/bin/gcc
     - sudo unlink /usr/bin/g++ && sudo ln -s /usr/bin/g++-6 /usr/bin/g++
 install:
-    - ./configure --with-replication
+    - ./configure --enable-debug --enable-replication
     - sudo make
 script:
     # run ztest and test supported zio backends
