@@ -13,22 +13,24 @@ device_name=""
 CONTROLLER_IP="127.0.0.1"
 CONTROLLER_PORT="6060"
 
+source $SETUP_ISTGT
+
 login_to_volume() {
-	sudo $ISCSIADM -m discovery -t st -p $1
-	sudo $ISCSIADM -m node -l
+	$ISCSIADM -m discovery -t st -p $1
+	$ISCSIADM -m node -l
 }
 
 logout_of_volume() {
-	sudo $ISCSIADM -m node -u
-	sudo $ISCSIADM -m node -o delete
+	$ISCSIADM -m node -u
+	$ISCSIADM -m node -o delete
 }
 
 get_scsi_disk() {
-	device_name=$(sudo $ISCSIADM -m session -P 3 |grep -i "Attached scsi disk" | awk '{print $4}')
+	device_name=$($ISCSIADM -m session -P 3 |grep -i "Attached scsi disk" | awk '{print $4}')
 	i=0
 	while [ -z $device_name ]; do
 		sleep 5
-		device_name=$(sudo $ISCSIADM -m session -P 3 |grep -i "Attached scsi disk" | awk '{print $4}')
+		device_name=$($ISCSIADM -m session -P 3 |grep -i "Attached scsi disk" | awk '{print $4}')
 		i=`expr $i + 1`
 		if [ $i -eq 10 ]; then
 			echo "scsi disk not found";
@@ -42,7 +44,7 @@ get_scsi_disk() {
 
 start_istgt() {
 	cd $DIR/src
-	sudo sh $SETUP_ISTGT &
+	run_istgt $* &
 	SETUP_PID=$!
 	echo $SETUP_PID
 	sleep 5
@@ -70,7 +72,7 @@ run_istgt_integration()
 	echo $externalIP
 	$ISTGT_INTEGRATION
 	[[ $? -ne 0 ]] && echo "istgt integration test failed" && tail -20 /var/log/syslog && exit 1
-	sudo rm -f /tmp/test_vol*
+	rm -f /tmp/test_vol*
 	return 0
 }
 
@@ -79,16 +81,16 @@ write_and_verify_data(){
 	sleep 5
 	get_scsi_disk
 	if [ "$device_name"!="" ]; then
-		sudo mkfs.ext2 -F /dev/$device_name
+		mkfs.ext2 -F /dev/$device_name
 		[[ $? -ne 0 ]] && echo "mkfs failed for $device_name" && tail -20 /var/log/syslog && exit 1
 
-		sudo mount /dev/$device_name /mnt/store
+		mount /dev/$device_name /mnt/store
 		[[ $? -ne 0 ]] && echo "mount for $device_name" && tail -20 /var/log/syslog && exit 1
 
-		sudo dd if=/dev/urandom of=file1 bs=4k count=10000
-		hash1=$(sudo md5sum file1 | awk '{print $1}')
-		sudo cp file1 /mnt/store
-		hash2=$(sudo md5sum /mnt/store/file1 | awk '{print $1}')
+		dd if=/dev/urandom of=file1 bs=4k count=10000
+		hash1=$(md5sum file1 | awk '{print $1}')
+		cp file1 /mnt/store
+		hash2=$(md5sum /mnt/store/file1 | awk '{print $1}')
 		if [ $hash1 == $hash2 ]; then echo "DI Test: PASSED"
 		else
 			echo "DI Test: FAILED";
@@ -96,7 +98,7 @@ write_and_verify_data(){
 			exit 1
 		fi
 
-		sudo umount /mnt/store
+		umount /mnt/store
 		logout_of_volume
 		sleep 5
 	else
@@ -106,18 +108,34 @@ write_and_verify_data(){
 	fi
 }
 
+write_data()
+{
+	local offset=$1
+	local len=$2
+	local base=$3
+	local output1=$4
+	local output2=$5
+
+	seek=$(( $offset / $base ))
+	count=$(( $len / $base ))
+
+	dd if=/dev/urandom | tr -dc 'a-zA-Z0-9'| head  -c $len  | \
+	    tee >(dd of=$output1 conv=notrunc bs=$base count=$count seek=$seek oflag=direct) | \
+	    (dd of=$output2 conv=notrunc bs=$base count=$count seek=$seek oflag=direct)
+}
+
 setup_test_env() {
-	sudo rm -f /tmp/test_vol*
-	sudo mkdir -p /mnt/store
-	sudo truncate -s 20G /tmp/test_vol1 /tmp/test_vol2 /tmp/test_vol3
+	rm -f /tmp/test_vol*
+	mkdir -p /mnt/store
+	truncate -s 5G /tmp/test_vol1 /tmp/test_vol2 /tmp/test_vol3
 	logout_of_volume
 
-	start_istgt
+	start_istgt 5G
 }
 
 cleanup_test_env() {
 	stop_istgt
-	sudo rm -rf /mnt/store
+	rm -rf /mnt/store
 }
 
 wait_for_pids()
@@ -155,15 +173,15 @@ run_data_integrity_test() {
 	setup_test_env
 	$TEST_SNAPSHOT 0
 
-	sudo $REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V "/tmp/test_vol1" &
+	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V "/tmp/test_vol1" &
 	replica1_pid=$!
 	$TEST_SNAPSHOT 0
 
-	sudo $REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V "/tmp/test_vol2" &
+	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V "/tmp/test_vol2" &
 	replica2_pid=$!
 	$TEST_SNAPSHOT 0
 
-	sudo $REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V "/tmp/test_vol3" &
+	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V "/tmp/test_vol3" &
 	replica3_pid=$!
 	sleep 15
 
@@ -176,8 +194,8 @@ run_data_integrity_test() {
 
 	$TEST_SNAPSHOT 1
 
-	sudo pkill -9 -P $replica1_pid
-	sudo kill -SIGKILL $replica1_pid
+	pkill -9 -P $replica1_pid
+	kill -SIGKILL $replica1_pid
 	sleep 5
 	write_and_verify_data
 
@@ -187,7 +205,7 @@ run_data_integrity_test() {
 	ps -o pid,ppid,command
 	$TEST_SNAPSHOT 0
 
-	sudo $REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V "/tmp/test_vol1" &
+	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V "/tmp/test_vol1" &
 	replica1_pid=$!
 	sleep 5
 	write_and_verify_data
@@ -198,10 +216,10 @@ run_data_integrity_test() {
 	ps -o pid,ppid,command
 	$TEST_SNAPSHOT 1
 
-	sudo pkill -9 -P $replica1_pid
+	pkill -9 -P $replica1_pid
 
 	# test replica IO timeout
-	sudo $REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V "/tmp/test_vol1" -t 500&
+	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V "/tmp/test_vol1" -n 500&
 	replica1_pid1=$!
 	sleep 5
 	write_and_verify_data
@@ -215,14 +233,14 @@ run_data_integrity_test() {
 		echo "Replica timeout passed"
 	fi
 
-	sudo pkill -9 -P $replica1_pid1
-	sudo pkill -9 -P $replica2_pid
-	sudo pkill -9 -P $replica3_pid
+	pkill -9 -P $replica1_pid1
+	pkill -9 -P $replica2_pid
+	pkill -9 -P $replica3_pid
 
-	sudo kill -SIGKILL $replica1_pid
-	sudo kill -SIGKILL $replica1_pid1
-	sudo kill -SIGKILL $replica2_pid
-	sudo kill -SIGKILL $replica3_pid
+	kill -SIGKILL $replica1_pid
+	kill -SIGKILL $replica1_pid1
+	kill -SIGKILL $replica2_pid
+	kill -SIGKILL $replica3_pid
 
 	cleanup_test_env
 
@@ -231,9 +249,97 @@ run_data_integrity_test() {
 
 }
 
+run_read_consistency_test ()
+{
+	local replica1_port="6161"
+	local replica2_port="6162"
+	local replica3_port="6163"
+	local replica1_ip="127.0.0.1"
+	local replica2_ip="127.0.0.1"
+	local replica3_ip="127.0.0.1"
+	local replica1_vdev="/tmp/test_vol1"
+	local replica2_vdev="/tmp/test_vol2"
+	local replica3_vdev="/tmp/test_vol3"
+	local file_name="/root/data_file"
+	local device_file="/root/device_file"
+	local w_pid
+
+	setup_test_env
+	rm -rf $file_name $device_file
+
+	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev &
+	replica1_pid=$!
+
+	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V $replica2_vdev  &
+	replica2_pid=$!
+
+	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V $replica3_vdev &
+	replica3_pid=$!
+	sleep 5
+
+	login_to_volume "$CONTROLLER_IP:3260"
+	sleep 5
+
+	get_scsi_disk
+	if [ "$device_name" == "" ]; then
+		echo "error happened while running read consistency test"
+		kill -9 $replica1_pid $replica2_pid $replica3_pid
+		return
+	fi
+
+	write_data 0 104857600 512 $device_name $file_name
+	sync
+
+	write_data 0 31457280 4096 $device_name $file_name &
+	w_pid=$!
+	sleep 1
+	kill -9 $replica1_pid
+	wait $w_pid
+	sync
+
+	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev -d &
+	replica1_pid=$!
+	sleep 5
+	write_data 39845888 31457280 4096 $device_name $file_name &
+	w_pid=$!
+	sleep 1
+	kill -9 $replica2_pid
+	wait $w_pid
+	sync
+
+	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V $replica2_vdev -d &
+	replica2_pid=$!
+	sleep 5
+	write_data 71303168 31457280 4096 $device_name $file_name &
+	w_pid=$!
+	sleep 1
+	kill -9 $replica3_pid
+	wait $w_pid
+	sync
+
+	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V $replica3_vdev -d &
+	replica3_pid=$!
+	sleep 5
+
+	dd if=$device_name of=$device_file bs=4096 iflag=direct oflag=direct count=25600
+	diff $device_file $file_name >> /dev/null 2>&1
+	if [ $? -ne 0 ]; then
+		echo "read consistency test failed"
+		tail -50 /var/log/syslog
+	else
+		echo "read consistency test passed"
+	fi
+
+	kill -9 $replica1_pid $replica2_pid $replica3_pid
+	rm -rf ${replica1_vdev}* ${replica2_vdev}* ${replica3_vdev}*
+	logout_of_volume
+	stop_istgt
+}
+
 run_data_integrity_test
 run_mempool_test
 run_istgt_integration
+run_read_consistency_test
 
 tail -20 /var/log/syslog
 

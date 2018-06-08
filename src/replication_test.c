@@ -1,12 +1,14 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <sys/socket.h>
-#include <netdb.h>
-#include <sys/epoll.h>
-#include <stdlib.h>
 #include <unistd.h>
-
+#include <netdb.h>
+#include <sys/socket.h>
+#include <sys/epoll.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <sys/mman.h>
 #include "replication.h"
 #include "istgt_integration.h"
 #include "replication_misc.h"
@@ -34,10 +36,162 @@ __thread char  tinfo[50] =  {0};
 	mgmt_ack_data->zvol_guid = 500;\
 }
 
-int64_t test_read_data(int fd, uint8_t *data, uint64_t len);
+bool degraded_mode = false;
+int error_freq = 0;
+void *md_list;
+int mdlist_fd = 0;
+size_t mdlist_size = 0;
 
-int64_t
-test_read_data(int fd, uint8_t *data, uint64_t len) {
+static int
+init_mdlist(char *vol_name)
+{
+	char mdpath[MAX_NAME_LEN];
+	struct stat sbuf;
+	bool create = false;
+
+	if (vol_name == NULL)
+		return -1;
+
+	if (stat(vol_name, &sbuf)) {
+		REPLICA_ERRLOG("Failed to access %s\n", vol_name);
+		return -1;
+	}
+	mdlist_size = (sbuf.st_size / 512) * 8;
+
+	snprintf(mdpath, MAX_NAME_LEN, "%s.mdfile", vol_name);
+	if (stat(mdpath, &sbuf)) {
+		create = true;
+	}
+
+	mdlist_fd = open(mdpath, O_CREAT|O_RDWR, 0666);
+	if (mdlist_fd < 0) {
+		REPLICA_ERRLOG("Failed to open metadata file %s err(%d)\n",
+		    mdpath, errno);
+		return -1;
+	}
+
+	if(create) {
+		if (truncate(mdpath, mdlist_size)) {
+			REPLICA_ERRLOG("Failed to create %s err(%d)\n", mdpath, errno);
+			return -1;
+		}
+	}
+
+	md_list = mmap(NULL, mdlist_size, PROT_READ|PROT_WRITE, MAP_SHARED,
+	    mdlist_fd, 0);
+
+	return 0;
+}
+
+static void
+destroy_mdlist(void)
+{
+	munmap(md_list, mdlist_size);
+	close(mdlist_fd);
+}
+
+static void
+write_metadata(uint64_t offset, size_t len, uint64_t io_num)
+{
+	size_t md_offset;
+	uint64_t end = offset + len;
+	uint64_t *buffer = (uint64_t *) md_list;
+
+	while (offset < end) {
+		md_offset = offset / 512;
+		buffer[md_offset] = io_num;
+		offset += 512;
+	}
+}
+
+static uint64_t
+read_metadata(off_t offset)
+{
+	return *(uint64_t *)((uint64_t *)md_list + offset/512);
+}
+
+static uint64_t
+fetch_update_io_buf(zvol_io_hdr_t *io_hdr, uint8_t *user_data,
+    uint8_t **resp_data)
+{
+	uint32_t count = 0;
+	uint64_t len = io_hdr->len;
+	uint64_t offset = io_hdr->offset;
+	uint64_t start = offset;
+	uint64_t end = offset + len;
+	uint64_t resp_index, data_index;
+	uint64_t total_payload_len;
+	uint64_t md_io_num = 0;
+	struct zvol_io_rw_hdr *last_io_rw_hdr;
+	uint8_t *resp;
+
+	while (start < end) {
+		if (md_io_num != read_metadata(start)) {
+			count++;
+			md_io_num = read_metadata(start);
+		}
+		start += 512;
+	}
+	if (!count)
+		count = 1;
+
+	if (!(io_hdr->flags & ZVOL_OP_FLAG_READ_METADATA))
+		count = 1;
+
+	total_payload_len = len + count * sizeof(struct zvol_io_rw_hdr);
+	*resp_data = malloc(total_payload_len);
+	memset(*resp_data, 0, total_payload_len);
+	start = offset;
+
+	md_io_num = read_metadata(start);
+	last_io_rw_hdr = (struct zvol_io_rw_hdr *)*resp_data;
+	last_io_rw_hdr->io_num = (io_hdr->flags & ZVOL_OP_FLAG_READ_METADATA) ?
+	    md_io_num : 0;
+	resp_index = sizeof (struct zvol_io_rw_hdr);
+	resp = *resp_data;
+	data_index = 0;
+	count = 0;
+	while ((io_hdr->flags & ZVOL_OP_FLAG_READ_METADATA) && (start < end)) {
+		if (md_io_num != read_metadata(start)) {
+			last_io_rw_hdr->len = count * 512;
+			memcpy(resp + resp_index, user_data + data_index,
+			    last_io_rw_hdr->len);
+			data_index += last_io_rw_hdr->len;
+			resp_index += last_io_rw_hdr->len;
+			last_io_rw_hdr = (struct zvol_io_rw_hdr *)(resp + resp_index);
+			resp_index += sizeof (struct zvol_io_rw_hdr);
+			md_io_num = read_metadata(start);
+			last_io_rw_hdr->io_num = md_io_num;
+			count = 0;
+		}
+		count++;
+		start += 512;
+	}
+	last_io_rw_hdr->len = (io_hdr->flags & ZVOL_OP_FLAG_READ_METADATA) ?
+	    (count * 512) : len;
+	memcpy(resp + resp_index, user_data + data_index, last_io_rw_hdr->len);
+	return total_payload_len;
+}
+
+static int
+check_for_err(zvol_io_hdr_t *io_hdr)
+{
+	static int io_count;
+
+	io_count++;
+	if (io_count == 10)
+		io_count = 0;
+
+	if (io_count < error_freq) {
+		io_hdr->status = ZVOL_OP_STATUS_FAILED;
+		return 1;
+	}
+	return 0;
+}
+
+static int64_t
+test_read_data(int fd, uint8_t *data, uint64_t len)
+{
 	int rc;
 	uint64_t nbytes = 0;
 	while((rc = read(fd, data + nbytes, len - nbytes))) {
@@ -94,7 +248,10 @@ send_mgmtack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip, int rep
 		mgmt_ack_hdr->status = (random() % 5 == 0) ? ZVOL_OP_STATUS_FAILED : ZVOL_OP_STATUS_OK;
 		mgmt_ack_hdr->len = 0;
 	} else if (opcode == ZVOL_OPCODE_REPLICA_STATUS) {
-		repl_status.state = ZVOL_STATUS_HEALTHY;
+		if (degraded_mode)
+			repl_status.state = ZVOL_STATUS_DEGRADED;
+		else
+			repl_status.state = ZVOL_STATUS_HEALTHY;
 		mgmt_ack_hdr->len = sizeof(zrepl_status_ack_t);
 		iovec_count = 4;
 		iovec[3].iov_base = &repl_status;
@@ -152,26 +309,21 @@ out:
 int
 send_io_resp(int fd, zvol_io_hdr_t *io_hdr, void *buf)
 {
-	struct iovec iovec[3];
-	struct zvol_io_rw_hdr io_rw_hdr;
+	struct iovec iovec[2];
 	int iovcnt, i, nbytes = 0;
 	int rc = 0;
-	io_hdr->status = ZVOL_OP_STATUS_OK;
 
-	if (fd < 0)
+	if (fd < 0) {
+		REPLICA_ERRLOG("fd is %d!!!\n", fd);
 		return -1;
+	}
 
 	if(io_hdr->opcode == ZVOL_OPCODE_READ) {
-		iovcnt = 3;
-		io_rw_hdr.io_num = 2000;
-		io_rw_hdr.len = io_hdr->len;
+		iovcnt = 2;
 		iovec[0].iov_base = io_hdr;
 		nbytes = iovec[0].iov_len = sizeof(zvol_io_hdr_t);
-		iovec[1].iov_base = &io_rw_hdr;
-		iovec[1].iov_len = sizeof(struct zvol_io_rw_hdr);
-		iovec[2].iov_base = buf;
-		iovec[2].iov_len = io_hdr->len;
-		io_hdr->len += (sizeof(struct zvol_io_rw_hdr));
+		iovec[1].iov_base = buf;
+		iovec[1].iov_len = io_hdr->len;
 		nbytes += io_hdr->len;
 	} else if(io_hdr->opcode == ZVOL_OPCODE_WRITE) {
 		iovcnt = 1;
@@ -186,6 +338,7 @@ send_io_resp(int fd, zvol_io_hdr_t *io_hdr, void *buf)
 	while (nbytes) {
 		rc = writev(fd, iovec, iovcnt);//Review iovec in this line
 		if (rc < 0) {
+			REPLICA_ERRLOG("failed to write on fd errno(%d)\n", errno);
 			return -1;
 		}
 		nbytes -= rc;
@@ -205,7 +358,6 @@ send_io_resp(int fd, zvol_io_hdr_t *io_hdr, void *buf)
 		}
 	}
 	return 0;
-
 }
 
 static void
@@ -218,7 +370,9 @@ usage(void)
 	printf(" -I replica ip\n");
 	printf(" -P replica port\n");
 	printf(" -V volume path\n");
-	printf(" -t number of IOs to serve before sleeping for 60 seconds\n");
+	printf(" -n number of IOs to serve before sleeping for 60 seconds\n");
+	printf(" -d run in degraded mode only\n");
+	printf(" -e error frequency (should be <= 10, default is 0)\n");
 }
 
 
@@ -250,8 +404,9 @@ main(int argc, char **argv)
 	int io_cnt = 0;
 	int ch;
 	int check = 1;
+	struct timespec now;
 
-	while ((ch = getopt(argc, argv, "i:p:I:P:V:t:")) != -1) {
+	while ((ch = getopt(argc, argv, "i:p:I:P:V:n:e:d")) != -1) {
 		switch (ch) {
 			case 'i':
 				strncpy(ctrl_ip, optarg, sizeof(ctrl_ip));
@@ -273,8 +428,18 @@ main(int argc, char **argv)
 				strncpy(test_vol, optarg, sizeof(test_vol));
 				check |= 1 << 5;
 				break;
-			case 't':
+			case 'n':
 				io_cnt = atoi(optarg);
+				break;
+			case 'd':
+				degraded_mode = true;
+				break;
+			case 'e':
+				error_freq = atoi(optarg);
+				if (error_freq > 10) {
+					usage();
+					exit(EXIT_FAILURE);
+				}
 				break;
 			default:
 				usage();
@@ -289,8 +454,13 @@ main(int argc, char **argv)
 	vol_fd = open(test_vol, O_RDWR, 0666);
 	io_hdr = malloc(sizeof(zvol_io_hdr_t));
 	mgmtio = malloc(sizeof(zvol_io_hdr_t));
-	struct timespec now;
-	
+
+	if (init_mdlist(test_vol)) {
+		REPLICA_ERRLOG("Failed to initialize mdlist\n");
+		close(vol_fd);
+		exit(EXIT_FAILURE);
+	}
+
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	srandom(now.tv_sec);
 
@@ -300,6 +470,8 @@ main(int argc, char **argv)
 	//Create listener for io connections from controller and add to epoll
 	if((sfd = cstor_ops.conn_listen(replica_ip, replica_port, 32, 1)) < 0) {
                 REPLICA_LOG("conn_listen() failed, errorno:%d", errno);
+		close(vol_fd);
+		destroy_mdlist();
                 exit(EXIT_FAILURE);
         }
 	event.data.fd = sfd;
@@ -307,14 +479,19 @@ main(int argc, char **argv)
 	rc = epoll_ctl(epfd, EPOLL_CTL_ADD, sfd, &event);
 	if (rc == -1) {
 		REPLICA_ERRLOG("epoll_ctl() failed, errrno:%d", errno);
+		close(vol_fd);
+		destroy_mdlist();
 		exit(EXIT_FAILURE);
 	}
 
 	//Connect to controller to start handshake and connect to epoll
 	if((mgmtfd = cstor_ops.conn_connect(ctrl_ip, ctrl_port)) < 0) {
 		REPLICA_ERRLOG("conn_connect() failed errno:%d\n", errno);
+		close(vol_fd);
+		destroy_mdlist();
 		exit(EXIT_FAILURE);
 	}
+
 	event.data.fd = mgmtfd;
 	event.events = EPOLLIN | EPOLLET;
 	rc = epoll_ctl(epfd, EPOLL_CTL_ADD, mgmtfd, &event);
@@ -429,6 +606,7 @@ main(int argc, char **argv)
 					    io_hdr->opcode == ZVOL_OPCODE_HANDSHAKE ||
 					    io_hdr->opcode == ZVOL_OPCODE_OPEN) {
 						if (io_hdr->len) {
+							io_hdr->status = ZVOL_OP_STATUS_OK;
 							data = malloc(io_hdr->len);
 							nbytes = 0;
 							count = test_read_data(events[i].data.fd, (uint8_t *)data, io_hdr->len);
@@ -449,6 +627,7 @@ main(int argc, char **argv)
 
 					if (io_hdr->opcode == ZVOL_OPCODE_OPEN) {
 						open_ptr = (zvol_op_open_data_t *)data;
+						io_hdr->status = ZVOL_OP_STATUS_OK;
 						REPLICA_LOG("Volume name:%s blocksize:%d timeout:%d\n",
 						    open_ptr->volname, open_ptr->tgt_block_size, open_ptr->timeout);
 					}
@@ -462,8 +641,11 @@ execute_io:
 						}
 					}
 					if(io_hdr->opcode == ZVOL_OPCODE_WRITE) {
+						io_hdr->status = ZVOL_OP_STATUS_OK;
 						io_rw_hdr = (struct zvol_io_rw_hdr *)data;
+						write_metadata(io_hdr->offset, io_rw_hdr->len, io_rw_hdr->io_num);
 						data += sizeof(struct zvol_io_rw_hdr);
+						nbytes = 0;
 						while((rc = pwrite(vol_fd, data + nbytes, io_rw_hdr->len - nbytes, io_hdr->offset + nbytes))) {
 							if(rc == -1 ) {
 								if(errno == 11) {
@@ -477,28 +659,56 @@ execute_io:
 								break;
 							}
 						}
+
+						if (nbytes != io_rw_hdr->len) {
+							REPLICA_ERRLOG("Failed to write data to %s\n", test_vol);
+							goto error;
+						}
+
 						data -= sizeof(struct zvol_io_rw_hdr);
 						usleep(sleeptime);
 					} else if(io_hdr->opcode == ZVOL_OPCODE_READ) {
+						uint8_t *user_data = NULL;
 						if(io_hdr->len) {
-							data = malloc(io_hdr->len);
+							user_data = malloc(io_hdr->len);
 						}
 						nbytes = 0;
-						while((rc = pread(vol_fd, data + nbytes, io_hdr->len - nbytes, io_hdr->offset + nbytes))) {
-							if(rc == -1 ) {
-								if(errno == EAGAIN) {
-									sleep(1);
-									continue;
+						io_hdr->status = ZVOL_OP_STATUS_OK;
+						rc = check_for_err(io_hdr);
+						if(!rc)  {
+							while ((rc = pread(vol_fd, user_data + nbytes, io_hdr->len - nbytes, io_hdr->offset + nbytes))) {
+								if(rc == -1 ) {
+									if(errno == EAGAIN) {
+										sleep(1);
+										continue;
+									}
+									break;
 								}
-								break;
-							}
-							nbytes += rc;
-							if(nbytes == io_hdr->len) {
-								break;
+								nbytes += rc;
+								if(nbytes == io_hdr->len) {
+									break;
+								}
 							}
 						}
+
+						if (nbytes != io_hdr->len) {
+							REPLICA_ERRLOG("failed to read completed data from %s\n", test_vol);
+							free(user_data);
+							goto error;
+						}
+
+						nbytes = fetch_update_io_buf(io_hdr, user_data, &data);
+						if (user_data)
+							free(user_data);
+						io_hdr->len = nbytes;
 					}
-					send_io_resp(iofd, io_hdr, data);
+
+					rc = send_io_resp(iofd, io_hdr, data);
+					if (rc) {
+						REPLICA_ERRLOG("Failed to send response\n");
+						goto error;
+					}
+
 					if (data) {
 						free(data);
 						data = NULL;
@@ -507,5 +717,12 @@ execute_io:
 			}
 		}
 	}
-	return 0;
+
+error:
+	REPLICA_ERRLOG("shutting down replica(%s:%d)\n", ctrl_ip, ctrl_port);
+	if (data)
+		free(data);
+	close(vol_fd);
+	destroy_mdlist();
+	return rc;
 }

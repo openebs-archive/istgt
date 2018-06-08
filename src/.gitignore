@@ -7,3 +7,4 @@
 /istgt_integration
 *.full
 *.debug
+/zrepl_prot.h

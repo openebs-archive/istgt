@@ -8,7 +8,8 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <math.h>
-
+#include <sys/types.h>
+#include <sys/stat.h>
 #include "istgt_misc.h"
 #include "istgt_proto.h"
 #include "replication.h"
@@ -73,8 +74,6 @@ typedef struct zvol_io_cmd_s {
 	zvol_io_hdr_t 	hdr;
 	void		*buf;
 } zvol_io_cmd_t;
-
-int initialize_volume(spec_t *spec, int, int);
 
 /*
  * Allocate zio command along with
@@ -180,7 +179,7 @@ static void handle_handshake(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 	zvol_io_hdr_t *hdr = &(zio_cmd->hdr);
 
 	if (strcmp(zio_cmd->buf, rargs->volname) != 0)
-		REPLICA_ERRLOG("volname not matching %s %s\n", zio_cmd->buf, rargs->volname);
+		REPLICA_ERRLOG("volname not matching %s %s\n", (char *)zio_cmd->buf, rargs->volname);
 
 	mgmt_ack_t *mgmt_ack = malloc(sizeof (mgmt_ack_t));
 	memset(mgmt_ack, 0, sizeof (mgmt_ack_t));
@@ -679,7 +678,8 @@ create_mock_replicas(int replication_factor, char *volname)
 	}
 }
 
-static void usage()
+static void
+usage(void)
 {
 	printf("istgt_integration -b <blocklen> -s <volsize> -t <total_time_in_sec> -v <volname> -T <testid>\n");
 	exit(1);
@@ -791,6 +791,7 @@ main(int argc, char **argv)
 	spec_t *spec = (spec_t *)malloc(sizeof (spec_t));
 	int replication_factor = 3, consistency_factor = 2;
 	pthread_t replica_thread;
+	struct stat sbuf;
 
 	process_options(argc, argv);
 	rc = pthread_mutexattr_init(&mutex_attr);
@@ -806,7 +807,15 @@ main(int argc, char **argv)
 #endif
 
 	blocklen = 512;
-	volsize = (2 * 1024ULL * 1024ULL * 10240ULL);
+	/*
+	 * We are using /tmp/test_vol* files for replica volume files.
+	 */
+	if (stat("/tmp/test_vol1", &sbuf)) {
+		REPLICA_ERRLOG("volume files (/tmp/test_vol*) not created\n");
+		return 1;
+	}
+
+	volsize = sbuf.st_size;
 
 	/* Initialize mempool needed for replication*/
 	if (initialize_replication_mempool(false)) {
@@ -833,4 +842,3 @@ main(int argc, char **argv)
 
 	return 0;
 }
-

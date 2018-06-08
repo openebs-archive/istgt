@@ -70,14 +70,14 @@ static int handle_mgmt_event_fd(replica_t *replica);
 			default:					\
 				break;					\
 		}							\
-		if (cmd_write) {						\
+		if (cmd_write) {					\
 			rcomm_cmd->opcode = ZVOL_OPCODE_WRITE;		\
 			rcomm_cmd->iovcnt = cmd->iobufindx+1;		\
 		} else {						\
 			rcomm_cmd->opcode = ZVOL_OPCODE_READ;		\
 			rcomm_cmd->iovcnt = 0;				\
 		}							\
-		if (cmd_write) {						\
+		if (cmd_write) {					\
 			for (i=1; i < iovcnt + 1; i++) {		\
 				rcomm_cmd->iov[i].iov_base =		\
 				    cmd->iobuf[i-1].iov_base;		\
@@ -91,6 +91,7 @@ static int handle_mgmt_event_fd(replica_t *replica);
 #define BUILD_REPLICA_MGMT_HDR(_mgmtio_hdr, _mgmt_opcode, _data_len)	\
 	do {								\
 		_mgmtio_hdr = malloc(sizeof(zvol_io_hdr_t));		\
+		memset(_mgmtio_hdr, 0, sizeof(zvol_io_hdr_t));		\
 		_mgmtio_hdr->opcode = _mgmt_opcode;			\
 		_mgmtio_hdr->version = REPLICA_VERSION;			\
 		_mgmtio_hdr->len    = _data_len;			\
@@ -218,13 +219,14 @@ perform_read_write_on_fd(int fd, uint8_t *data, uint64_t len, int state)
  * get_all_read_resp_data_chunk will create/update io_data_chunk_list
  * with response received from replica according to io_numer.
  */
-void
-get_all_read_resp_data_chunk(replica_rcomm_resp_t *resp, struct io_data_chunk_list_t *io_chunk_list)
+static void
+get_all_read_resp_data_chunk(replica_rcomm_resp_t *resp, size_t block_len,
+    struct io_data_chunk_list_t *io_chunk_list)
 {
 	zvol_io_hdr_t *hdr = &resp->io_resp_hdr;
 	struct zvol_io_rw_hdr *io_hdr;
 	uint8_t *dataptr = resp->data_ptr;
-	uint64_t len = 0, parsed = 0;
+	uint64_t parsed = 0, data_len;
 	io_data_chunk_t  *io_chunk_entry;
 
 	if (!TAILQ_EMPTY(io_chunk_list)) {
@@ -232,27 +234,31 @@ get_all_read_resp_data_chunk(replica_rcomm_resp_t *resp, struct io_data_chunk_li
 
 		while (parsed < hdr->len) {
 			io_hdr = (struct zvol_io_rw_hdr *)dataptr;
-
-			if (io_chunk_entry->io_num < io_hdr->io_num) {
-				io_chunk_entry->data = dataptr + sizeof(struct zvol_io_rw_hdr) + len;
-				io_chunk_entry->io_num = io_hdr->io_num;
-				io_chunk_entry->len = io_hdr->len;
+			data_len = 0;
+			while (data_len < io_hdr->len) {
+				if (io_chunk_entry->io_num < io_hdr->io_num) {
+					io_chunk_entry->data = dataptr + sizeof(struct zvol_io_rw_hdr) + data_len;
+					io_chunk_entry->io_num = io_hdr->io_num;
+				}
+				data_len += block_len;
+				io_chunk_entry = TAILQ_NEXT(io_chunk_entry, io_data_chunk_next);
 			}
 
-			len += io_hdr->len;
 			dataptr += (sizeof(struct zvol_io_rw_hdr) + io_hdr->len);
 			parsed += (sizeof(struct zvol_io_rw_hdr) + io_hdr->len);
-			io_chunk_entry = TAILQ_NEXT(io_chunk_entry, io_data_chunk_next);
 		}
 	} else {
 		while (parsed < hdr->len) {
 			io_hdr = (struct zvol_io_rw_hdr *)dataptr;
+			data_len = 0;
 
-			io_chunk_entry = malloc(sizeof(io_data_chunk_t));
-			io_chunk_entry->io_num = io_hdr->io_num;
-			io_chunk_entry->data = dataptr + sizeof(struct zvol_io_rw_hdr);
-			io_chunk_entry->len = io_hdr->len;
-			TAILQ_INSERT_TAIL(io_chunk_list, io_chunk_entry, io_data_chunk_next);
+			while (data_len < io_hdr->len) {
+				io_chunk_entry = malloc(sizeof(io_data_chunk_t));
+				io_chunk_entry->io_num = io_hdr->io_num;
+				io_chunk_entry->data = dataptr + sizeof(struct zvol_io_rw_hdr) + data_len;
+				TAILQ_INSERT_TAIL(io_chunk_list, io_chunk_entry, io_data_chunk_next);
+				data_len += block_len;
+			}
 
 			dataptr += (sizeof(struct zvol_io_rw_hdr) + io_hdr->len);
 			parsed += (sizeof(struct zvol_io_rw_hdr) + io_hdr->len);
@@ -263,8 +269,9 @@ get_all_read_resp_data_chunk(replica_rcomm_resp_t *resp, struct io_data_chunk_li
 /*
  * process_chunk_read_resp forms a response data from io_data_chunk_list.
  */
-uint8_t *
-process_chunk_read_resp(struct io_data_chunk_list_t  *io_chunk_list, uint64_t len)
+static uint8_t *
+process_chunk_read_resp(struct io_data_chunk_list_t  *io_chunk_list,
+    uint64_t len, uint64_t block_len)
 {
 	uint64_t parsed = 0;
 	uint8_t *read_data;
@@ -274,8 +281,8 @@ process_chunk_read_resp(struct io_data_chunk_list_t  *io_chunk_list, uint64_t le
 
 	io_chunk_entry = TAILQ_FIRST(io_chunk_list);
 	while (io_chunk_entry) {
-		memcpy(read_data + parsed, io_chunk_entry->data, io_chunk_entry->len);
-		parsed += io_chunk_entry->len;
+		memcpy(read_data + parsed, io_chunk_entry->data, block_len);
+		parsed += block_len;
 
 		io_chunk_next = TAILQ_NEXT(io_chunk_entry, io_data_chunk_next);
 		TAILQ_REMOVE(io_chunk_list, io_chunk_entry, io_data_chunk_next);
@@ -283,6 +290,33 @@ process_chunk_read_resp(struct io_data_chunk_list_t  *io_chunk_list, uint64_t le
 		io_chunk_entry = io_chunk_next;
 	}
 	return read_data;
+}
+
+/*
+ * get_read_resp_data will for a data-response for read command
+ * from a single replica's response
+ */
+static uint8_t *
+get_read_resp_data(replica_rcomm_resp_t *resp, size_t len)
+{
+	zvol_io_hdr_t *hdr = &resp->io_resp_hdr;
+	struct zvol_io_rw_hdr *io_hdr;
+	uint8_t *dataptr = resp->data_ptr;
+	uint8_t *resp_data, *resp_ptr;
+	uint64_t parsed = 0;
+
+	resp_data = xmalloc(len);
+	resp_ptr = resp_data;
+
+	while (parsed < hdr->len) {
+		io_hdr = (struct zvol_io_rw_hdr *)dataptr;
+
+		memcpy(resp_ptr, dataptr + sizeof(struct zvol_io_rw_hdr), io_hdr->len);
+		dataptr += (sizeof(struct zvol_io_rw_hdr) + io_hdr->len);
+		parsed += (sizeof(struct zvol_io_rw_hdr) + io_hdr->len);
+		resp_ptr += io_hdr->len;
+	}
+	return resp_data;
 }
 
 /* creates replica entry and adds to spec's rwaitq list after creating mgmt connection */
@@ -304,6 +338,7 @@ create_replica_entry(spec_t *spec, int epfd, int mgmt_fd)
 
 	replica->initial_checkpointed_io_seq = 0;
 	replica->mgmt_io_resp_hdr = malloc(sizeof(zvol_io_hdr_t));
+	memset(replica->mgmt_io_resp_hdr, 0, sizeof (zvol_io_hdr_t));
 	replica->mgmt_io_resp_data = NULL;
 
 	MTX_LOCK(&spec->rq_mtx);
@@ -368,10 +403,12 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 
 	replica->spec = spec;
 	replica->io_resp_hdr = (zvol_io_hdr_t *) malloc(sizeof (zvol_io_hdr_t));
+	memset(replica->io_resp_hdr, 0, sizeof (zvol_io_hdr_t));
 	replica->io_state = READ_IO_RESP_HDR;
 	replica->io_read = 0;
 
 	rio_hdr = (zvol_io_hdr_t *) malloc(sizeof (zvol_io_hdr_t));
+	memset(rio_hdr, 0, sizeof (zvol_io_hdr_t));
 	rio_hdr->opcode = ZVOL_OPCODE_OPEN;
 	rio_hdr->io_seq = 0;
 	rio_hdr->offset = 0;
@@ -486,6 +523,7 @@ send_replica_handshake_query(replica_t *replica, spec_t *spec)
 	mgmt_cmd->io_bytes = 0;
 	mgmt_cmd->data = data;
 	mgmt_cmd->mgmt_cmd_state = WRITE_IO_SEND_HDR;
+	mgmt_cmd->rcomm_mgmt = NULL;
 
 	MTX_LOCK(&replica->r_mtx);
 	TAILQ_INSERT_TAIL(&replica->mgmt_cmd_queue, mgmt_cmd, mgmt_cmd_next);
@@ -756,6 +794,7 @@ send_replica_status_query(replica_t *replica, spec_t *spec)
 	mgmt_cmd->io_bytes = 0;
 	mgmt_cmd->data = data;
 	mgmt_cmd->mgmt_cmd_state = WRITE_IO_SEND_HDR;
+	mgmt_cmd->rcomm_mgmt = NULL;
 
 	MTX_LOCK(&replica->r_mtx);
 	TAILQ_INSERT_TAIL(&replica->mgmt_cmd_queue, mgmt_cmd, mgmt_cmd_next);
@@ -868,7 +907,6 @@ accept_mgmt_conns(int epfd, int sfd)
 	struct epoll_event event;
 	int rc, rcount=0;
 	spec_t *spec;
-	char *buf = malloc(BUFSIZE);
 	int mgmt_fd;
 	mgmt_event_t *mevent1, *mevent2;
 
@@ -973,7 +1011,6 @@ cleanup:
 		replica->m_event2 = mevent2;
 		send_replica_handshake_query(replica, spec);
 	}
-	free(buf);
 }
 
 /*
@@ -1056,6 +1093,7 @@ read_io_resp_hdr:
 				resp_hdr->len = 0;
 			if (resp_hdr->len != 0) {
 				(*resp_data) = malloc(resp_hdr->len);
+				memset(*resp_data, 0, resp_hdr->len);
 			}
 			*state = READ_IO_RESP_DATA;
 
@@ -1241,6 +1279,10 @@ respond_with_error_for_all_outstanding_mgmt_ios(replica_t *r)
 		struct zvol_io_rw_hdr *rio_rw_hdr =			\
 		    (struct zvol_io_rw_hdr *)(ldata +			\
 		    sizeof(zvol_io_hdr_t));				\
+		memset(ldata, 0, sizeof(zvol_io_hdr_t) +		\
+		    sizeof(struct zvol_io_rw_hdr));			\
+		if (!spec->healthy_rcount)				\
+			rio->flags |= ZVOL_OP_FLAG_READ_METADATA;	\
 		rcmd = get_from_mempool(&rcmd_mempool);			\
 		memset(rcmd, 0, sizeof(*rcmd));				\
 		rcmd->opcode = rcomm_cmd->opcode;			\
@@ -1248,9 +1290,11 @@ respond_with_error_for_all_outstanding_mgmt_ios(replica_t *r)
 		rcmd->data_len = rcomm_cmd->data_len;			\
 		rcmd->io_seq = rcomm_cmd->io_seq;			\
 		rcmd->idx = rcomm_cmd->copies_sent - 1;			\
+		rcomm_cmd->resp_list[rcmd->idx].status |= 		\
+		    (replica->state == ZVOL_STATUS_HEALTHY) ? 		\
+		    SENT_TO_HEALTHY : SENT_TO_DEGRADED;			\
 		rcmd->healthy_count = spec->healthy_rcount;		\
 		rcmd->rcommq_ptr = rcomm_cmd;				\
-		rcmd->status = 0;					\
 		rcmd->iovcnt = rcomm_cmd->iovcnt;			\
 		for (i=1; i < rcomm_cmd->iovcnt + 1; i++) {		\
 			rcmd->iov[i].iov_base = 			\
@@ -1289,8 +1333,13 @@ clear_rcomm_cmd(rcommon_cmd_t *rcomm_cmd)
 	put_to_mempool(&rcommon_cmd_mempool, rcomm_cmd);
 }
 
+/*
+ * This function will check response received for read command
+ * from all replica and process it according to io number
+ */
 static uint8_t *
-handle_read_consistency(rcommon_cmd_t *rcomm_cmd)
+handle_read_consistency(rcommon_cmd_t *rcomm_cmd, ssize_t block_len,
+    bool check_all)
 {
 	int i;
 	uint8_t *dataptr = NULL;
@@ -1299,12 +1348,22 @@ handle_read_consistency(rcommon_cmd_t *rcomm_cmd)
 	TAILQ_INIT(&(io_data_chunk_list));
 
 	for (i = 0; i < rcomm_cmd->copies_sent; i++) {
-		if (rcomm_cmd->resp_list[i].status == 1) {
-			get_all_read_resp_data_chunk(&rcomm_cmd->resp_list[i], &io_data_chunk_list);
+		if (rcomm_cmd->resp_list[i].status & RECEIVED_OK) {
+			if (check_all) {
+				get_all_read_resp_data_chunk(
+				    &rcomm_cmd->resp_list[i], block_len,
+				    &io_data_chunk_list);
+			} else {
+				dataptr = get_read_resp_data(
+				    &rcomm_cmd->resp_list[i],
+				    rcomm_cmd->data_len);
+				return dataptr;
+			}
 		}
 	}
 
-	dataptr = process_chunk_read_resp(&io_data_chunk_list, rcomm_cmd->data_len);
+	dataptr = process_chunk_read_resp(&io_data_chunk_list,
+	    rcomm_cmd->data_len, block_len);
 
 	return dataptr;
 }
@@ -1314,33 +1373,87 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 {
 	int i, rc = 0;
 	uint8_t *data = NULL;
-	int success = 0, failure = 0;
+	int success = 0, failure = 0, healthy_response = 0, response_received;
+	int min_response;
+	int healthy_replica = 0;
 
 	for (i = 0; i < rcomm_cmd->copies_sent; i++) {
-		if (rcomm_cmd->resp_list[i].status == 1) {
+		if (rcomm_cmd->resp_list[i].status & RECEIVED_OK) {
 			success++;
-		} else if (rcomm_cmd->resp_list[i].status == -1) {
+			if (rcomm_cmd->resp_list[i].status & SENT_TO_HEALTHY)
+				healthy_response++;
+		} else if (rcomm_cmd->resp_list[i].status & RECEIVED_ERR) {
 			failure++;
 		}
+
+		if (rcomm_cmd->resp_list[i].status & SENT_TO_HEALTHY)
+			healthy_replica++;
 	}
 
+	response_received = success + failure;
+	min_response = MAX(rcomm_cmd->replication_factor -
+	    rcomm_cmd->consistency_factor + 1, rcomm_cmd->consistency_factor);
+
+	rc = 0;
 	if (rcomm_cmd->opcode == ZVOL_OPCODE_READ) {
-		if ((rcomm_cmd->copies_sent != (success + failure))) {
-			rc = 0;
-		} else if (rcomm_cmd->copies_sent == failure) {
-			rc = -1;
-		} else {
-			data = handle_read_consistency(rcomm_cmd);
+		/*
+		 * If the command is sent to single replica only then
+		 * min_response should be set to 1.
+		 */
+		min_response = (rcomm_cmd->copies_sent == 1) ? 1 : min_response;
+		if (success >= min_response) {
+			/*
+			 * we got the successful response from the required
+			 * number of the replica. So, we can reply back to the
+			 * client with success
+			 */
+			data = handle_read_consistency(rcomm_cmd,
+			    spec->blocklen, (rcomm_cmd->copies_sent == 1) ?
+			    false : true);
 			cmd->data = data;
 			rc = 1;
-		}
-	} else if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) {
-		if (success >= rcomm_cmd->consistency_factor) {
-			rc = 1;
-		} else if ((success + failure) == rcomm_cmd->copies_sent) {
+		} else if (response_received == rcomm_cmd->copies_sent) {
+			/*
+			 * we have received the response from all the replicas
+			 * to whom we have sent a command, but we didn't get
+			 * enough number of successful response. So, we will
+			 * reply to the client with an error.
+			 */
+			rc = -1;
+			REPLICA_ERRLOG("didn't receive success from replica.."
+			    " cmd:read io(%lu) cs(%d)\n", rcomm_cmd->io_seq,
+			    rcomm_cmd->copies_sent);
+		} else if ((rcomm_cmd->copies_sent - failure) < min_response) {
+			/*
+			 * In this case, we will avoid waiting for replicas
+			 * which haven't sent response yet.
+			 */
+			REPLICA_ERRLOG("got error from %d replicas.. io(%lu)"
+			    "cs(%d)\n", failure, rcomm_cmd->io_seq,
+			    rcomm_cmd->copies_sent);
 			rc = -1;
 		}
-
+	} else if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) {
+		if (healthy_replica >= rcomm_cmd->consistency_factor &&
+		    healthy_response >= rcomm_cmd->consistency_factor) {
+			/*
+			 * We got the successful response from required healthy
+			 * replicas.
+			 */
+			rc = 1;
+		} else if (success >= min_response) {
+			/*
+			 * If we didn't get the required number of response
+			 * from healthy replica's but success response matches
+			 * with min_response.
+			 */
+			rc = 1;
+		} else if (response_received == rcomm_cmd->copies_sent) {
+			rc = -1;
+			REPLICA_ERRLOG("didn't receive success from replica.."
+			    " cmd:write io(%lu) cs(%d)\n", rcomm_cmd->io_seq,
+			    rcomm_cmd->copies_sent);
+		}
 	}
 
 	return rc;
@@ -1854,7 +1967,7 @@ exit:
 }
 
 /*
- * destroy response recieved from replica for a rcommon_cmd
+ * destroy response received from replica for a rcommon_cmd
  */
 static void
 destroy_resp_list(rcommon_cmd_t *rcomm_cmd)
@@ -1886,7 +1999,8 @@ cleanup_deadlist(void *arg)
 			rcomm_cmd = get_from_mempool(&spec->rcommon_deadlist);
 
 			for (i = 0; i < rcomm_cmd->copies_sent; i++) {
-				if (rcomm_cmd->resp_list[i].status)
+				if (rcomm_cmd->resp_list[i].status &
+				    (RECEIVED_OK|RECEIVED_ERR))
 					count++;
 			}
 
