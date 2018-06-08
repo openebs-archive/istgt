@@ -77,6 +77,46 @@ run_istgt_integration()
 	return 0
 }
 
+run_and_verify_iostats() {
+	login_to_volume "$CONTROLLER_IP:3260"
+	sleep 5
+	get_scsi_disk
+	if [ "$device_name"!="" ]; then
+		sudo mkfs.ext2 -F /dev/$device_name
+		[[ $? -ne 0 ]] && echo "mkfs failed for $device_name" && exit 1
+
+		sudo mount /dev/$device_name /mnt/store
+		[[ $? -ne 0 ]] && echo "mount for $device_name" && exit 1
+
+		sudo dd if=/dev/urandom of=/mnt/store/file1 bs=4k count=10000 oflag=direct
+		sudo istgtcontrol iostats
+		#var1="$(sudo istgtcontrol iostats |  awk '{ print $7 }' | cut -d '=' -f 2)"
+		var1="$(sudo istgtcontrol iostats | grep -oP "(?<=totalwritebytes\": \")[^ ]+" | cut -d '"' -f 1)"
+		if [ $var1 -eq 0 ]; then
+			echo "iostats command failed" && exit 1
+		fi
+
+		sudo dd if=/dev/urandom of=/mnt/store/file1 bs=4k count=10000 oflag=direct
+		sudo istgtcontrol iostats
+		#var2="$(sudo istgtcontrol iostats |  awk '{ print $7 }' | cut -d '=' -f 2)"
+		var2="$(sudo istgtcontrol iostats | grep -oP "(?<=totalwritebytes\": \")[^ ]+" | cut -d '"' -f 1)"
+		if [ $var2 -eq 0 ]; then
+			echo "iostats command failed" && exit 1
+		fi
+
+		if [ "$var2" == "$var1" ]; then
+			echo "iostats command failed, both the values are same" && exit 1
+		else echo "iostats test passed"
+		fi
+
+		sudo umount /mnt/store
+		logout_of_volume
+		sleep 5
+	else
+		echo "Unable to detect iSCSI device, login failed"; exit 1
+	fi
+}
+
 write_and_verify_data(){
 	login_to_volume "$CONTROLLER_IP:3260"
 	sleep 5
@@ -227,6 +267,11 @@ run_data_integrity_test() {
 	write_and_verify_data
 	sleep 5
 	write_and_verify_data
+	sleep 5
+
+	run_and_verify_iostats
+	sleep 15
+
 	wait $replica1_pid1
 	if [ $? == 0 ]; then
 		echo "Replica timeout failed"

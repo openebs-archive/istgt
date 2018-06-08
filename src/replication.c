@@ -91,7 +91,7 @@ static int handle_mgmt_event_fd(replica_t *replica);
 			default:					\
 				break;					\
 		}							\
-		if (cmd_write) {					\
+		if (cmd_write) {					\	
 			for (i=1; i < iovcnt + 1; i++) {		\
 				rcomm_cmd->iov[i].iov_base =		\
 				    cmd->iobuf[i-1].iov_base;		\

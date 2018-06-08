@@ -771,7 +771,11 @@ typedef struct istgt_lu_disk_t {
 #endif
 
 	uint32_t max_unmap_sectors;
-	struct IO_types IO_size[10];	
+	struct IO_types IO_size[10];
+	uint64_t writes;
+	uint64_t reads;
+	uint64_t readbytes;
+	uint64_t writebytes;
 
 	/* modify lun */
 	int dofake;
