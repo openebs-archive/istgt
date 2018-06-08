@@ -226,6 +226,14 @@ handle_data_conn_error(replica_t *r)
 	else if (r->state == ZVOL_STATUS_DEGRADED)
 		spec->degraded_rcount--;
 
+	if (spec->master_replica == r) {
+		REPLICA_ERRLOG("Replica %s %d was under rebuild,"
+		    " seting master_replica to NULL\n",
+		    r->ip, r->port);
+		spec->master_replica = NULL;
+		spec->rebuild_in_progress = false;
+	}
+
 	update_volstate(r->spec);
 
 	mgmt_eventfd2 = r->mgmt_eventfd2;
@@ -641,5 +649,6 @@ replica_thread(void *arg)
 exit:
 	if (ret == -1)
 		handle_data_conn_error(r);
+	REPLICA_ERRLOG("replica_thread exiting ...\n");
 	return NULL;
 }

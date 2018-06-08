@@ -3107,7 +3107,7 @@ main(int argc, char **argv)
 	istgt_close_log();
 
 	/* Destroy mempool created for replication */
-	(void)destroy_relication_mempool();
+	(void)destroy_replication_mempool();
 
 	config = istgt->config;
 	istgt->config = NULL;
