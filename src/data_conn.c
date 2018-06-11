@@ -226,11 +226,11 @@ handle_data_conn_error(replica_t *r)
 	else if (r->state == ZVOL_STATUS_DEGRADED)
 		spec->degraded_rcount--;
 
-	if (spec->master_replica == r) {
-		REPLICA_ERRLOG("Replica %s %d was under rebuild,"
+	if (spec->target_replica == r) {
+		REPLICA_ERRLOG("Replica:%s port:%d was under rebuild,"
 		    " seting master_replica to NULL\n",
 		    r->ip, r->port);
-		spec->master_replica = NULL;
+		spec->target_replica = NULL;
 		spec->rebuild_in_progress = false;
 	}
 

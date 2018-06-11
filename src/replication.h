@@ -119,7 +119,9 @@ typedef struct rcommon_mgmt_cmd {
 	int cmds_succeeded; // success responses received
 	int cmds_failed; // failure responses received
 	int caller_gone; // thread that is waiting for responses is gone?
+	uint64_t buf_size;
 	pthread_mutex_t mtx;
+	void *buf;
 } rcommon_mgmt_cmd_t;
 
 typedef struct mgmt_cmd_s {
@@ -166,7 +168,7 @@ int64_t perform_read_write_on_fd(int fd, uint8_t *data, uint64_t len,
 int initialize_volume(spec_t *spec, int, int);
 
 /* Replica default timeout is 200 seconds */
-#define	REPLICA_DEFAULT_TIMEOUT	200
+#define	REPLICA_DEFAULT_TIMEOUT	1
 
 #define REPLICA_LOG(fmt, ...)	syslog(LOG_NOTICE, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
 #define REPLICA_NOTICELOG(fmt, ...)	syslog(LOG_NOTICE, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
