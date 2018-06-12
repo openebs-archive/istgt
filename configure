@@ -3395,8 +3395,7 @@ if test "${with_replication+set}" = set; then :
  cat >>confdefs.h <<_ACEOF
 #define REPLICATION
 _ACEOF
-LIBS="-lm $LIBS"
-LIBS="-ljson-c $LIBS"
+LIBS="-lm -ljson-c $LIBS"
 fi
 
 	tmp="/usr/src/virtualbox/*/include"

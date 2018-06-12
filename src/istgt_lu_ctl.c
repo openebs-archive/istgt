@@ -26,7 +26,6 @@
  */
 
 #ifdef HAVE_CONFIG_H
-#include <json-c/json_object.h>
 #include "config.h"
 #endif
 
@@ -43,6 +42,7 @@
 #endif
 #include <unistd.h>
 #include <sys/param.h>
+#include <json-c/json_object.h>
 
 #include "istgt.h"
 #include "istgt_ver.h"
@@ -2909,80 +2909,80 @@ _verb_istat ISCSIstat_last[ISCSI_ARYSZ] = { {0,0,0} };
 _verb_istat ISCSIstat_now[ISCSI_ARYSZ] = { {0,0,0} };
 _verb_istat ISCSIstat_rslt[ISCSI_ARYSZ] = { {0,0,0} };
 
-// istgt_uctl_cmd_iostats collects the iostats from the spec structure
-// and marshal them into json format using json-c library.The returned
-// string memory is managed by the json_object and will be freed when
-// the reference count of the json_object drops to zero.
-// TODO: Add the fields for getting the latency, used capacity etc.
-
+/* istgt_uctl_cmd_iostats collects the iostats from the spec structure
+** and marshal them into json format using json-c library.The returned
+** string memory is managed by the json_object and will be freed when
+** the reference count of the json_object drops to zero.Following command
+** can be used to fetch the iostats.
+** USE : sudo istgtcontrol iostats
+** TODO: Add the fields for getting the latency, used capacity etc.
+*/
 static int
 istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 {
 	ISTGT_LU_Ptr lu;
 	int rc, length;
-	// instantiate json_object from json-c library.
+	/* instantiate json_object from json-c library. */
         struct json_object *jobj;
-	// these are utility variables that will be freed at the end of the
-	// function.
+	/* these are utility variables that will be freed at the end of the function. */
 	char *writes, *reads, *totalreadbytes, *totalwritebytes, *size;
-	int i, j;
 	ISTGT_LU_DISK *spec;
-	ISTGT_Ptr istgt = uctl->istgt;
-	for (i = 0; i < MAX_LOGICAL_UNIT; i++) {
-                lu = (ISTGT_LU_Ptr *) istgt->logical_unit[i];
-                if (lu == NULL)
-                        continue;
-                for (j = 0; j< lu->maxlun; j++) {
-			spec = (ISTGT_LU_DISK *) lu->lun[j].spec;
-			if (spec == NULL)
-				continue;
-			jobj = json_object_new_object();	// create new object
-			json_object *jIQN = json_object_new_string(lu->name);
-			json_object_object_add(jobj, "iqn", jIQN);
+	MTX_LOCK(&specq_mtx);
+	TAILQ_FOREACH(spec, &spec_q, spec_next) {
+		lu = spec->lu;
+		jobj = json_object_new_object();	/* create new object */
+		json_object *jIQN = json_object_new_string(lu->name);
+		json_object_object_add(jobj, "iqn", jIQN);
 
-			length = snprintf(NULL, 0, "%"PRIu64, spec->writes);	// get the length
-			writes = malloc(length + 1);
-			snprintf(writes, length + 1, "%"PRIu64, spec->writes);	// uint64 to string
+		length = snprintf(NULL, 0, "%"PRIu64, spec->writes);	/* get the length */
+		writes = malloc(length + 1);
+		snprintf(writes, length + 1, "%"PRIu64, spec->writes);	/* uint64 to string */
 
-			length = snprintf(NULL, 0, "%"PRIu64, spec->reads);
-			reads = malloc(length + 1);
-			snprintf(reads, length + 1, "%"PRIu64, spec->reads);
+		length = snprintf(NULL, 0, "%"PRIu64, spec->reads);
+		reads = malloc(length + 1);
+		snprintf(reads, length + 1, "%"PRIu64, spec->reads);
 
-			length = snprintf(NULL, 0, "%"PRIu64, spec->readbytes);
-			totalreadbytes = malloc(length + 1);
-			snprintf(totalreadbytes, length + 1, "%"PRIu64, spec->readbytes);
+		length = snprintf(NULL, 0, "%"PRIu64, spec->readbytes);
+		totalreadbytes = malloc(length + 1);
+		snprintf(totalreadbytes, length + 1, "%"PRIu64, spec->readbytes);
 
-			length = snprintf(NULL, 0, "%"PRIu64, spec->writebytes);
-			totalwritebytes = malloc(length + 1);
-			snprintf(totalwritebytes, length + 1, "%"PRIu64, spec->writebytes);
+		length = snprintf(NULL, 0, "%"PRIu64, spec->writebytes);
+		totalwritebytes = malloc(length + 1);
+		snprintf(totalwritebytes, length + 1, "%"PRIu64, spec->writebytes);
 
-			length = snprintf(NULL, 0, "%"PRIu64, spec->size);
-			size = malloc(length + 1);
-			snprintf(size, length + 1, "%"PRIu64, spec->size);
+		length = snprintf(NULL, 0, "%"PRIu64, spec->size);
+		size = malloc(length + 1);
+		snprintf(size, length + 1, "%"PRIu64, spec->size);
 
-			json_object *jreads = json_object_new_string(reads);	// instantiate object
-			json_object *jwrites = json_object_new_string(writes);
-			json_object *jtotalreadbytes = json_object_new_string(totalreadbytes);
-			json_object *jtotalwritebytes = json_object_new_string(totalwritebytes);
-			json_object *jsize = json_object_new_string(size);
+		json_object *jreads = json_object_new_string(reads);	/* instantiate child object */
+		json_object *jwrites = json_object_new_string(writes);
+		json_object *jtotalreadbytes = json_object_new_string(totalreadbytes);
+		json_object *jtotalwritebytes = json_object_new_string(totalwritebytes);
+		json_object *jsize = json_object_new_string(size);
 
-			json_object_object_add(jobj, "writes", jwrites);	// add values to object field
-			json_object_object_add(jobj, "reads", jreads);
-			json_object_object_add(jobj, "totalwritebytes", jtotalwritebytes);
-			json_object_object_add(jobj, "totalreadbytes", jtotalreadbytes);
-			json_object_object_add(jobj, "size", jsize);
+		json_object_object_add(jobj, "writes", jwrites);	/* add values to object field */
+		json_object_object_add(jobj, "reads", jreads);
+		json_object_object_add(jobj, "totalwritebytes", jtotalwritebytes);
+		json_object_object_add(jobj, "totalreadbytes", jtotalreadbytes);
+		json_object_object_add(jobj, "size", jsize);
 
-			istgt_uctl_snprintf(uctl, "%s  %s\n", uctl->cmd, json_object_to_json_string(jobj));
-			rc = istgt_uctl_writeline(uctl);
-			if (rc != UCTL_CMD_OK)
-				return rc;
-		}
+		istgt_uctl_snprintf(uctl, "%s  %s\n", uctl->cmd, json_object_to_json_string(jobj));
+		rc = istgt_uctl_writeline(uctl);
+		if (rc != UCTL_CMD_OK)
+			return rc;
+
+		// free the pointers
+		free(reads);
+		free(writes);
+		free(totalreadbytes);
+		free(totalwritebytes);
+		free(size);
+		/* freeing root json_object will free all the allocated memory
+		** associated with the json_object.
+		*/
+		json_object_put(jobj);
 	}
-	free(reads);
-	free(writes);
-	free(totalreadbytes);
-	free(totalwritebytes);
-	free(size);
+	MTX_UNLOCK(&specq_mtx);
 	istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
 	rc = istgt_uctl_writeline(uctl);
 	if (rc != UCTL_CMD_OK) {
