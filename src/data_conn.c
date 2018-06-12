@@ -225,15 +225,6 @@ handle_data_conn_error(replica_t *r)
 		spec->healthy_rcount--;
 	else if (r->state == ZVOL_STATUS_DEGRADED)
 		spec->degraded_rcount--;
-
-	if (spec->target_replica == r) {
-		REPLICA_ERRLOG("Replica:%s port:%d was under rebuild,"
-		    " seting master_replica to NULL\n",
-		    r->ip, r->port);
-		spec->target_replica = NULL;
-		spec->rebuild_in_progress = false;
-	}
-
 	update_volstate(r->spec);
 
 	mgmt_eventfd2 = r->mgmt_eventfd2;

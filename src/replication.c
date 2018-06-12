@@ -230,14 +230,16 @@ send_prepare_for_rebuild(spec_t *spec, replica_t *target_replica,
 	spec->rebuild_in_progress = true;
 
 	replica_cnt = count_of_replicas_helping_rebuild(spec, healthy_replica);
+	assert(replica_cnt);
 	size = replica_cnt * sizeof (mgmt_ack_t); 
 	rcomm_mgmt = allocate_rcommon_mgmt_cmd(size);
 	// Case 1
 	if (healthy_replica != NULL) {
-
+		replica = healthy_replica;
 		mgmt_cmd = malloc(sizeof (mgmt_cmd_t));
 		BUILD_REPLICA_MGMT_HDR(rmgmtio, mgmt_opcode, data_len);
 
+		replica_cnt--;
 		mgmt_cmd->io_hdr = rmgmtio;
 		mgmt_cmd->io_bytes = 0;
 		mgmt_cmd->data = (char *)malloc(data_len);
@@ -245,23 +247,21 @@ send_prepare_for_rebuild(spec_t *spec, replica_t *target_replica,
 		mgmt_cmd->mgmt_cmd_state = WRITE_IO_SEND_HDR;
 		mgmt_cmd->rcomm_mgmt = rcomm_mgmt;
 
-		MTX_LOCK(&healthy_replica->r_mtx);
-		TAILQ_INSERT_TAIL(&healthy_replica->mgmt_cmd_queue, mgmt_cmd,
+		MTX_LOCK(&replica->r_mtx);
+		TAILQ_INSERT_TAIL(&replica->mgmt_cmd_queue, mgmt_cmd,
 		    mgmt_cmd_next);
-		MTX_UNLOCK(&healthy_replica->r_mtx);
+		MTX_UNLOCK(&replica->r_mtx);
 
 		rcomm_mgmt->cmds_sent++;
 	
-		if (write(healthy_replica->mgmt_eventfd1, &num,
+		if (write(replica->mgmt_eventfd1, &num,
 		    sizeof (num)) != sizeof (num)) {
 			REPLICA_NOTICELOG("Failed to inform to mgmt_eventfd "
 			    "for replica(%p)\n", replica);
 			ret = -1;
 			rcomm_mgmt->cmds_failed++;
-			goto exit;
 		}
-	
-		return ret;
+		goto exit;
 	}
 
 	// Case 2
@@ -301,17 +301,22 @@ send_prepare_for_rebuild(spec_t *spec, replica_t *target_replica,
 
 exit:
 	if (ret == -1) {
+		/*
+		 * Since insertion and processing/deletion happens in same
+		 * thread(mgmt_thread), it is safe to remove cmd from queue
+		 * in error case. Be cautious when you replicate this code.  
+		 */
 		MTX_LOCK(&replica->r_mtx);
-		TAILQ_REMOVE(&replica->mgmt_cmd_queue, mgmt_cmd,
-		    mgmt_cmd_next);
+		clear_mgmt_cmd(replica, mgmt_cmd);
 		MTX_UNLOCK(&replica->r_mtx);
 		if (rcomm_mgmt->cmds_failed == rcomm_mgmt->cmds_sent) {
-			free(mgmt_cmd);
 			free_rcommon_mgmt_cmd(rcomm_mgmt);
 			spec->target_replica = NULL;
 			spec->rebuild_in_progress = false;
 		} 
-	}
+	} else {
+		assert(!replica_cnt);
+	} 
 	return ret;
 }
 
@@ -341,6 +346,9 @@ start_rebuild(void *buf, replica_t *replica, uint64_t data_len)
 	    sizeof (num)) {
 		REPLICA_NOTICELOG("Failed to inform to mgmt_eventfd "
 		    "for replica(%p)\n", replica);
+		MTX_LOCK(&replica->r_mtx);
+		clear_mgmt_cmd(replica, mgmt_cmd);
+		MTX_UNLOCK(&replica->r_mtx);
 		return (ret = -1);
 	}
 	REPLICA_LOG("start_rebuild opcode sent for Replica ip:%s port:%d "
@@ -354,10 +362,10 @@ start_rebuild(void *buf, replica_t *replica, uint64_t data_len)
  * API does the following tasks:-
  * 1. find if there is healthy replica available for rebuilding
  * 2. find downgraded replica for rebuild
- * 3. Call prepare_for_rebuild to on healthy replica or on all
- * other replicas to get IP address and port for replicas.
+ * 3. send prepare_for_rebuild on healthy replica/ other replicas
+ * to get rebuild_IP & rebuild_port for rebuilding.
  */
-void
+static void
 trigger_rebuild(spec_t *spec)
 {
 	int ret = 0;
@@ -368,16 +376,15 @@ trigger_rebuild(spec_t *spec)
 	replica_t *healthy_replica = NULL;
 
 	if (spec->rebuild_in_progress == true) {
+		assert(spec->ready == true);
 		REPLICA_NOTICELOG("Rebuild is already in progress "
 		    "on volume:%s\n", spec->volname);
-		MTX_UNLOCK(&spec->rq_mtx);
 		return;
 	}
 
 	if (spec->ready != true) {
 		REPLICA_NOTICELOG("Volume:%s is not ready to accept IOs\n",
 		    spec->volname);
-		MTX_UNLOCK(&spec->rq_mtx);
 		return;
 	}
 
@@ -404,28 +411,19 @@ trigger_rebuild(spec_t *spec)
 			continue;
 		}
 
-		if (max < replica->initial_checkpointed_io_seq) {
+		if (max <= replica->initial_checkpointed_io_seq) {
 			max = replica->initial_checkpointed_io_seq;
 			target_replica = replica;
 		}
-
-		/*
-		 * Increase io_seq only when we do not have healthy replica
-		 */	
-		if (healthy_replica == NULL) {
-			max = (max == 0) ? 10 : max + (1<<20);
-			spec->io_seq = max;
-		}
 	}
+
+	if (target_replica == NULL)
+		return;
 
 	REPLICA_LOG("Healthy count:%d degraded count:%d consistency factor:%d"
 	    " replication factor:%d\n", spec->healthy_rcount,
 	    spec->degraded_rcount, spec->consistency_factor,
 	    spec->replication_factor);
-
-	if (target_replica == NULL) {
-		assert(!"Can this happen ?\n");
-	}
 
 	ret = send_prepare_for_rebuild(spec, target_replica, healthy_replica);
 	if (ret == 0) {
@@ -441,11 +439,28 @@ trigger_rebuild(spec_t *spec)
 void
 update_volstate(spec_t *spec)
 {
+	uint64_t max = 0;
+	replica_t *replica;
+
 	if (((spec->healthy_rcount + spec->degraded_rcount >=
 	    spec->consistency_factor) && (spec->healthy_rcount >= 1)) ||
 	    (spec->healthy_rcount  + spec->degraded_rcount >=
 	    MAX(spec->replication_factor - spec->consistency_factor + 1,
 	    spec->consistency_factor))) { 
+		TAILQ_FOREACH(replica, &spec->rq, r_next) {
+			if (max < replica->initial_checkpointed_io_seq) {
+				max = replica->initial_checkpointed_io_seq;
+			}
+		}
+
+		/*
+		 * If io_seq is 0, it means either iSCSI controller
+		 * is online very first time or boot-back after crash.
+		 */
+		if (spec->io_seq == 0) {
+			max = (max == 0) ? 10 : max + (1<<20);
+			spec->io_seq = max;
+		}
 		spec->ready = true;
 		REPLICA_NOTICELOG("Marking volume:%s ready for IOs\n", spec->volname);
 	} else {
@@ -828,8 +843,10 @@ send_replica_handshake_query(replica_t *replica, spec_t *spec)
 	if (write(replica->mgmt_eventfd1, &num, sizeof (num)) != sizeof (num)) {
 		REPLICA_NOTICELOG("Failed to inform to mgmt_eventfd for replica(%p)\n", replica);
 		ret = -1;
+		MTX_LOCK(&replica->r_mtx);
+		clear_mgmt_cmd(replica, mgmt_cmd);
+		MTX_UNLOCK(&replica->r_mtx);
 	}
-
 	return ret;
 }
 
@@ -1128,6 +1145,19 @@ ask_replica_status_all(spec_t *spec)
 }
 
 static void
+handle_start_rebuild_resp(spec_t *spec, zvol_io_hdr_t *hdr)
+{
+
+	if (hdr->status == ZVOL_OP_STATUS_OK)
+		return;
+
+	MTX_LOCK(&spec->rq_mtx);
+	spec->target_replica = NULL;
+	spec->rebuild_in_progress = false;
+	MTX_UNLOCK(&spec->rq_mtx);
+}
+
+static void
 handle_prepare_for_rebuild_resp(spec_t *spec, zvol_io_hdr_t *hdr,
     mgmt_ack_t *ack_data, mgmt_cmd_t *mgmt_cmd)
 {
@@ -1145,8 +1175,8 @@ handle_prepare_for_rebuild_resp(spec_t *spec, zvol_io_hdr_t *hdr,
 
 	if (rcomm_mgmt->cmds_sent == rcomm_mgmt->cmds_succeeded) {
 		ret = start_rebuild(buf, spec->target_replica, rcomm_mgmt->buf_size);
+		rcomm_mgmt->buf = NULL;
 		if (ret == 0) {
-			rcomm_mgmt->buf = NULL;
 			REPLICA_LOG("Rebuild triggered on Replica ip:%s port:%d"
 			    " state:%d\n", spec->target_replica->ip,
 			    spec->target_replica->port, spec->target_replica->state);
@@ -1163,8 +1193,13 @@ handle_prepare_for_rebuild_resp(spec_t *spec, zvol_io_hdr_t *hdr,
 	} else if (rcomm_mgmt->cmds_sent ==
 	    (rcomm_mgmt->cmds_failed + rcomm_mgmt->cmds_succeeded)) {
 		free_rcommon_mgmt_cmd(rcomm_mgmt);
+		MTX_LOCK(&spec->rq_mtx);
 		spec->target_replica = NULL;
 		spec->rebuild_in_progress = false;
+		MTX_UNLOCK(&spec->rq_mtx);
+		REPLICA_LOG("Unable to trigger rebuild on Replica ip:"
+		    "%s port:%d state:%d\n", spec->target_replica->ip,
+		    spec->target_replica->port, spec->target_replica->state);
 	}
 }
 
@@ -1195,6 +1230,7 @@ update_replica_status(spec_t *spec, replica_t *replica)
 			/* master_replica became healthy*/
 			spec->degraded_rcount--;
 			spec->healthy_rcount++;
+			assert(spec->target_replica == replica);
 			spec->target_replica = NULL;
 			spec->rebuild_in_progress = false;
 			REPLICA_ERRLOG("Replica:%s port:%d marked healthy,"
@@ -1503,6 +1539,10 @@ read_io_resp_hdr:
 					break;
 
 				case ZVOL_OPCODE_START_REBUILD:
+					assert(fd != replica->iofd);
+					handle_start_rebuild_resp(spec, resp_hdr);
+					break;
+
 				case ZVOL_OPCODE_SNAP_DESTROY:
 					break;
 
@@ -1966,6 +2006,14 @@ handle_mgmt_conn_error(replica_t *r, int sfd, struct epoll_event *events, int ev
 	mgmtfd = r->mgmt_fd;
 	r->mgmt_fd = -1;
 	MTX_UNLOCK(&r->r_mtx);
+
+	if (r->spec->target_replica == r) {
+		REPLICA_ERRLOG("Replica:%s port:%d was under rebuild,"
+		    " seting master_replica to NULL\n",
+		    r->ip, r->port);
+		r->spec->target_replica = NULL;
+		r->spec->rebuild_in_progress = false;
+	}
 	MTX_UNLOCK(&r->spec->rq_mtx);
 
 	close_fd(epollfd, mgmtfd);

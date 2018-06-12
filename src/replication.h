@@ -114,6 +114,13 @@ typedef struct io_data_chunk {
 } io_data_chunk_t;
 
 TAILQ_HEAD(io_data_chunk_list_t, io_data_chunk);
+/*
+ * struct can be used in multithreaded scope and in single thread scope.
+ * Multithreaded scope - snapshot create
+ * Single threade scope - prepare_for_rebuild
+ * So if you are using it in multithreaded scope, use mutex for
+ * thread safe access.
+ */
 typedef struct rcommon_mgmt_cmd {
 	int cmds_sent; // total cmds sent
 	int cmds_succeeded; // success responses received
@@ -168,7 +175,7 @@ int64_t perform_read_write_on_fd(int fd, uint8_t *data, uint64_t len,
 int initialize_volume(spec_t *spec, int, int);
 
 /* Replica default timeout is 200 seconds */
-#define	REPLICA_DEFAULT_TIMEOUT	1
+#define	REPLICA_DEFAULT_TIMEOUT	200
 
 #define REPLICA_LOG(fmt, ...)	syslog(LOG_NOTICE, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
 #define REPLICA_NOTICELOG(fmt, ...)	syslog(LOG_NOTICE, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
