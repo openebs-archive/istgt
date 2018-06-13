@@ -3312,7 +3312,7 @@ $as_echo "$MKDIR_P" >&6; }
 
 # clagn with -O3
 if test "$CC" = "clang" && test "$ac_test_CFLAGS" != "set"; then
-  CFLAGS="-g -O3"
+  CFLAGS="-g -O3 -DNDEBUG"
 fi
 
 # host OS related
