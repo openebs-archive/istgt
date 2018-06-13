@@ -187,7 +187,7 @@ respond_with_error_for_all_outstanding_ios(replica_t *r)
 	rcommon_cmd_t *rcomm_cmd;
 	pthread_cond_t *cond_var;
 
-	VERIFY(r->data_eventfd == -1);
+	ASSERT(r->data_eventfd == -1);
 
 	while ((rcmd = dequeue_replica_cmdq(r)) != NULL)
 		move_to_blocked_or_ready_q(r, rcmd);
@@ -319,7 +319,7 @@ read_cmd(replica_t *r)
 
 	switch(state) {
 		case READ_IO_RESP_HDR:
-			VERIFY(r->io_read < sizeof(zvol_io_hdr_t));
+			ASSERT(r->io_read < sizeof(zvol_io_hdr_t));
 			reqlen = sizeof (zvol_io_hdr_t) - (r->io_read);
 			count = perform_read_write_on_fd(fd,
 			    ((uint8_t *)resp_hdr) + (r->io_read), reqlen, state);
@@ -364,6 +364,12 @@ read_cmd(replica_t *r)
 					return READ_PARTIAL;
 			}
 			return READ_COMPLETED;
+		default:
+			REPLICA_ERRLOG("got invalid read state(%d) for "
+			    "replica(%lu).. aborting..\n", state,
+			    r->zvol_guid);
+			abort();
+			break;
 	}
 	return -1;
 }
@@ -374,7 +380,7 @@ write_cmd(int fd, rcmd_t *cmd)
 	ssize_t rc;
 	int err, i;
 
-	VERIFY(cmd->iovcnt > 0);
+	ASSERT(cmd->iovcnt > 0);
 start:
 	rc = writev(fd, cmd->iov, cmd->iovcnt);
 	err = errno;

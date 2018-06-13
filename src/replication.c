@@ -140,7 +140,7 @@ update_volstate(spec_t *spec)
 	uint64_t max;
 	replica_t *replica;
 
-	VERIFY(MTX_LOCKED(&spec->rq_mtx));
+	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 
 	if(((spec->healthy_rcount + spec->degraded_rcount >= spec->consistency_factor) &&
 		(spec->healthy_rcount >= 1))||
@@ -332,8 +332,8 @@ create_replica_entry(spec_t *spec, int epfd, int mgmt_fd)
 	replica_t *replica = NULL;
 	int rc;
 
-	VERIFY(epfd > 0);
-	VERIFY(mgmt_fd > 0);
+	ASSERT(epfd > 0);
+	ASSERT(mgmt_fd > 0);
 
 	replica = (replica_t *)malloc(sizeof(replica_t));
 	if (!replica)
@@ -653,7 +653,7 @@ pause_and_timed_wait_for_ongoing_ios(spec_t *spec, int sec)
 	bool write_io_found = false;
 	replica_t *replica;
 
-	VERIFY(MTX_LOCKED(&spec->rq_mtx));
+	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 	spec->quiesce = 1;
 
 	clock_gettime(CLOCK_MONOTONIC, &last);
@@ -1045,8 +1045,6 @@ write_io_data(replica_t *replica, io_event_t *wevent)
 	int donecount = 0;
 	(void)replica;
 
-	VERIFY((*state == WRITE_IO_SEND_HDR) || (*state == WRITE_IO_SEND_DATA));
-
 	switch(*state) {
 		case WRITE_IO_SEND_HDR:
 			reqlen = sizeof (zvol_io_hdr_t) - (*write_count);
@@ -1071,6 +1069,12 @@ write_io_data(replica_t *replica, io_event_t *wevent)
 			donecount++;
 			*state = READ_IO_RESP_HDR;
 			break;
+		default:
+			REPLICA_ERRLOG("got invalid write state(%d) for "
+			    "replica(%lu).. aborting..\n", *state,
+			    replica->zvol_guid);
+                        abort();
+			break;
 	}
 	return donecount;
 }
@@ -1094,8 +1098,6 @@ read_io_resp(spec_t *spec, replica_t *replica, io_event_t *revent, mgmt_cmd_t *m
 	ssize_t count;
 	int rc = 0;
 	int donecount = 0;
-
-	VERIFY((*state == READ_IO_RESP_HDR) || (*state == READ_IO_RESP_DATA));
 
 	switch(*state) {
 		case READ_IO_RESP_HDR:
@@ -1127,11 +1129,9 @@ read_io_resp_hdr:
 
 			switch (resp_hdr->opcode) {
 				case ZVOL_OPCODE_HANDSHAKE:
-					if(resp_hdr->len != sizeof (mgmt_ack_t))
-						REPLICA_ERRLOG("mgmt_ack_len %lu not matching with size of mgmt_ack_data..\n",
-						    resp_hdr->len);
+					VERIFY(resp_hdr->len == sizeof (mgmt_ack_t));
+					ASSERT(fd != replica->iofd);
 
-					VERIFY(fd != replica->iofd);
 					rc = zvol_handshake(spec, replica);
 
 					memset(resp_hdr, 0, sizeof(zvol_io_hdr_t));
@@ -1142,13 +1142,8 @@ read_io_resp_hdr:
 					break;
 
 				case ZVOL_OPCODE_REPLICA_STATUS:
-					if(resp_hdr->len != sizeof (zrepl_status_ack_t))
-						REPLICA_ERRLOG("replica_state_t length %lu is not matching with size of repl status data..\n",
-							resp_hdr->len);
-
-					/* replica status must come from mgmt connection */
-					if (fd != replica->iofd)
-						update_replica_status(spec, replica);
+					VERIFY(resp_hdr->len == sizeof (zrepl_status_ack_t));
+					update_replica_status(spec, replica);
 					free(*resp_data);
 					break;
 
@@ -1169,6 +1164,13 @@ read_io_resp_hdr:
 			donecount++;
 			*state = READ_IO_RESP_HDR;
 			goto read_io_resp_hdr;
+			break;
+		default:
+			REPLICA_ERRLOG("got invalid read state(%d) for "
+			    "replica(%lu).. aborting..\n", *state,
+			    replica->zvol_guid);
+			abort();
+			break;
 	}
 
 	return donecount;
@@ -1251,7 +1253,10 @@ free_replica(replica_t *r)
 void
 close_fd(int epollfd, int fd)
 {
-	ASSERT0(epoll_ctl(epollfd, EPOLL_CTL_DEL, fd, NULL));
+	int rc;
+	rc = epoll_ctl(epollfd, EPOLL_CTL_DEL, fd, NULL);
+	ASSERT0(rc);
+
 	close(fd);
 }
 
@@ -1282,7 +1287,7 @@ empty_mgmt_q_of_replica(replica_t *r)
 static void
 respond_with_error_for_all_outstanding_mgmt_ios(replica_t *r)
 {
-	VERIFY(r->conn_closed == 2);
+	ASSERT(r->conn_closed == 2);
 	empty_mgmt_q_of_replica(r);
 }
 
@@ -2012,7 +2017,7 @@ cleanup_deadlist(void *arg)
 			count = 0;
 			rcomm_cmd = get_from_mempool(&spec->rcommon_deadlist);
 
-			VERIFY(rcomm_cmd->state == CMD_EXECUTION_DONE);
+			ASSERT(rcomm_cmd->state == CMD_EXECUTION_DONE);
 
 			for (i = 0; i < rcomm_cmd->copies_sent; i++) {
 				if (rcomm_cmd->resp_list[i].status &
