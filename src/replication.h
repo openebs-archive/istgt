@@ -114,12 +114,21 @@ typedef struct io_data_chunk {
 } io_data_chunk_t;
 
 TAILQ_HEAD(io_data_chunk_list_t, io_data_chunk);
+/*
+ * struct can be used in multithreaded scope and in single thread scope.
+ * Multithreaded scope - snapshot create
+ * Single threade scope - prepare_for_rebuild
+ * So if you are using it in multithreaded scope, use mutex for
+ * thread safe access.
+ */
 typedef struct rcommon_mgmt_cmd {
 	int cmds_sent; // total cmds sent
 	int cmds_succeeded; // success responses received
 	int cmds_failed; // failure responses received
 	int caller_gone; // thread that is waiting for responses is gone?
+	uint64_t buf_size;
 	pthread_mutex_t mtx;
+	void *buf;
 } rcommon_mgmt_cmd_t;
 
 typedef struct mgmt_cmd_s {
