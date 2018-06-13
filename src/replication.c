@@ -132,8 +132,8 @@ allocate_rcommon_mgmt_cmd(uint64_t buf_size)
 {
 
 	rcommon_mgmt_cmd_t *rcomm_mgmt;
-	rcomm_mgmt = (struct rcommon_mgmt_cmd *)malloc(sizeof (struct rcommon_mgmt_cmd));
-	rcomm_mgmt->buf = malloc(buf_size);
+	rcomm_mgmt = (struct rcommon_mgmt_cmd *)malloc(
+	    sizeof (struct rcommon_mgmt_cmd));
 	pthread_mutex_init(&rcomm_mgmt->mtx, NULL);
 	rcomm_mgmt->cmds_sent = 0;
 	rcomm_mgmt->cmds_succeeded = 0;
@@ -239,7 +239,6 @@ send_prepare_for_rebuild(spec_t *spec, replica_t *target_replica,
 		mgmt_cmd = malloc(sizeof (mgmt_cmd_t));
 		BUILD_REPLICA_MGMT_HDR(rmgmtio, mgmt_opcode, data_len);
 
-		replica_cnt--;
 		mgmt_cmd->io_hdr = rmgmtio;
 		mgmt_cmd->io_bytes = 0;
 		mgmt_cmd->data = (char *)malloc(data_len);
@@ -261,6 +260,7 @@ send_prepare_for_rebuild(spec_t *spec, replica_t *target_replica,
 			ret = -1;
 			rcomm_mgmt->cmds_failed++;
 		}
+		replica_cnt--;
 		goto exit;
 	}
 
@@ -271,7 +271,6 @@ send_prepare_for_rebuild(spec_t *spec, replica_t *target_replica,
 		
 		if (replica_cnt == 0)
 			break;
-		replica_cnt--;
 
 		mgmt_cmd = malloc(sizeof (mgmt_cmd_t));
 		BUILD_REPLICA_MGMT_HDR(rmgmtio, mgmt_opcode, data_len);
@@ -297,6 +296,7 @@ send_prepare_for_rebuild(spec_t *spec, replica_t *target_replica,
 			rcomm_mgmt->cmds_failed++;
 			goto exit;
 		}
+		replica_cnt--;
 	}
 
 exit:
@@ -314,9 +314,9 @@ exit:
 			spec->target_replica = NULL;
 			spec->rebuild_in_progress = false;
 		} 
-	} else {
-		assert(!replica_cnt);
-	} 
+	}
+	assert(((ret == -1) && replica_cnt) || (ret == replica_cnt));
+	
 	return ret;
 }
 
@@ -1237,7 +1237,9 @@ update_replica_status(spec_t *spec, replica_t *replica)
 		    	    " seting master_replica to NULL\n",
 		    	    replica->ip, replica->port);
 		}
-	} else if ((repl_status->state == ZVOL_STATUS_DEGRADED) &&
+	}
+#if 0
+ 	else if ((repl_status->state == ZVOL_STATUS_DEGRADED) &&
 	    (repl_status->rebuild_status == ZVOL_REBUILDING_FAILED) &&
 	    (replica == spec->target_replica)) {
 		/*
@@ -1247,7 +1249,7 @@ update_replica_status(spec_t *spec, replica_t *replica)
 		spec->rebuild_in_progress = false;
 		spec->target_replica = NULL;
 	}
-
+#endif
 	/*Trigger rebuild if possible */
 	trigger_rebuild(spec);
 	MTX_UNLOCK(&spec->rq_mtx);
