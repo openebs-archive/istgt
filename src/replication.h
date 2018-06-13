@@ -173,5 +173,10 @@ int initialize_volume(spec_t *spec, int, int);
 #define REPLICA_ERRLOG(fmt, ...)	syslog(LOG_ERR, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
 #define REPLICA_WARNLOG(fmt, ...)	syslog(LOG_ERR, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
 
+#ifdef	DEBUG
+#define REPLICA_DEBUGLOG(fmt, ...)	syslog(LOG_NOTICE, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
+#else
+#define REPLICA_DEBUGLOG(fmt, ...)
+#endif
 #endif /* _REPLICATION_H */
 

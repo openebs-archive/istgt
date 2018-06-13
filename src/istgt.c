@@ -73,6 +73,7 @@
 #include "istgt_lu.h"
 #include "istgt_proto.h"
 #include "istgt_integration.h"
+#include "istgt_misc.h"
 
 #include <sys/time.h>
 
@@ -2622,6 +2623,15 @@ void *timerfn(void *ptr __attribute__((__unused__)))
 	ISTGT_QUEUE backupconns;
 	istgt_queue_init(&backupconns);
 	CONN *conn;
+	spec_t *spec;
+	ISTGT_LU_TASK_Ptr lu_task;
+	ISTGT_LU_CMD_Ptr lu_cmd;
+	int ms;
+	struct timespec now, diff, last_check;
+	int check_interval1 = (replica_timeout / 4) * 1000;
+	int check_interval2 = check_interval1;
+	clock_gettime(clockid, &last_check);
+
 	while(1)
 	{
 		while((conn = (CONN *)(istgt_queue_dequeue(&closedconns))) != NULL)
@@ -2633,6 +2643,38 @@ void *timerfn(void *ptr __attribute__((__unused__)))
 		}
 		while((conn = (CONN *)(istgt_queue_dequeue(&backupconns))) != NULL)
 			istgt_queue_enqueue(&closedconns, conn);
+
+		clock_gettime(clockid, &now);
+		timesdiff(clockid, last_check, now, diff);
+		ms = diff.tv_sec * 1000;
+		ms += diff.tv_nsec / 1000000;
+
+		if (ms > check_interval1) {
+			check_interval1 = check_interval2;
+			MTX_LOCK(&specq_mtx);
+			TAILQ_FOREACH(spec, &spec_q, spec_next) {
+				MTX_LOCK(&spec->complete_queue_mutex);
+				lu_task = (ISTGT_LU_TASK_Ptr)istgt_queue_first(&spec->complete_queue);
+				if (lu_task) {
+					lu_cmd = &lu_task->lu_cmd;
+					clock_gettime(clockid, &now);
+					timesdiff(clockid, lu_cmd->times[0], now, diff);
+					ms = diff.tv_sec * 1000;
+					ms += diff.tv_nsec / 1000000;
+					if (ms > check_interval2) {
+						ISTGT_NOTICELOG("LU:%lu CSN:0x%x TT:%x OP:%2.2x:%x:%s(%lu+%u) not responded since %d seconds\n",
+						    lu_cmd->lun, lu_cmd->CmdSN, lu_cmd->task_tag, lu_cmd->cdb0, lu_cmd->status, lu_cmd->info, lu_cmd->lba, lu_cmd->lblen, ms / 1000);
+					}
+					if (ms < check_interval1)
+						check_interval1 = ms;
+				}
+
+				MTX_UNLOCK(&spec->complete_queue_mutex);
+			}
+			MTX_UNLOCK(&specq_mtx);
+			clock_gettime(clockid, &last_check);
+		}
+
 		sleep(60);
 	}
 	return (void *)NULL;

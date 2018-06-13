@@ -58,6 +58,11 @@ int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 		rcomm_cmd->resp_list[idx].status |= RECEIVED_ERR;	\
 		if (rcomm_cmd->state != CMD_EXECUTION_DONE)		\
 			pthread_cond_signal(_cond);			\
+		REPLICA_ERRLOG("command %s(offset:%lu len:%lu seq:%lu)" \
+		    " failed for replica(%lu)\n",			\
+		    (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) ? "write" :\
+		    "read", rcomm_cmd->offset, rcomm_cmd->data_len,	\
+		    rcomm_cmd->io_seq, r->zvol_guid);			\
 		free(rcmd->iov_data);					\
 		put_to_mempool(&rcmd_mempool, rcmd);			\
 		rcmd = next_rcmd;					\
@@ -66,22 +71,33 @@ int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 
 #define	CHECK_REPLICA_TIMEOUT(_head, _diff, _ret, _exit_label, etimeout)\
 	do {								\
-		struct timespec now;					\
+		struct timespec nw;					\
 		rcmd_t *pending_cmd;					\
 		int ms;							\
 		pending_cmd = TAILQ_FIRST(_head);			\
 		if (pending_cmd != NULL) {				\
-			clock_gettime(CLOCK_MONOTONIC, &now);		\
-			timesdiff(pending_cmd->queued_time, now, _diff);\
+			clock_gettime(CLOCK_MONOTONIC, &nw);		\
+			timesdiff(CLOCK_MONOTONIC,			\
+			    pending_cmd->queued_time, nw, _diff);	\
 			if (_diff.tv_sec >= replica_timeout) {		\
 				REPLICA_ERRLOG("timeout happened for "	\
-				    "replica(%s:%d)..time(%lu)\n", 	\
-				    r->ip, r->port, _diff.tv_sec); 	\
+				    "replica(%lu).. delay(%lu sec)\n", 	\
+				    r->zvol_guid, _diff.tv_sec); 	\
 				_ret = -1;				\
 				goto _exit_label;			\
 			} else {					\
 				ms = _diff.tv_sec * 1000;		\
 				ms += _diff.tv_nsec / 1000000;		\
+				if (ms >				\
+				    (wait_count * polling_timeout)) {	\
+					REPLICA_NOTICELOG("replica(%lu)"\
+					    " hasn't responded in last "\
+					    "%d seconds\n",		\
+					    r->zvol_guid, ms / 1000);	\
+				}					\
+				if (ms > (wait_count * polling_timeout))\
+					wait_count =			\
+					    (ms / polling_timeout) + 1;	\
 				ms = (replica_timeout * 1000) - ms;	\
 				if (ms < etimeout)			\
 					etimeout = ms;			\
@@ -154,7 +170,8 @@ inform_mgmt_conn(replica_t *r)
 	uint64_t num = 1;
 	r->disconnect_conn = 1;
 	if (write(r->mgmt_eventfd1, &num, sizeof (num)) != sizeof (num))
-		REPLICA_NOTICELOG("Failed report err to mgmt_conn for replica(%p)\n", r);
+		REPLICA_NOTICELOG("Failed to report err to mgmt_conn for "
+		    "replica(%s:%d)\n", r->ip, r->port);
 }
 
 /*
@@ -526,10 +543,14 @@ replica_thread(void *arg)
 	struct epoll_event ev, events[MAXEVENTS];
 	int i, nfds, fd, ret = 0;
 	void *ptr;
-	struct timespec diff_rq, diff_bq, diff_wq;
+	struct timespec diff_time, last_time, now;
 	replica_t *r = (replica_t *)arg;
-	int polling_timeout = (replica_timeout / 3) * 1000;
+	int polling_timeout = (replica_timeout / 4) * 1000;
 	int epoll_timeout = polling_timeout;
+	int wait_count = 1;
+	pthread_t self = pthread_self();
+
+	snprintf(tinfo, sizeof tinfo, "r#%d.%lu", (int)(((uint64_t *)self)[0]), r->zvol_guid);
 
 	r->data_eventfd = r_data_eventfd = eventfd(0, EFD_NONBLOCK);
 	if (r_data_eventfd < 0) {
@@ -581,6 +602,7 @@ replica_thread(void *arg)
 	MTX_UNLOCK(&r->r_mtx);
 
 	prctl(PR_SET_NAME, "replica", 0, 0, 0);
+	clock_gettime(CLOCK_MONOTONIC, &last_time);
 
 	while (1) {
 		nfds = epoll_wait(r_epollfd, events, MAXEVENTS, epoll_timeout);
@@ -633,10 +655,22 @@ replica_thread(void *arg)
 		 * set epoll timeout to minimum of replica_io_timeout/3 or minimum of last
 		 * queued IO time diff in all queues (waitq, readyq and blocked queue)
 		 */
-		epoll_timeout = polling_timeout;
-		CHECK_REPLICA_TIMEOUT(&r->readyq, diff_wq, ret, exit, epoll_timeout);
-		CHECK_REPLICA_TIMEOUT(&r->waitq, diff_rq, ret, exit, epoll_timeout);
-		CHECK_REPLICA_TIMEOUT(&r->blockedq, diff_bq, ret, exit, epoll_timeout);
+		clock_gettime(CLOCK_MONOTONIC, &now);
+		timesdiff(CLOCK_MONOTONIC, last_time, now, diff_time);
+		if (((diff_time.tv_sec * 1000) +
+		    (diff_time.tv_nsec / 1000000)) > epoll_timeout) {
+			epoll_timeout = polling_timeout;
+			CHECK_REPLICA_TIMEOUT(&r->readyq, diff_time, ret, exit,
+			    epoll_timeout);
+			CHECK_REPLICA_TIMEOUT(&r->waitq, diff_time, ret, exit,
+			    epoll_timeout);
+			CHECK_REPLICA_TIMEOUT(&r->blockedq, diff_time, ret,
+			    exit, epoll_timeout);
+
+			if (epoll_timeout < replica_timeout)
+				wait_count = 1;
+			clock_gettime(CLOCK_MONOTONIC, &last_time);
+		}
 	}
 exit:
 	if (ret == -1)

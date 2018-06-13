@@ -24,4 +24,20 @@ void * get_from_mempool(rte_smempool_t *obj);
 void put_to_mempool(rte_smempool_t *obj, void *node);
 unsigned get_num_entries_from_mempool(rte_smempool_t *obj);
 
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+
+#ifdef REPLICATION
+#include "replication.h"
+#endif
+
+#endif
+
+#ifndef REPLICATION
+#define	REPLICA_LOG
+#define REPLICA_NOTICELOG
+#define	REPLICA_ERRLOG
+#define	REPLICA_WARNLOG
+#endif
+
 #endif /* _RING_MEMPOOL_H */

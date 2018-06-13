@@ -1,3 +1,12 @@
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+
+#ifdef REPLICATION
+#include "replication.h"
+#endif
+
+#endif
+
 #include "ring_mempool.h"
 
 int
@@ -21,14 +30,16 @@ init_mempool(rte_smempool_t *obj, size_t count, size_t mem_size,
 		for (i = 0; i < count; i++, mem_entry = NULL) {
 			mem_entry = malloc(mem_size);
 			if (!mem_entry) {
-				printf("failed to get memory from mempool\n");
+				REPLICA_ERRLOG("failed to allocate memory for "
+				    "mempool(%s)'s entry\n", obj->ring->name);
 				rc = -1;
 				break;
 			}
 
 			rc = rte_ring_enqueue(obj->ring, mem_entry);
 			if(rc) {
-				printf("failed to insert entry.. no buffer\n");
+				REPLICA_ERRLOG("failed to insert entry in "
+				    "mempool(%s).. \n", obj->ring->name);
 				rc = -1;
 				break;
 			}
@@ -62,8 +73,9 @@ destroy_mempool(rte_smempool_t *obj)
 	int rc;
 
 	if (rte_ring_count(obj->ring) != obj->length) {
-		printf("there are still some orphan alloc from ring(%u)\n",
-		    obj->length - rte_ring_count(obj->ring));
+		REPLICA_ERRLOG("there are still orphan entries(%d) for "
+		    "mempool(%s)\n",
+		    obj->length - rte_ring_count(obj->ring), obj->ring->name);
 		return (obj->length - rte_ring_count(obj->ring));
 	}
 
@@ -75,7 +87,8 @@ destroy_mempool(rte_smempool_t *obj)
 	}
 
 	if (rte_ring_count(obj->ring) != 0) {
-		printf("allocation happened while destroying mempool\n");
+		REPLICA_ERRLOG("allocation happened while destroying "
+		    "mempool(%s)\n", obj->ring->name);
 		return -1;
 	}
 
@@ -88,9 +101,23 @@ get_from_mempool(rte_smempool_t *obj)
 {
 	void *entry = NULL;
 	int rc = 0;
+	int count = 0;
 
 	do {
 		rc = rte_ring_dequeue(obj->ring, &entry);
+
+		/*
+		 * if all entries from ring buffer are being used then
+		 * dequeue from ring buffer will fail.
+		 */
+		if (rc)
+			count++;
+
+		if (count == 10) {
+			REPLICA_ERRLOG("mempool(%s) is empty\n",
+			    obj->ring->name);
+			count = 0;
+		}
 	} while (rc != 0);
 
 	if (obj->create)
@@ -111,7 +138,8 @@ put_to_mempool(rte_smempool_t *obj, void *node)
 
 	rc = rte_ring_enqueue(obj->ring, entry);
 	if (rc) {
-		printf("failed to insert into ring\n");
+		REPLICA_ERRLOG("failed to put entry into mempool(%s)\n",
+		    obj->ring->name);
 	}
 
 	return;

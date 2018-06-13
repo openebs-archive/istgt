@@ -373,6 +373,7 @@ usage(void)
 	printf(" -n number of IOs to serve before sleeping for 60 seconds\n");
 	printf(" -d run in degraded mode only\n");
 	printf(" -e error frequency (should be <= 10, default is 0)\n");
+	printf(" -t delay in response in seconds\n");
 }
 
 
@@ -405,8 +406,9 @@ main(int argc, char **argv)
 	int ch;
 	int check = 1;
 	struct timespec now;
+	int delay = 0;
 
-	while ((ch = getopt(argc, argv, "i:p:I:P:V:n:e:d")) != -1) {
+	while ((ch = getopt(argc, argv, "i:p:I:P:V:n:e:t:d")) != -1) {
 		switch (ch) {
 			case 'i':
 				strncpy(ctrl_ip, optarg, sizeof(ctrl_ip));
@@ -440,6 +442,9 @@ main(int argc, char **argv)
 					usage();
 					exit(EXIT_FAILURE);
 				}
+				break;
+			case 't':
+				delay = atoi(optarg);
 				break;
 			default:
 				usage();
@@ -641,6 +646,9 @@ execute_io:
 						}
 					}
 					if(io_hdr->opcode == ZVOL_OPCODE_WRITE) {
+						if (delay > 0)
+							sleep(delay);
+
 						io_hdr->status = ZVOL_OP_STATUS_OK;
 						io_rw_hdr = (struct zvol_io_rw_hdr *)data;
 						write_metadata(io_hdr->offset, io_rw_hdr->len, io_rw_hdr->io_num);
@@ -669,6 +677,9 @@ execute_io:
 						usleep(sleeptime);
 					} else if(io_hdr->opcode == ZVOL_OPCODE_READ) {
 						uint8_t *user_data = NULL;
+						if (delay > 0)
+							sleep(delay);
+
 						if(io_hdr->len) {
 							user_data = malloc(io_hdr->len);
 						}
@@ -692,7 +703,8 @@ execute_io:
 						}
 
 						if (nbytes != io_hdr->len) {
-							REPLICA_ERRLOG("failed to read completed data from %s\n", test_vol);
+							REPLICA_ERRLOG("failed to read completed data from %s off:%lu req:%lu read:%lu\n",
+							    test_vol, io_hdr->offset, io_hdr->len, nbytes);
 							free(user_data);
 							goto error;
 						}
