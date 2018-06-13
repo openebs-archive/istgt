@@ -332,10 +332,10 @@ run_read_consistency_test ()
 		echo "read consistency test passed"
 	fi
 
+	logout_of_volume
 	kill -9 $replica1_pid $replica2_pid $replica3_pid
 	rm -rf ${replica1_vdev}* ${replica2_vdev}* ${replica3_vdev}*
 	rm -rf $file_name $device_file
-	logout_of_volume
 	stop_istgt
 }
 
