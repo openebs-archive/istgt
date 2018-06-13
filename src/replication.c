@@ -1237,9 +1237,7 @@ update_replica_status(spec_t *spec, replica_t *replica)
 		    	    " seting master_replica to NULL\n",
 		    	    replica->ip, replica->port);
 		}
-	}
-#if 0
- 	else if ((repl_status->state == ZVOL_STATUS_DEGRADED) &&
+	} else if ((repl_status->state == ZVOL_STATUS_DEGRADED) &&
 	    (repl_status->rebuild_status == ZVOL_REBUILDING_FAILED) &&
 	    (replica == spec->target_replica)) {
 		/*
@@ -1249,7 +1247,7 @@ update_replica_status(spec_t *spec, replica_t *replica)
 		spec->rebuild_in_progress = false;
 		spec->target_replica = NULL;
 	}
-#endif
+
 	/*Trigger rebuild if possible */
 	trigger_rebuild(spec);
 	MTX_UNLOCK(&spec->rq_mtx);
@@ -2008,14 +2006,6 @@ handle_mgmt_conn_error(replica_t *r, int sfd, struct epoll_event *events, int ev
 	mgmtfd = r->mgmt_fd;
 	r->mgmt_fd = -1;
 	MTX_UNLOCK(&r->r_mtx);
-
-	if (r->spec->target_replica == r) {
-		REPLICA_ERRLOG("Replica:%s port:%d was under rebuild,"
-		    " seting master_replica to NULL\n",
-		    r->ip, r->port);
-		r->spec->target_replica = NULL;
-		r->spec->rebuild_in_progress = false;
-	}
 	MTX_UNLOCK(&r->spec->rq_mtx);
 
 	close_fd(epollfd, mgmtfd);
@@ -2055,6 +2045,16 @@ handle_mgmt_conn_error(replica_t *r, int sfd, struct epoll_event *events, int ev
 				REPLICA_ERRLOG("unexpected fd(%d) for replica:%p\n", mevent->fd, r);
 		}
 	}
+
+	MTX_LOCK(&r->spec->rq_mtx);
+	if (r->spec->target_replica == r) {
+		REPLICA_ERRLOG("Replica:%s port:%d was under rebuild,"
+		    " seting master_replica to NULL\n",
+		    r->ip, r->port);
+		r->spec->target_replica = NULL;
+		r->spec->rebuild_in_progress = false;
+	}
+	MTX_UNLOCK(&r->spec->rq_mtx);
 
 	if (r->dont_free != 1)
 		free_replica(r);
