@@ -330,10 +330,10 @@ run_read_consistency_test ()
 		echo "read consistency test passed"
 	fi
 
-	kill -9 $replica1_pid $replica2_pid $replica3_pid
-	rm -rf ${replica1_vdev}* ${replica2_vdev}* ${replica3_vdev}*
 	logout_of_volume
+	kill -9 $replica1_pid $replica2_pid $replica3_pid
 	stop_istgt
+	rm -rf ${replica1_vdev}* ${replica2_vdev}* ${replica3_vdev}*
 }
 
 run_data_integrity_test

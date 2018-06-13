@@ -242,7 +242,6 @@ handle_data_conn_error(replica_t *r)
 		spec->healthy_rcount--;
 	else if (r->state == ZVOL_STATUS_DEGRADED)
 		spec->degraded_rcount--;
-
 	update_volstate(r->spec);
 
 	mgmt_eventfd2 = r->mgmt_eventfd2;
@@ -255,7 +254,7 @@ handle_data_conn_error(replica_t *r)
 	if (epoll_ctl(r->epollfd, EPOLL_CTL_DEL, r->iofd, NULL) == -1) {
 		MTX_UNLOCK(&r->r_mtx);
 		REPLICA_ERRLOG("epoll error for replica(%s:%d) iofd:%d "
-		    "errno(%d)\n", r->ip, r->port, r->iofd, errno);
+		    "err(%d)\n", r->ip, r->port, r->iofd, errno);
 		return -1;
 	}
 
@@ -562,28 +561,28 @@ replica_thread(void *arg)
 	r->epollfd = r_epollfd = epoll_create1(0);
 	if (r_epollfd < 0) {
 		REPLICA_ERRLOG("epoll_create error for replica(%s:%d) "
-		    "errno(%d)\n", r->ip, r->port, errno);
+		    "err(%d)\n", r->ip, r->port, errno);
 		return NULL;
 	}
 
 	ev.events = EPOLLIN;
 	ev.data.fd = r_data_eventfd;
 	if (epoll_ctl(r_epollfd, EPOLL_CTL_ADD, r_data_eventfd, &ev) == -1) {
-		REPLICA_ERRLOG("epoll error for replica(%s:%d) errno(%d)\n",
+		REPLICA_ERRLOG("epoll error for replica(%s:%d) err(%d)\n",
 		    r->ip, r->port, errno);
 		return NULL;
 	}
 
 	r->mgmt_eventfd2 = r_mgmt_eventfd = eventfd(0, EFD_NONBLOCK);
 	if (r_mgmt_eventfd < 0) {
-		REPLICA_ERRLOG("epoll error for replica(%s:%d) errno(%d)\n",
+		REPLICA_ERRLOG("epoll error for replica(%s:%d) err(%d)\n",
 		    r->ip, r->port, errno);
 		return NULL;
 	}
 
 	ev.data.fd = r_mgmt_eventfd;
 	if (epoll_ctl(r_epollfd, EPOLL_CTL_ADD, r_mgmt_eventfd, &ev) == -1) {
-		REPLICA_ERRLOG("epoll error for replica(%s:%d) errno(%d)\n",
+		REPLICA_ERRLOG("epoll error for replica(%s:%d) err(%d)\n",
 		    r->ip, r->port, errno);
 		return NULL;
 	}
@@ -595,7 +594,7 @@ replica_thread(void *arg)
 	if ((r->iofd == -1) ||
 	    (epoll_ctl(r_epollfd, EPOLL_CTL_ADD, r->iofd, &ev) == -1)) {
 		MTX_UNLOCK(&r->r_mtx);
-		REPLICA_ERRLOG("epoll error for replica(%s:%d) errno(%d)\n",
+		REPLICA_ERRLOG("epoll error for replica(%s:%d) err(%d)\n",
 		    r->ip, r->port, errno);
 		return NULL;
 	}
@@ -610,7 +609,7 @@ replica_thread(void *arg)
 			if (errno == EINTR)
 				continue;
 			REPLICA_ERRLOG("epoll_wait error for replica(%s:%d) "
-			    "errno(%d)\n", r->ip, r->port, errno);
+			    "err(%d)\n", r->ip, r->port, errno);
 			ret = -1;
 			goto exit;
 		}
@@ -675,5 +674,6 @@ replica_thread(void *arg)
 exit:
 	if (ret == -1)
 		handle_data_conn_error(r);
+	REPLICA_ERRLOG("replica_thread exiting ...\n");
 	return NULL;
 }

@@ -61,6 +61,7 @@ typedef struct replica_s {
 	int epfd;
 	int dont_free;
 
+	struct timespec create_time;
 	/*
 	 * this variable will be updated by only replica_thread,
 	 * so no lock required while updating this

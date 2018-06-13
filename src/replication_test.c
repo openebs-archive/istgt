@@ -22,7 +22,7 @@ __thread char  tinfo[50] =  {0};
 	mgmt_ack_hdr = (zvol_io_hdr_t *)malloc(sizeof(zvol_io_hdr_t));\
 	mgmt_ack_hdr->opcode = opcode;\
 	mgmt_ack_hdr->version = REPLICA_VERSION;\
-	mgmt_ack_hdr->len = sizeof(mgmt_ack_data_t);\
+	mgmt_ack_hdr->len = sizeof (mgmt_ack_data_t);\
 	mgmt_ack_hdr->status = ZVOL_OP_STATUS_OK;\
 	mgmt_ack_hdr->checkpointed_io_seq = 1000;\
 }
@@ -210,19 +210,21 @@ test_read_data(int fd, uint8_t *data, uint64_t len)
 	return nbytes;
 }
 
-int
-send_mgmtack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip, int replica_port)
+static int
+send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
+    int replica_port, zrepl_status_ack_t *zrepl_status,
+    int *zrepl_status_msg_cnt)
 {
-	zvol_io_hdr_t *mgmt_ack_hdr = NULL;
 	int i, nbytes = 0;
 	int rc = 0, start;
 	struct iovec iovec[6];
-	build_mgmt_ack_hdr;
 	int iovec_count;
-	zrepl_status_ack_t repl_status;
+	zvol_io_hdr_t *mgmt_ack_hdr = NULL;
 	mgmt_ack_t *mgmt_ack_data = NULL;
 	int ret = -1;
 
+	/* Init mgmt_ack_hdr */
+	build_mgmt_ack_hdr;
 	iovec[0].iov_base = mgmt_ack_hdr;
 	iovec[0].iov_len = 16;
 
@@ -248,14 +250,25 @@ send_mgmtack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip, int rep
 		mgmt_ack_hdr->status = (random() % 5 == 0) ? ZVOL_OP_STATUS_FAILED : ZVOL_OP_STATUS_OK;
 		mgmt_ack_hdr->len = 0;
 	} else if (opcode == ZVOL_OPCODE_REPLICA_STATUS) {
-		if (degraded_mode)
-			repl_status.state = ZVOL_STATUS_DEGRADED;
-		else
-			repl_status.state = ZVOL_STATUS_HEALTHY;
-		mgmt_ack_hdr->len = sizeof(zrepl_status_ack_t);
+		if (((*zrepl_status_msg_cnt) >= 2) &&
+		    (zrepl_status->state != ZVOL_STATUS_HEALTHY)) {
+			zrepl_status->state = ZVOL_STATUS_HEALTHY;
+			zrepl_status->rebuild_status = ZVOL_REBUILDING_DONE;
+			(*zrepl_status_msg_cnt) = 0;
+		}
+
+		if (zrepl_status->rebuild_status == ZVOL_REBUILDING_IN_PROGRESS) {
+			(*zrepl_status_msg_cnt) += 1;
+		}
+
+		mgmt_ack_hdr->len = sizeof (zrepl_status_ack_t);
 		iovec_count = 4;
-		iovec[3].iov_base = &repl_status;
-		iovec[3].iov_len = sizeof(zrepl_status_ack_t);
+		iovec[3].iov_base = zrepl_status;
+		iovec[3].iov_len = sizeof (zrepl_status_ack_t);
+	} else if (opcode == ZVOL_OPCODE_START_REBUILD) {
+		zrepl_status->rebuild_status = ZVOL_REBUILDING_IN_PROGRESS;
+		mgmt_ack_hdr->len = 0;
+		iovec_count = 3;
 	} else {
 		build_mgmt_ack_data;
 
@@ -270,10 +283,10 @@ send_mgmtack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip, int rep
 		iovec_count = 6;
 	}
 
-	for (start = 0; start < iovec_count; start += 2) {
-		nbytes = iovec[start].iov_len + iovec[start + 1].iov_len;
+	for (start = 0; start < iovec_count; start += 1) {
+		nbytes = iovec[start].iov_len;
 		while (nbytes) {
-			rc = writev(fd, &iovec[start], 2);//Review iovec in this line
+			rc = writev(fd, &iovec[start], 1);//Review iovec in this line
 			if (rc < 0) {
 				goto out;
 			}
@@ -281,7 +294,7 @@ send_mgmtack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip, int rep
 			if (nbytes == 0)
 				break;
 			/* adjust iovec length */
-			for (i = start; i < start + 2; i++) {
+			for (i = start; i < start + 1; i++) {
 				if (iovec[i].iov_len != 0 && iovec[i].iov_len > (size_t)rc) {
 					iovec[i].iov_base
 						= (void *) (((uintptr_t)iovec[i].iov_base) + rc);
@@ -381,6 +394,8 @@ int
 main(int argc, char **argv)
 {
 	char ctrl_ip[MAX_IP_LEN];
+	zrepl_status_ack_t *zrepl_status;
+	int zrepl_status_msg_cnt = 0;
 	int ctrl_port = 0;
 	char replica_ip[MAX_IP_LEN];
 	int replica_port = 0;
@@ -459,7 +474,9 @@ main(int argc, char **argv)
 	vol_fd = open(test_vol, O_RDWR, 0666);
 	io_hdr = malloc(sizeof(zvol_io_hdr_t));
 	mgmtio = malloc(sizeof(zvol_io_hdr_t));
-
+	zrepl_status = (zrepl_status_ack_t *)malloc(sizeof (zrepl_status_ack_t));
+	zrepl_status->state = ZVOL_STATUS_DEGRADED; 
+	zrepl_status->rebuild_status = ZVOL_REBUILDING_INIT; 
 	if (init_mdlist(test_vol)) {
 		REPLICA_ERRLOG("Failed to initialize mdlist\n");
 		close(vol_fd);
@@ -530,7 +547,7 @@ main(int argc, char **argv)
 					count = test_read_data(events[i].data.fd, (uint8_t *)data, mgmtio->len);
 				}
 				opcode = mgmtio->opcode;
-				send_mgmtack(mgmtfd, opcode, data, replica_ip, replica_port);
+				send_mgmt_ack(mgmtfd, opcode, data, replica_ip, replica_port, zrepl_status, &zrepl_status_msg_cnt);
 			} else if (events[i].data.fd == sfd) {
 				struct sockaddr saddr;
 				socklen_t slen;
