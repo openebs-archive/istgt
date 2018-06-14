@@ -1952,8 +1952,6 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 				rc = cmd->data_len = rcomm_cmd->data_len;
 			}
 			rcomm_cmd->state = CMD_EXECUTION_DONE;
-			put_to_mempool(&spec->rcommon_deadlist, rcomm_cmd);
-			MTX_UNLOCK(rcomm_cmd->mutex);
 
 			/*
 			 * NOTE: This is for debugging purpose only
@@ -1966,6 +1964,8 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 			TAILQ_REMOVE(&spec->rcommon_waitq, rcomm_cmd, wait_cmd_next);
 			MTX_UNLOCK(&spec->rq_mtx);
 
+			put_to_mempool(&spec->rcommon_deadlist, rcomm_cmd);
+			MTX_UNLOCK(rcomm_cmd->mutex);
 			break;
 		}
 
