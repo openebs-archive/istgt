@@ -336,10 +336,63 @@ run_read_consistency_test ()
 	rm -rf ${replica1_vdev}* ${replica2_vdev}* ${replica3_vdev}*
 }
 
+run_replication_factor_test()
+{
+	local replica1_port="6161"
+	local replica2_port="6162"
+	local replica3_port="6163"
+	local replica4_port="6164"
+	local replica1_ip="127.0.0.1"
+	local replica2_ip="127.0.0.1"
+	local replica3_ip="127.0.0.1"
+	local replica4_ip="127.0.0.1"
+	local replica1_vdev="/tmp/test_vol1"
+	local ret=0
+
+	setup_test_env
+
+	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev &
+	replica1_pid=$!
+	sleep 2	#Replica will take some time to make successful connection to target
+
+	# As long as we are not running any IOs we can use the same vdev file
+	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V $replica1_vdev  &
+	replica2_pid=$!
+	sleep 2
+
+	# As long as we are not running any IOs we can use the same vdev file
+	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V $replica1_vdev &
+	replica3_pid=$!
+	sleep 2
+
+	# As long as we are not running any IOs we can use the same vdev file
+	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica4_ip" -P "$replica4_port" -V $replica1_vdev &
+	replica4_pid=$!
+	sleep 5
+
+	wait $replica4_pid
+	if [ $? == 0 ]; then
+		echo "replica limit test failed"
+		kill -9 $replica4_pid
+		ret=1
+	else
+		echo "replica limit test passed"
+	fi
+
+	kill -9 $replica1_pid $replica2_pid $replica3_pid
+	stop_istgt
+	rm -rf ${replica1_vdev}*
+
+	if [ $ret == 1 ]; then
+		exit 1
+	fi
+}
+
 run_data_integrity_test
 run_mempool_test
 run_istgt_integration
 run_read_consistency_test
+run_replication_factor_test
 
 tail -20 /var/log/syslog
 

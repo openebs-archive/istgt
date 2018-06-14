@@ -436,6 +436,23 @@ trigger_rebuild(spec_t *spec)
 	}
 }
 
+static int
+verify_replica_count(spec_t *spec, replica_t *replica)
+{
+	int replica_count;
+	int ret = 0;
+
+	replica_count = spec->healthy_rcount + spec->degraded_rcount;
+	if (replica_count > spec->replication_factor) {
+		REPLICA_ERRLOG("removing replica(%s:%d) since max replica "
+		    "connection limit(%d) reached\n", replica->ip,
+		    replica->port, spec->replication_factor);
+		ret = -1;
+	}
+
+	return ret;
+}
+
 void
 update_volstate(spec_t *spec)
 {
@@ -799,6 +816,16 @@ replica_error:
 
 	spec->degraded_rcount++;
 	TAILQ_REMOVE(&spec->rwaitq, replica, r_waitnext);
+
+	rc = verify_replica_count(spec, replica);
+	if (rc) {
+		MTX_UNLOCK(&spec->rq_mtx);
+		ISTGT_ERRLOG("failed to verify replica(ip:%s port:%d guid:%lu"
+		    ") err(%d)\n", replica->ip, replica->port,
+		    replica->zvol_guid, rc);
+		return -1;
+	}
+
 	TAILQ_INSERT_TAIL(&spec->rq, replica, r_next);
 
 	/* Update the volume ready state */
@@ -1928,7 +1955,6 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 			if (rc == 1)
 				rc = cmd->data_len = rcomm_cmd->data_len;
 			rcomm_cmd->state = CMD_EXECUTION_DONE;
-			put_to_mempool(&spec->rcommon_deadlist, rcomm_cmd);
 			MTX_UNLOCK(rcomm_cmd->mutex);
 
 			/*
@@ -1940,6 +1966,7 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 
 			MTX_LOCK(&spec->rq_mtx);
 			TAILQ_REMOVE(&spec->rcommon_waitq, rcomm_cmd, wait_cmd_next);
+			put_to_mempool(&spec->rcommon_deadlist, rcomm_cmd);
 			MTX_UNLOCK(&spec->rq_mtx);
 
 			break;
@@ -2209,11 +2236,8 @@ init_replication(void *arg __attribute__((__unused__)))
 						else
 							rc = handle_mgmt_event_fd(r);
 					}
-					if (rc == -1)
-						handle_mgmt_conn_error(r, sfd, events, event_count);
 
-					rc = 0;
-					if (events[i].events & EPOLLOUT)
+					if ((rc != -1) && (events[i].events & EPOLLOUT))
 						//ASSERT(mevent->fd == r->mgmt_fd);
 						rc = handle_write_data_event(r);
 					if (rc == -1)
