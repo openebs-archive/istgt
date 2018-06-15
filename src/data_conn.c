@@ -671,8 +671,15 @@ replica_thread(void *arg)
 		}
 
 		/*
-		 * set epoll timeout to minimum of replica_io_timeout/3 or minimum of last
-		 * queued IO time diff in all queues (waitq, readyq and blocked queue)
+		 * Here, we are checking if replica are taking much time to
+		 * responde than expected time.
+		 * Expected time is set to replica_timeout in ms.
+		 *
+		 * We will check time difference for first IOs from all replica
+		 * queues (waitq, readyq and blocked queue) at an interval of
+		 * `x` ms.
+		 * `x` is set to minimum of (replica_timeout/4) or lowest
+		 * time_diff of IOs from all replica queue.
 		 */
 		clock_gettime(CLOCK_MONOTONIC, &now);
 		timesdiff(CLOCK_MONOTONIC, last_time, now, diff_time);
@@ -686,6 +693,12 @@ replica_thread(void *arg)
 			CHECK_REPLICA_TIMEOUT(&r->blockedq, diff_time, ret,
 			    exit, epoll_timeout);
 
+			/*
+			 * In CHECK_REPLICA_TIMEOUT macro, we are logging
+			 * replica details and time_diff since how long replica
+			 * is not responding at an interval of
+			 * (replica_timeout/4) ms.
+			 */
 			if (epoll_timeout < replica_timeout)
 				wait_count = 1;
 			clock_gettime(CLOCK_MONOTONIC, &last_time);

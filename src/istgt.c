@@ -2628,8 +2628,7 @@ void *timerfn(void *ptr __attribute__((__unused__)))
 	ISTGT_LU_CMD_Ptr lu_cmd;
 	int ms;
 	struct timespec now, diff, last_check;
-	int check_interval1 = (replica_timeout / 4) * 1000;
-	int check_interval2 = check_interval1;
+	int check_interval = (replica_timeout / 4) * 1000;
 	clock_gettime(clockid, &last_check);
 
 	while(1)
@@ -2649,8 +2648,19 @@ void *timerfn(void *ptr __attribute__((__unused__)))
 		ms = diff.tv_sec * 1000;
 		ms += diff.tv_nsec / 1000000;
 
-		if (ms > check_interval1) {
-			check_interval1 = check_interval2;
+		/*
+		 * Here, we are checking if IOs are taking much time to
+		 * complete than expected time at an interval of (replica_timeout /4).
+		 * Expected time is set to (replica_timeout / 4) in ms.
+		 *
+		 * complete_queue holds the IOs scheduled for the target.
+		 * we will calculate the time difference of first IO from
+		 * complete_queue as first IO is the oldest one in the queue.
+		 * If the time difference is more than (replica_timeout / 4)
+		 * then we will log the IO's details.
+		 */
+
+		if (ms > check_interval) {
 			MTX_LOCK(&specq_mtx);
 			TAILQ_FOREACH(spec, &spec_q, spec_next) {
 				MTX_LOCK(&spec->complete_queue_mutex);
@@ -2661,12 +2671,10 @@ void *timerfn(void *ptr __attribute__((__unused__)))
 					timesdiff(clockid, lu_cmd->times[0], now, diff);
 					ms = diff.tv_sec * 1000;
 					ms += diff.tv_nsec / 1000000;
-					if (ms > check_interval2) {
+					if (ms > check_interval) {
 						ISTGT_NOTICELOG("LU:%lu CSN:0x%x TT:%x OP:%2.2x:%x:%s(%lu+%u) not responded since %d seconds\n",
 						    lu_cmd->lun, lu_cmd->CmdSN, lu_cmd->task_tag, lu_cmd->cdb0, lu_cmd->status, lu_cmd->info, lu_cmd->lba, lu_cmd->lblen, ms / 1000);
 					}
-					if (ms < check_interval1)
-						check_interval1 = ms;
 				}
 
 				MTX_UNLOCK(&spec->complete_queue_mutex);
