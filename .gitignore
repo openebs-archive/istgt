@@ -13,7 +13,7 @@
 #
 # Normal rules
 #
-*.[oa]
+*.[oais]
 *.lo
 *.la
 *~
@@ -26,8 +26,15 @@
 !.gitignore
 tags
 TAGS
+configure
 cscope.*
 *.patch
 *.orig
 config.log
 config.status
+autom4te.cache
+doc/istgt.1
+etc/istgt.conf
+etc/istgt.large.conf
+etc/istgt_linux.sh
+src/config.h.in

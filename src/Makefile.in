@@ -13,9 +13,9 @@ datarootdir = @datarootdir@
 datadir  = @datadir@
 libexecdir = @libexecdir@
 mandir   = @mandir@
+REPLICATION_BIN = @replication_bin@
 
 CC       = @CC@
-SUBPROGRAM  = @SUBPROGRAM@
 CFLAGS   = @CFLAGS@
 CPPFLAGS = @CPPFLAGS@ -I$(top_srcdir) -I$(srcdir)
 LDFLAGS  = @LDFLAGS@
@@ -26,7 +26,6 @@ MKDIR_P  = @MKDIR_P@
 RANLIB   = @RANLIB@
 MKDEP	 = @MKDEP@
 
-CFLAGS  += -DDEBUG -ggdb3
 CFLAGS  += -fno-strict-aliasing -Wstrict-aliasing
 CFLAGS  += -Wformat=2 -Wreturn-type
 CFLAGS  += -Wbad-function-cast
@@ -35,21 +34,25 @@ CFLAGS  += -Wmissing-prototypes -Wnested-externs -Wpointer-arith
 CFLAGS  += -Wredundant-decls -Wshadow -Wstrict-prototypes -Wwrite-strings
 CFLAGS  += -Wno-error=cast-align
 
-source   = istgt.c istgt_iscsi.c istgt_iscsi_param.c \
-	istgt_lu.c istgt_cmd_table.c istgt_ser_table.c istgt_lu_disk.c istgt_lu_disk_xcopy.c istgt_lu_disk_vbox.c \
-	istgt_lu_ctl.c \
-	istgt_log.c istgt_conf.c istgt_sock.c istgt_misc.c \
-	istgt_queue.c istgt_crc32c.c istgt_md5.c replication.c replication_misc.c \
-	ring_mempool.c rte_ring.c data_conn.c
+istgt_source = istgt.c istgt_iscsi.c istgt_iscsi_param.c istgt_lu.c 	\
+		istgt_cmd_table.c istgt_ser_table.c istgt_lu_disk.c 	\
+		istgt_lu_disk_xcopy.c istgt_lu_disk_vbox.c istgt_lu_ctl.c \
+		istgt_log.c istgt_conf.c istgt_sock.c istgt_misc.c \
+		istgt_queue.c istgt_crc32c.c istgt_md5.c
 
-header   = istgt_ver.h istgt.h istgt_iscsi.h istgt_iscsi_xcopy.h istgt_iscsi_param.h \
-	istgt_scsi.h istgt_proto.h istgt_lu.h \
-	istgt_log.h istgt_conf.h istgt_sock.h \
-	istgt_misc.h istgt_queue.h istgt_crc32c.h istgt_md5.h replication.h  istgt_integration.h \
-	rte_atomic_64.h  rte_atomic_generic.h  rte_atomic.h  rte_common.h  \
-	rte_memory.h  rte_pause.h  rte_ring.h rte_mempool.h
-document = 
-sample   = 
+istgt_header = istgt_ver.h istgt.h istgt_iscsi.h istgt_iscsi_xcopy.h istgt_iscsi_param.h \
+		istgt_scsi.h istgt_proto.h istgt_lu.h istgt_log.h istgt_conf.h istgt_sock.h \
+		istgt_misc.h istgt_queue.h istgt_crc32c.h istgt_md5.h
+
+replication_source = replication.c replication_misc.c ring_mempool.c rte_ring.c data_conn.c
+
+replication_header = replication.h  istgt_integration.h zrepl_prot.h 	\
+			rte_atomic_64.h  rte_atomic_generic.h  rte_atomic.h	\
+			rte_common.h rte_memory.h  rte_pause.h  rte_ring.h rte_mempool.h
+
+target_source = @target_source_files@
+target_header = @target_header_files@
+
 
 ctl_source = istgtcontrol.c istgt_conf.c istgt_log.c istgt_sock.c istgt_misc.c \
 	istgt_md5.c
@@ -64,7 +67,7 @@ replication_test_header   = replication.h istgt_integration.h
 
 mempool_test_source = rte_ring.c mempool_test.c ring_mempool.c
 
-ISTGT    = $(source:.c=.o)
+ISTGT    = $(target_source:.c=.o)
 ISTGTCONTROL = $(ctl_source:.c=.o)
 REPLICATION_TEST = $(replication_test_source:.c=.o)
 ISTGT_INTEGRATION = $(istgt_integration_source:.c=.o)
@@ -85,8 +88,7 @@ DISTEXTVER = `sed -e '/ISTGT_EXTRA_VERSION/!d' -e 's/[^0-9.]*\([0-9.a-z]*\).*/\1
 DISTDIR = $(top_srcdir)/`cat $(top_srcdir)/distdir`
 DISTNAME = $(DISTDIR).tar.gz
 DISTFILES = Makefile.in config.h.in build.h.in \
-	$(header) $(source) $(ctl_header) $(ctl_source) \
-	$(document) $(sample)
+	$(target_header) $(target_source) $(ctl_header) $(ctl_source)
 
 #########################################################################
 
@@ -126,8 +128,8 @@ mempool_test: $(MEMPOOL_TEST)
 build_image:
 	sh ./package.sh
 
-all: stamp-depend config.h $(SUBPROGRAM) istgtcontrol istgt istgt_integration replication_test mempool_test build_image
-dev: stamp-depend config.h $(SUBPROGRAM) istgtcontrol istgt replication_test mempool_test
+all: stamp-depend config.h istgtcontrol istgt $(REPLICATION_BIN)
+dev: stamp-depend config.h istgtcontrol istgt $(REPLICATION_BIN)
 
 install: install-dirs
 	$(INSTALL) -m 0755 istgt $(DESTDIR)$(bindir)
@@ -147,11 +149,8 @@ dist: $(DISTFILES)
 	fi
 
 depend:
-	wget -O ${srcdir}/zrepl_prot.h https://raw.githubusercontent.com/openebs/zfs/zfs-0.7-release/include/zrepl_prot.h >> /dev/null 2>&1
-	#As of now openebs/zfs/zfs-0.7-release doesn't support ZVOL_OP_FLAG_READ_METADATA. We need to modify zrepl_prot.h to support ZVOL_OP_FLAG_READ_METADATA.
-	cat  ${srcdir}/zrepl_prot.h | grep ZVOL_OP_FLAG_READ_METADATA >> /dev/null 2>&1 || sed -i '/ZVOL_OP_FLAG_REBUILD/ a #define ZVOL_OP_FLAG_READ_METADATA 0x02' ${srcdir}/zrepl_prot.h
 	if [ "x$(MKDEP)" != "x" ]; then \
-		$(MKDEP) -MM $(DEFS) $(CFLAGS) $(CPPFLAGS) $(source); \
+		$(MKDEP) -MM $(DEFS) $(CFLAGS) $(CPPFLAGS) $(target_source); \
 	fi
 	touch stamp-depend
 
@@ -161,8 +160,9 @@ clean:
 	-rm -f istgt istgtcontrol
 	-rm -f istgt.debug istgtcontrol.debug
 	-rm -f istgt.full istgtcontrol.full
-	-rm -f mempool_test
 	-rm -f replication_test replication_test.debug replication_test.full
+	-rm -f mempool_test mempool_test.debug mempool_test.full
+	-rm -f istgt_integration istgt_integration.debug istgt_integration.full
 
 distclean: clean
 	-rm -f stamp-depend .depend

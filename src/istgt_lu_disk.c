@@ -112,6 +112,15 @@ extern clockid_t clockid;
 	}                                                \
 }
 
+#ifdef	REPLICATION
+#define	IS_SPEC_READY(_spec)						\
+		(_spec->state == ISTGT_LUN_BUSY || 			\
+		    _spec->ready == false)
+#else
+#define	IS_SPEC_READY(_spec)	\
+		(_spec->state == ISTGT_LUN_BUSY)
+#endif
+
 #define MAX_DIO_WAIT 30   //loop for 30 seconds
 //#define enterblockingcall(lu_cmd, conn)
 #define enterblockingcall(macroname)				   \
@@ -122,7 +131,7 @@ extern clockid_t clockid;
 		markedForReturn = 1;	\
 		goto macroname;	\
 	}	\
-	if (spec->state == ISTGT_LUN_BUSY || spec->ready == false) {  \
+	if (IS_SPEC_READY(spec)) {  \
 		lu_cmd->data_len  = 0;             \
 		lu_cmd->status = ISTGT_SCSI_STATUS_BUSY; \
 		if(pthread_mutex_unlock(&spec->state_mutex) != 0)	\
@@ -903,14 +912,18 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 		spec = xmalloc(sizeof *spec);
 		memset(spec, 0, sizeof *spec);
 		spec->lu = lu;
+#ifdef	REPLICATION
 		spec->volname = xstrdup(spec->lu->volname);
+#endif
 		spec->num = lu->num;
 		spec->lun = i;
 		spec->do_avg = 0;
 		spec->inflight = 0;
 		spec->fd = -1;
 		spec->ludsk_ref = 0;
+#ifdef	REPLICATION
 		spec->quiesce = 0;
+#endif
 		spec->max_unmap_sectors = 4096;
 		spec->persist = is_persist_enabled();
 		spec->luworkers = lu->luworkers;
@@ -1003,6 +1016,7 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 				return -1;
 			}
 
+#ifdef	REPLICATION
 			rc = pthread_mutex_init(&spec->luworker_rmutex[k], &istgt->mutex_attr);
 			if (rc != 0) {
 				ISTGT_ERRLOG("LU%d: luworker %d mutex_init() failed errno:%d\n", lu->num, k, errno);
@@ -1014,6 +1028,8 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 				ISTGT_ERRLOG("LU%d: luworker %d cond_init() failed errno:%d\n", lu->num, k, errno);
 				return -1;
 			}
+#endif
+
 			rc = pthread_mutex_init(&spec->lu_tmf_mutex[k], &istgt->mutex_attr);
 			if (rc != 0) {
 				ISTGT_ERRLOG("LU%d: lu_tmf_mutex %d mutex_init() failed errno:%d\n", lu->num, k, errno);
@@ -1475,8 +1491,10 @@ istgt_lu_disk_shutdown(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr
 		for ( i=0; i < lu->luworkers; i++ ) {
 			rc = pthread_mutex_destroy(&spec->luworker_mutex[i]);
 			rc = pthread_cond_destroy(&spec->luworker_cond[i]);
+#ifdef	REPLICATION
 			rc = pthread_mutex_destroy(&spec->luworker_rmutex[i]);
 			rc = pthread_cond_destroy(&spec->luworker_rcond[i]);
+#endif
 		}
 		rc = pthread_mutex_destroy(&spec->wait_lu_task_mutex);
 		if (rc != 0) {
@@ -5518,6 +5536,9 @@ istgt_lu_disk_lbread(ISTGT_LU_DISK *spec, CONN_Ptr conn __attribute__((__unused_
 	uint64_t offset;
 	uint64_t nbytes;
 	int64_t rc = 0;
+#ifndef REPLICATION
+	uint8_t *data;
+#endif
 	int diskIoPendingL = 0, markedForFree = 0;
 	int markedForReturn = 0;
 
@@ -5620,6 +5641,10 @@ istgt_lu_disk_lbwrite(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cm
 	int markedForReturn = 0;
 	const char *msg = "write";
 	int i;
+#ifndef	REPLICATION
+	uint64_t actual;
+#endif
+
 	if (len == 0) {
 		lu_cmd->data_len = 0;
 		return 0;
@@ -5650,10 +5675,12 @@ istgt_lu_disk_lbwrite(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cm
 		iov[i].iov_len = lu_cmd->iobuf[i].iov_len;
 	}
 
+#ifdef	REPLICATION
 	while (spec->quiesce) {
 		ISTGT_ERRLOG("c#%d LU%d: quiescing write IOs\n", conn->id, spec->lu->num);
 		sleep(1);
 	}
+#endif
 
 	if (nbytes != lu_cmd->iobufsize) { //aj-the below call doesn't read anything
 		ISTGT_ERRLOG("c#%d nbytes(%zu) != iobufsize(%zu) (write lba:%lu+%u)\n",
@@ -5701,9 +5728,11 @@ freeiovcnt:
 			sleep(8);
 		}
 
+#ifdef	REPLICATION
 	MTX_LOCK(&spec->rq_mtx);
 	spec->inflight_write_io_cnt += 1;
 	MTX_UNLOCK(&spec->rq_mtx);
+#endif
 
 	timediffw(lu_cmd, 'w');
 	if (spec->wzero && nthbitset == nbits) {
@@ -5748,9 +5777,11 @@ freeiovcnt:
 #endif
 	}
 
+#ifdef	REPLICATION
 	MTX_LOCK(&spec->rq_mtx);
 	spec->inflight_write_io_cnt -= 1;
 	MTX_UNLOCK(&spec->rq_mtx);
+#endif
 
 	lu_cmd->iobufsize = 0;
 	lu_cmd->iobufindx = -1;
@@ -9021,7 +9052,11 @@ istgt_lu_disk_execute(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 	}
 
 	MTX_LOCK(&spec->state_mutex);
-	if ((spec->state == ISTGT_LUN_BUSY && (!istgt_lu_disk_busy_excused(cdb[0]))) || !spec->ready) {
+	if ((spec->state == ISTGT_LUN_BUSY && (!istgt_lu_disk_busy_excused(cdb[0])))
+#ifdef	REPLICATION
+	    || !spec->ready
+#endif
+	    ) {
 		lu_cmd->data_len  = 0;
 		lu_cmd->status = ISTGT_SCSI_STATUS_BUSY;
 		MTX_UNLOCK(&spec->state_mutex);

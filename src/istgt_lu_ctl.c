@@ -514,6 +514,7 @@ istgt_uctl_cmd_sync(UCTL_Ptr uctl)
         return UCTL_CMD_OK;
 }
 
+#ifdef	REPLICATION
 #define CHECK_ARG_AND_GOTO_ERROR { \
 	if (arg == NULL) { \
 		istgt_uctl_snprintf(uctl, "ERR invalid param\n"); \
@@ -568,6 +569,7 @@ error_return:
 	}
 	return ret;
 }
+#endif
 
 static int
 istgt_uctl_cmd_set(UCTL_Ptr uctl)
@@ -3115,8 +3117,10 @@ static ISTGT_UCTL_CMD_TABLE istgt_uctl_cmd_table[] =
 	{ "STATS", istgt_uctl_cmd_stats},
 	{ "SET", istgt_uctl_cmd_set},
 	{ "MAXTIME", istgt_uctl_cmd_maxtime},
+#ifdef	REPLICATION
 	{ "SNAPCREATE", istgt_uctl_cmd_snap},
 	{ "SNAPDESTROY", istgt_uctl_cmd_snap},
+#endif
 	{ NULL,      NULL },
 };
 

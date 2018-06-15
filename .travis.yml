@@ -10,8 +10,16 @@ before_install:
     - sudo unlink /usr/bin/gcc && sudo ln -s /usr/bin/gcc-6 /usr/bin/gcc
     - sudo unlink /usr/bin/g++ && sudo ln -s /usr/bin/g++-6 /usr/bin/g++
 install:
-    - ./configure --with-replication
-    - sudo make
+    - autoconf
+    # we are running build two times. One is without replication code and
+    # another one is with replication code. The reason behind running build
+    # without replication code is to make sure that replication feature
+    # related code doesn't break the existing target code.
+    - ./configure
+    - make
+    - make clean
+    - ./configure --enable-debug --enable-replication
+    - make
 script:
     # run ztest and test supported zio backends
     - travis_wait 60 sudo bash ./test_istgt.sh || travis_terminate 1;

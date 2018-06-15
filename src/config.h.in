@@ -1,13 +1,10 @@
-/* src/config.h.in.  Generated from configure.in by autoheader.  */
+/* src/config.h.in.  Generated from configure.ac by autoheader.  */
 
 /* Define if enable symlink-device */
 #undef ALLOW_SYMLINK_DEVICE
 
 /* Define if enable debug */
 #undef DEBUG
-
-/* Define if enable replication */
-#undef REPLICATION
 
 /* syslog facility */
 #undef DEFAULT_LOG_FACILITY
@@ -53,9 +50,6 @@
 
 /* Define to 1 if you have the <inttypes.h> header file. */
 #undef HAVE_INTTYPES_H
-
-/* Define to 1 if you have the `cam' library (-lcam). */
-#undef HAVE_LIBCAM
 
 /* Define to 1 if you have the `crypto' library (-lcrypto). */
 #undef HAVE_LIBCRYPTO
@@ -235,8 +229,14 @@
 /* Define to the version of this package. */
 #undef PACKAGE_VERSION
 
+/* Define if enable replication */
+#undef REPLICATION
+
 /* Define to 1 if you have the ANSI C header files. */
 #undef STDC_HEADERS
+
+/* Define if enable tracedump */
+#undef TRACEDUMP
 
 /* Use atomic */
 #undef USE_ATOMIC

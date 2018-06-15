@@ -93,10 +93,12 @@ write_and_verify_data(){
 		hash2=$(md5sum /mnt/store/file1 | awk '{print $1}')
 		if [ $hash1 == $hash2 ]; then echo "DI Test: PASSED"
 		else
+			rm file1
 			echo "DI Test: FAILED";
 			tail -20 /var/log/syslog
 			exit 1
 		fi
+		rm file1
 
 		umount /mnt/store
 		logout_of_volume
@@ -287,10 +289,10 @@ run_read_consistency_test ()
 		return
 	fi
 
-	write_data 0 104857600 512 $device_name $file_name
+	write_data 0 104857600 512 "/dev/$device_name" $file_name
 	sync
 
-	write_data 0 31457280 4096 $device_name $file_name &
+	write_data 0 31457280 4096 "/dev/$device_name" $file_name &
 	w_pid=$!
 	sleep 1
 	kill -9 $replica1_pid
@@ -300,7 +302,7 @@ run_read_consistency_test ()
 	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev -d &
 	replica1_pid=$!
 	sleep 5
-	write_data 39845888 31457280 4096 $device_name $file_name &
+	write_data 39845888 31457280 4096 "/dev/$device_name" $file_name &
 	w_pid=$!
 	sleep 1
 	kill -9 $replica2_pid
@@ -310,7 +312,7 @@ run_read_consistency_test ()
 	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V $replica2_vdev -d &
 	replica2_pid=$!
 	sleep 5
-	write_data 71303168 31457280 4096 $device_name $file_name &
+	write_data 71303168 31457280 4096 "/dev/$device_name" $file_name &
 	w_pid=$!
 	sleep 1
 	kill -9 $replica3_pid
@@ -321,7 +323,7 @@ run_read_consistency_test ()
 	replica3_pid=$!
 	sleep 5
 
-	dd if=$device_name of=$device_file bs=4096 iflag=direct oflag=direct count=25600
+	dd if=/dev/$device_name of=$device_file bs=4096 iflag=direct oflag=direct count=25600
 	diff $device_file $file_name >> /dev/null 2>&1
 	if [ $? -ne 0 ]; then
 		echo "read consistency test failed"
@@ -332,8 +334,9 @@ run_read_consistency_test ()
 
 	logout_of_volume
 	kill -9 $replica1_pid $replica2_pid $replica3_pid
-	stop_istgt
 	rm -rf ${replica1_vdev}* ${replica2_vdev}* ${replica3_vdev}*
+	rm -rf $file_name $device_file
+	stop_istgt
 }
 
 run_data_integrity_test

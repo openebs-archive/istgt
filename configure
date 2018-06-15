@@ -30,7 +30,6 @@ else
 esac
 fi
 
-args=$@
 
 as_nl='
 '
@@ -622,7 +621,10 @@ ac_includes_default="\
 
 ac_subst_vars='LTLIBOBJS
 ALLOW_SYMLINK_DEVICE
+REPLICATION
+replication_bin
 DEBUG
+TRACEDUMP
 mediadir
 configdir
 MKDEP
@@ -638,6 +640,8 @@ build_os
 build_vendor
 build_cpu
 build
+target_header_files
+target_source_files
 rcdir
 rctemplate
 MKDIR_P
@@ -657,7 +661,6 @@ target_alias
 host_alias
 build_alias
 LIBS
-SUBPROGRAM
 ECHO_T
 ECHO_N
 ECHO_C
@@ -699,11 +702,12 @@ enable_largefile
 with_configdir
 with_mediadir
 with_rcdir
+enable_tracedump
 enable_debug
+enable_replication
 enable_symlink_device
 with_logfacility
 with_logpriority
-with_replication
 with_vbox
 with_vboxlib
 '
@@ -714,7 +718,6 @@ CC
 CFLAGS
 LDFLAGS
 LIBS
-SUBPROGRAM
 CPPFLAGS
 CPP'
 
@@ -766,8 +769,6 @@ psdir='${docdir}'
 libdir='${exec_prefix}/lib'
 localedir='${datarootdir}/locale'
 mandir='${datarootdir}/man'
-
-
 
 ac_prev=
 ac_dashdash=
@@ -1333,7 +1334,9 @@ Optional Features:
   --disable-FEATURE       do not include FEATURE (same as --enable-FEATURE=no)
   --enable-FEATURE[=ARG]  include FEATURE [ARG=yes]
   --disable-largefile     omit support for large files
-  --enable-debug          enable debug(logging)
+  --enable-tracedump      enable tracedump(logging)
+  --enable-debug          enable debug
+  --enable-replication    enable replication feature
   --enable-symlink-device allow symlink device
 
 Optional Packages:
@@ -3307,7 +3310,7 @@ $as_echo "$MKDIR_P" >&6; }
 
 # clagn with -O3
 if test "$CC" = "clang" && test "$ac_test_CFLAGS" != "set"; then
-  CFLAGS="-g -O3"
+  CFLAGS="-g -O3 -DNDEBUG"
 fi
 
 # host OS related
@@ -3316,6 +3319,11 @@ vboxlib="/usr/local/lib/virtualbox"
 rctemplate=""
 
 rcdir='${prefix}/etc/rc.d'
+
+target_source_files='${istgt_source}'
+
+target_header_files='${istgt_header}'
+
 
 # Make sure we can run config.sub.
 $SHELL "$ac_aux_dir/config.sub" sun4 >/dev/null 2>&1 ||
@@ -3390,14 +3398,6 @@ case $host_os in *\ *) host_os=`echo "$host_os" | sed 's/ /-/g'`;; esac
 
 case "$host_os" in
 *linux*)
-# Check whether --with-replication was given.
-if test "${with_replication+set}" = set; then :
- cat >>confdefs.h <<_ACEOF
-#define REPLICATION
-_ACEOF
-LIBS="-lm $LIBS"
-fi
-
 	tmp="/usr/src/virtualbox/*/include"
 	if test -d "`echo $tmp`"; then
 	    vboxinc=$tmp
@@ -3412,14 +3412,12 @@ $as_echo "#define _GNU_SOURCE 1" >>confdefs.h
 
 	;;
 *netbsd*)
-	SUBPROGRAM="istgt"
 	rctemplate="istgt_netbsd.sh.in"
 
 	rcdir='/etc/rc.d'
 
 	;;
 *freebsd*)
-	SUBPROGRAM="istgt"
 	tmp="/usr/ports/emulators/virtualbox-ose/work/*/include"
 	if test -d "`echo $tmp`"; then
 	    vboxinc=$tmp
@@ -3532,6 +3530,7 @@ _ACEOF
   LIBS="-lcrypto $LIBS"
 
 fi
+
 
 # Checks for header files.
 ac_ext=c
@@ -4365,7 +4364,7 @@ else
     We can't simply define LARGE_OFF_T to be 9223372036854775807,
     since some C++ compilers masquerading as C compilers
     incorrectly reject 9223372036854775807.  */
-#define LARGE_OFF_T (((off_t) 1 << 62) - 1 + ((off_t) 1 << 62))
+#define LARGE_OFF_T ((((off_t) 1 << 31) << 31) - 1 + (((off_t) 1 << 31) << 31))
   int off_t_is_large[(LARGE_OFF_T % 2147483629 == 721
 		       && LARGE_OFF_T % 2147483647 == 1)
 		      ? 1 : -1];
@@ -4411,7 +4410,7 @@ else
     We can't simply define LARGE_OFF_T to be 9223372036854775807,
     since some C++ compilers masquerading as C compilers
     incorrectly reject 9223372036854775807.  */
-#define LARGE_OFF_T (((off_t) 1 << 62) - 1 + ((off_t) 1 << 62))
+#define LARGE_OFF_T ((((off_t) 1 << 31) << 31) - 1 + (((off_t) 1 << 31) << 31))
   int off_t_is_large[(LARGE_OFF_T % 2147483629 == 721
 		       && LARGE_OFF_T % 2147483647 == 1)
 		      ? 1 : -1];
@@ -4435,7 +4434,7 @@ rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
     We can't simply define LARGE_OFF_T to be 9223372036854775807,
     since some C++ compilers masquerading as C compilers
     incorrectly reject 9223372036854775807.  */
-#define LARGE_OFF_T (((off_t) 1 << 62) - 1 + ((off_t) 1 << 62))
+#define LARGE_OFF_T ((((off_t) 1 << 31) << 31) - 1 + (((off_t) 1 << 31) << 31))
   int off_t_is_large[(LARGE_OFF_T % 2147483629 == 721
 		       && LARGE_OFF_T % 2147483647 == 1)
 		      ? 1 : -1];
@@ -4480,7 +4479,7 @@ else
     We can't simply define LARGE_OFF_T to be 9223372036854775807,
     since some C++ compilers masquerading as C compilers
     incorrectly reject 9223372036854775807.  */
-#define LARGE_OFF_T (((off_t) 1 << 62) - 1 + ((off_t) 1 << 62))
+#define LARGE_OFF_T ((((off_t) 1 << 31) << 31) - 1 + (((off_t) 1 << 31) << 31))
   int off_t_is_large[(LARGE_OFF_T % 2147483629 == 721
 		       && LARGE_OFF_T % 2147483647 == 1)
 		      ? 1 : -1];
@@ -4504,7 +4503,7 @@ rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
     We can't simply define LARGE_OFF_T to be 9223372036854775807,
     since some C++ compilers masquerading as C compilers
     incorrectly reject 9223372036854775807.  */
-#define LARGE_OFF_T (((off_t) 1 << 62) - 1 + ((off_t) 1 << 62))
+#define LARGE_OFF_T ((((off_t) 1 << 31) << 31) - 1 + (((off_t) 1 << 31) << 31))
   int off_t_is_large[(LARGE_OFF_T % 2147483629 == 721
 		       && LARGE_OFF_T % 2147483647 == 1)
 		      ? 1 : -1];
@@ -4751,17 +4750,64 @@ rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
 CFLAGS="$saved_CFLAGS"
 
 # check enable features
-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether to use debug mode" >&5
-$as_echo_n "checking whether to use debug mode... " >&6; }
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether to dump packet data (tracedump mode)" >&5
+$as_echo_n "checking whether to dump packet data (tracedump mode)... " >&6; }
+# Check whether --enable-tracedump was given.
+if test "${enable_tracedump+set}" = set; then :
+  enableval=$enable_tracedump; { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+$as_echo "yes" >&6; };
+$as_echo "#define TRACEDUMP 1" >>confdefs.h
+
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+fi
+
+
+
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether to enable debug mode" >&5
+$as_echo_n "checking whether to enable debug mode... " >&6; }
 # Check whether --enable-debug was given.
 if test "${enable_debug+set}" = set; then :
   enableval=$enable_debug; { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 $as_echo "yes" >&6; };
 $as_echo "#define DEBUG 1" >>confdefs.h
 
+  CFLAGS="-DDEBUG -Werror -ggdb3 -fstack-check"
 else
   { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
 $as_echo "no" >&6; }
+fi
+
+
+
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether to enable replication mode" >&5
+$as_echo_n "checking whether to enable replication mode... " >&6; }
+# Check whether --enable-replication was given.
+if test "${enable_replication+set}" = set; then :
+  enableval=$enable_replication; { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+$as_echo "yes" >&6; };
+$as_echo "#define REPLICATION 1" >>confdefs.h
+
+  LIBS="$LIBS -lm"
+  target_source_files='${istgt_source} ${replication_source}'
+
+  target_header_files='${istgt_header} ${replication_header}'
+
+  { $as_echo "$as_me:${as_lineno-$LINENO}: fetching zrepl_prot.h file..." >&5
+$as_echo "$as_me: fetching zrepl_prot.h file..." >&6;}
+  replication_bin='istgt_integration replication_test mempool_test'
+
+  if $( wget -O src/zrepl_prot.h https://raw.githubusercontent.com/openebs/zfs/zfs-0.7-release/include/zrepl_prot.h >> /dev/null 2>&1 ); then :
+
+else
+  as_fn_error $? "failed to fetch zrepl_prot.h" "$LINENO" 5
+fi
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+  replication_bin=''
+
 fi
 
 
