@@ -42,8 +42,16 @@ int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 	}								\
 }
 
-#define SEND_ERROR_RESPONSES(head, _cond) {				\
+#define SEND_ERROR_RESPONSES(head, _cond, _cnt, _time_diff, _r, _w) {	\
+	_cnt = 0;							\
+	memset(&_time_diff, 0, sizeof (_time_diff));			\
 	rcmd = TAILQ_FIRST(head);					\
+	if (rcmd != NULL) {						\
+		struct timespec now;					\
+		clock_gettime(CLOCK_MONOTONIC, &now);			\
+		timesdiff(CLOCK_MONOTONIC, rcmd->queued_time, 		\
+		    now, _time_diff);					\
+	}								\
 	while (rcmd != NULL) {						\
 		next_rcmd = TAILQ_NEXT(rcmd, next);			\
 		TAILQ_REMOVE(head, rcmd, next);				\
@@ -58,14 +66,11 @@ int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 		rcomm_cmd->resp_list[idx].status |= RECEIVED_ERR;	\
 		if (rcomm_cmd->state != CMD_EXECUTION_DONE)		\
 			pthread_cond_signal(_cond);			\
-		REPLICA_ERRLOG("command %s(offset:%lu len:%lu seq:%lu)" \
-		    " failed for replica(%lu)\n",			\
-		    (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) ? "write" :\
-		    "read", rcomm_cmd->offset, rcomm_cmd->data_len,	\
-		    rcomm_cmd->io_seq, r->zvol_guid);			\
+		(rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) ? ++_w : ++_r;	\
 		free(rcmd->iov_data);					\
 		put_to_mempool(&rcmd_mempool, rcmd);			\
 		rcmd = next_rcmd;					\
+		_cnt++;							\
 	}								\
 }
 
@@ -199,13 +204,28 @@ respond_with_error_for_all_outstanding_ios(replica_t *r)
 	int idx;
 	rcommon_cmd_t *rcomm_cmd;
 	pthread_cond_t *cond_var;
+	int wait_cnt, ready_cnt, blocked_cnt;
+	struct timespec wait_diff, ready_diff, blocked_diff;
+	uint64_t read_cnt = 0, write_cnt = 0;
 
 	while ((rcmd = dequeue_replica_cmdq(r)) != NULL)
 		move_to_blocked_or_ready_q(r, rcmd);
 
-	SEND_ERROR_RESPONSES((&(r->waitq)), cond_var);
-	SEND_ERROR_RESPONSES((&(r->readyq)), cond_var);
-	SEND_ERROR_RESPONSES((&(r->blockedq)), cond_var);
+	SEND_ERROR_RESPONSES((&(r->waitq)), cond_var, wait_cnt, wait_diff,
+	    read_cnt, write_cnt);
+	SEND_ERROR_RESPONSES((&(r->readyq)), cond_var, ready_cnt, ready_diff,
+	    read_cnt, write_cnt);
+	SEND_ERROR_RESPONSES((&(r->blockedq)), cond_var, blocked_cnt,
+	    blocked_diff, read_cnt, write_cnt);
+
+	REPLICA_ERRLOG("IO command set with error for replica(%lu) .."
+	    "sent command(count:%d delay:%lu), "
+	    "queued command(count:%d delay:%lu), "
+	    "blocked command(count:%d delay:%lu).. "
+	    " read_error(%lu) write_error(%lu)\n",
+	    r->zvol_guid, wait_cnt, wait_diff.tv_sec, ready_cnt,
+	    ready_diff.tv_sec, blocked_cnt, blocked_diff.tv_sec,
+	    read_cnt, write_cnt);
 }
 
 /*
