@@ -436,18 +436,20 @@ trigger_rebuild(spec_t *spec)
 	}
 }
 
-static int
-verify_replica_count(spec_t *spec, replica_t *replica)
+static bool
+is_rf_replicas_connected(spec_t *spec, replica_t *replica)
 {
 	int replica_count;
-	int ret = 0;
+	bool ret = false;
+
+	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 
 	replica_count = spec->healthy_rcount + spec->degraded_rcount;
-	if (replica_count > spec->replication_factor) {
+	if (replica_count >= spec->replication_factor) {
 		REPLICA_ERRLOG("removing replica(%s:%d) since max replica "
 		    "connection limit(%d) reached\n", replica->ip,
 		    replica->port, spec->replication_factor);
-		ret = -1;
+		ret = true;
 	}
 
 	return ret;
@@ -806,6 +808,16 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 		goto replica_error;
 	}
 
+	MTX_LOCK(&spec->rq_mtx);
+	if(is_rf_replicas_connected(spec, replica)) {
+		MTX_UNLOCK(&spec->rq_mtx);
+		ISTGT_ERRLOG("failed to verify replica(ip:%s port:%d "
+		    "guid:%lu)\n", replica->ip, replica->port,
+		    replica->zvol_guid);
+		goto replica_error;
+	}
+	MTX_UNLOCK(&spec->rq_mtx);
+
 	rc = pthread_create(&r_thread, NULL, &replica_thread,
 			(void *)replica);
 	if (rc != 0) {
@@ -822,33 +834,29 @@ replica_error:
 	free(rio_hdr);
 	free(rio_payload);
 
-	for (i = 0; (i < 10) && (replica->mgmt_eventfd2 == -1); i++)
+	MTX_LOCK(&replica->r_mtx);
+	for (i = 0; (i < 10) && (replica->mgmt_eventfd2 == -1); i++) {
+		MTX_UNLOCK(&replica->r_mtx);
 		sleep(1);
+		MTX_LOCK(&replica->r_mtx);
+	}
 
 	if (replica->mgmt_eventfd2 == -1) {
 		REPLICA_ERRLOG("unable to set mgmteventfd2 for more than 10 "
 		    "seconfs for replica(%lu)\n", replica->zvol_guid);
-		MTX_LOCK(&replica->r_mtx);
 		replica->dont_free = 1;
 		replica->iofd = -1;
 		MTX_UNLOCK(&replica->r_mtx);
+		shutdown(iofd, SHUT_RDWR);
 		close(iofd);
 		return -1;
 	}
+	MTX_UNLOCK(&replica->r_mtx);
 
 	MTX_LOCK(&spec->rq_mtx);
 
 	spec->degraded_rcount++;
 	TAILQ_REMOVE(&spec->rwaitq, replica, r_waitnext);
-
-	rc = verify_replica_count(spec, replica);
-	if (rc) {
-		MTX_UNLOCK(&spec->rq_mtx);
-		ISTGT_ERRLOG("failed to verify replica(ip:%s port:%d guid:%lu"
-		    ") err(%d)\n", replica->ip, replica->port,
-		    replica->zvol_guid, rc);
-		return -1;
-	}
 
 	TAILQ_INSERT_TAIL(&spec->rq, replica, r_next);
 
@@ -2022,12 +2030,14 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 			}
 			rcomm_cmd->state = CMD_EXECUTION_DONE;
 
+#ifdef	DEBUG
 			/*
 			 * NOTE: This is for debugging purpose only
 			 */
 			if (err_num == ETIMEDOUT)
 				fprintf(stderr, "last errno(%d) "
 				    "opcode(%d)\n", errno, rcomm_cmd->opcode);
+#endif
 
 			MTX_LOCK(&spec->rq_mtx);
 			TAILQ_REMOVE(&spec->rcommon_waitq, rcomm_cmd, wait_cmd_next);

@@ -64,6 +64,13 @@ int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 		rcomm_cmd->resp_list[idx].io_resp_hdr.status =		\
 		    ZVOL_OP_STATUS_FAILED;				\
 		rcomm_cmd->resp_list[idx].data_ptr = NULL;		\
+		/*							\
+		 * cleanup_deadlist thread performs cleanup of 		\
+		 * rcomm_cmd. if the response from all replica is 	\
+		 * received. Since we are avoiding locking for 		\
+		 * rcomm_cmd, we will update response status in 	\
+		 * rcomm_cmd at last.					\
+		 */							\
 		if (rcomm_cmd->state != CMD_EXECUTION_DONE) {		\
 			rcomm_cmd->resp_list[idx].status |= 		\
 			    RECEIVED_ERR;				\
@@ -250,7 +257,6 @@ handle_data_conn_error(replica_t *r)
 	int fd, data_eventfd, mgmt_eventfd2, epollfd;
 	spec_t *spec;
 	replica_t *r1 = NULL;
-	int update_spec_status = 0;
 
 	if (r->iofd == -1) {
 		REPLICA_ERRLOG("repl %s %d %p\n", r->ip, r->port, r);
@@ -261,20 +267,24 @@ handle_data_conn_error(replica_t *r)
 	spec = r->spec;
 
 	TAILQ_FOREACH(r1, &(spec->rq), r_next)
-		if (r1 == r) {
-			update_spec_status= 1;
+		if (r1 == r)
 			break;
-		}
+
+	if (r1 == NULL) {
+		REPLICA_ERRLOG("replica %s %d not part of rqlist..\n",
+		    r->ip, r->port);
+		MTX_UNLOCK(&spec->rq_mtx);
+		return -1;
+	}
+
+	TAILQ_REMOVE(&spec->rq, r, r_next);
 
 	if (r->state == ZVOL_STATUS_HEALTHY)
 		spec->healthy_rcount--;
 	else if (r->state == ZVOL_STATUS_DEGRADED)
 		spec->degraded_rcount--;
 
-	if (update_spec_status) {
-		TAILQ_REMOVE(&spec->rq, r, r_next);
-		update_volstate(r->spec);
-	}
+	update_volstate(r->spec);
 
 	mgmt_eventfd2 = r->mgmt_eventfd2;
 
@@ -527,6 +537,12 @@ start:
 		if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE)
 			r->replica_inflight_write_io_cnt -= 1;
 
+		/*
+		 * cleanup_deadlist thread performs cleanup of rcomm_cmd.
+		 * if the response from all replica is received. Since we are
+		 * avoiding locking for rcomm_cmd, we will update response
+		 * status in rcomm_cmd at last.
+		 */
 		if (rcomm_cmd->state != CMD_EXECUTION_DONE) {
 			rcomm_cmd->resp_list[idx].status |= RECEIVED_OK;
 			pthread_cond_signal(cond_var);
@@ -592,14 +608,14 @@ replica_thread(void *arg)
 
 	snprintf(tinfo, sizeof tinfo, "r#%d.%lu", (int)(((uint64_t *)self)[0]), r->zvol_guid);
 
-	r->data_eventfd = r_data_eventfd = eventfd(0, EFD_NONBLOCK);
+	r_data_eventfd = eventfd(0, EFD_NONBLOCK);
 	if (r_data_eventfd < 0) {
 		REPLICA_ERRLOG("error for replica(%s:%d) data_eventfd:%d\n",
 		    r->ip, r->port, r_data_eventfd);
 		return NULL;
 	}
 
-	r->epollfd = r_epollfd = epoll_create1(0);
+	r_epollfd = epoll_create1(0);
 	if (r_epollfd < 0) {
 		REPLICA_ERRLOG("epoll_create error for replica(%s:%d) "
 		    "errno(%d)\n", r->ip, r->port, errno);
@@ -614,7 +630,7 @@ replica_thread(void *arg)
 		goto initialize_error;
 	}
 
-	r->mgmt_eventfd2 = r_mgmt_eventfd = eventfd(0, EFD_NONBLOCK);
+	r_mgmt_eventfd = eventfd(0, EFD_NONBLOCK);
 	if (r_mgmt_eventfd < 0) {
 		REPLICA_ERRLOG("epoll error for replica(%s:%d) err(%d)\n",
 		    r->ip, r->port, errno);
@@ -633,6 +649,10 @@ replica_thread(void *arg)
 	ev.data.ptr = NULL;
 
 	MTX_LOCK(&r->r_mtx);
+	r->data_eventfd = r_data_eventfd;
+	r->epollfd = r_epollfd;
+	r->mgmt_eventfd2 = r_mgmt_eventfd;
+
 	if ((r->iofd == -1) ||
 	    (epoll_ctl(r_epollfd, EPOLL_CTL_ADD, r->iofd, &ev) == -1)) {
 		MTX_UNLOCK(&r->r_mtx);
@@ -642,19 +662,19 @@ initialize_error:
 		close(r->mgmt_eventfd2);
 		r->mgmt_eventfd2 = -1;
 
-		if (r->epollfd > 0) {
+		if (r_epollfd > 0) {
 			/*
 			 * epoll_ctl may fail so we are ignoring return
 			 * value of epoll_ctl
 			 */
-			(void) epoll_ctl(r->epollfd, EPOLL_CTL_DEL,
+			(void) epoll_ctl(r_epollfd, EPOLL_CTL_DEL,
 			    r_data_eventfd, NULL);
-			close(r->epollfd);
+			close(r_epollfd);
 			r->epollfd = -1;
 		}
 
-		if (r->data_eventfd) {
-			close(r->data_eventfd);
+		if (r_data_eventfd) {
+			close(r_data_eventfd);
 			r->data_eventfd = -1;
 		}
 		return NULL;

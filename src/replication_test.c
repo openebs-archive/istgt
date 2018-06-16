@@ -32,8 +32,8 @@ __thread char  tinfo[50] =  {0};
 	strcpy(mgmt_ack_data->ip, replica_ip);\
 	strcpy(mgmt_ack_data->volname, buf);\
 	mgmt_ack_data->port = replica_port;\
-	mgmt_ack_data->pool_guid = 100;\
-	mgmt_ack_data->zvol_guid = 500;\
+	mgmt_ack_data->pool_guid = replica_port;\
+	mgmt_ack_data->zvol_guid = replica_port;\
 }
 
 bool degraded_mode = false;
@@ -478,7 +478,7 @@ main(int argc, char **argv)
 	zrepl_status->state = ZVOL_STATUS_DEGRADED; 
 	zrepl_status->rebuild_status = ZVOL_REBUILDING_INIT; 
 	if (init_mdlist(test_vol)) {
-		REPLICA_ERRLOG("Failed to initialize mdlist\n");
+		REPLICA_ERRLOG("Failed to initialize mdlist for replica(%d)\n", ctrl_port);
 		close(vol_fd);
 		exit(EXIT_FAILURE);
 	}
@@ -491,7 +491,7 @@ main(int argc, char **argv)
 	
 	//Create listener for io connections from controller and add to epoll
 	if((sfd = cstor_ops.conn_listen(replica_ip, replica_port, 32, 1)) < 0) {
-                REPLICA_LOG("conn_listen() failed, errorno:%d", errno);
+                REPLICA_LOG("conn_listen() failed, err:%d replica(%d)", errno, ctrl_port);
 		close(vol_fd);
 		destroy_mdlist();
                 exit(EXIT_FAILURE);
@@ -500,7 +500,7 @@ main(int argc, char **argv)
 	event.events = EPOLLIN | EPOLLET;
 	rc = epoll_ctl(epfd, EPOLL_CTL_ADD, sfd, &event);
 	if (rc == -1) {
-		REPLICA_ERRLOG("epoll_ctl() failed, errrno:%d", errno);
+		REPLICA_ERRLOG("epoll_ctl() failed, err:%d replica(%d)", errno, ctrl_port);
 		close(vol_fd);
 		destroy_mdlist();
 		exit(EXIT_FAILURE);
@@ -508,7 +508,7 @@ main(int argc, char **argv)
 
 	//Connect to controller to start handshake and connect to epoll
 	if((mgmtfd = cstor_ops.conn_connect(ctrl_ip, ctrl_port)) < 0) {
-		REPLICA_ERRLOG("conn_connect() failed errno:%d\n", errno);
+		REPLICA_ERRLOG("conn_connect() failed err:%d replica(%d)\n", errno, ctrl_port);
 		close(vol_fd);
 		destroy_mdlist();
 		exit(EXIT_FAILURE);
@@ -518,7 +518,7 @@ main(int argc, char **argv)
 	event.events = EPOLLIN | EPOLLET;
 	rc = epoll_ctl(epfd, EPOLL_CTL_ADD, mgmtfd, &event);
 	if (rc == -1) {
-		REPLICA_ERRLOG("epoll_ctl() failed, errrno:%d", errno);
+		REPLICA_ERRLOG("epoll_ctl() failed, err:%d replica(%d)", errno, ctrl_port);
 		exit(EXIT_FAILURE);
 	}
 
@@ -529,11 +529,11 @@ main(int argc, char **argv)
 			if ((events[i].events & EPOLLERR) ||
 					(events[i].events & EPOLLHUP) ||
 					(!(events[i].events & EPOLLIN))) {
-				fprintf (stderr, "epoll error\n");
+				fprintf (stderr, "epoll error for replica(%d)\n", ctrl_port);
 				continue;
 			} else if (events[i].data.fd == mgmtfd) {
 				count = test_read_data(events[i].data.fd, (uint8_t *)mgmtio, sizeof(zvol_io_hdr_t));
-				if (count<0)
+				if (count < 0)
 				{
 					if (errno != EAGAIN)
 					{
@@ -542,6 +542,12 @@ main(int argc, char **argv)
 					}
 					break;
 				}
+
+				if (count == 0) {
+					rc = -1;
+					goto error;
+				}
+
 				if(mgmtio->len) {
 					data = data_ptr_cpy = malloc(mgmtio->len);
 					count = test_read_data(events[i].data.fd, (uint8_t *)data, mgmtio->len);
@@ -558,7 +564,7 @@ main(int argc, char **argv)
 					if((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
 						break;
 					} else {
-						REPLICA_ERRLOG("accept() failed, errrno:%d", errno);
+						REPLICA_ERRLOG("accept() failed, err:%d replica(%d)", errno, ctrl_port);
 						break;
 					}
 				}
@@ -573,25 +579,29 @@ main(int argc, char **argv)
 				}
 				rc = make_socket_non_blocking(iofd);
 				if (rc == -1) {
-					REPLICA_ERRLOG("make_socket_non_blocking() failed, errno:%d", errno);
+					REPLICA_ERRLOG("make_socket_non_blocking() failed, errno:%d"
+					    " replica(%d)", errno, ctrl_port);
 					exit(EXIT_FAILURE);
 				}
 				event.data.fd = iofd;
 				event.events = EPOLLIN | EPOLLET;
 				rc = epoll_ctl(epfd, EPOLL_CTL_ADD, iofd, &event);
 				if(rc == -1) {
-					REPLICA_ERRLOG("epoll_ctl() failed, errno:%d", errno);
+					REPLICA_ERRLOG("epoll_ctl() failed, errno:%d replica(%d)", errno, ctrl_port);
 					exit(EXIT_FAILURE);
 				}
 			} else if(events[i].data.fd == iofd) {
 				while(1) {
 					if(read_rem_data) {
 						count = test_read_data(events[i].data.fd, (uint8_t *)data + recv_len, total_len - recv_len);
-						if(count < 0 && errno == EAGAIN) {
+						if (count < 0 && errno == EAGAIN) {
 							break;
-						}else if(((uint64_t)count < total_len - recv_len) && errno == EAGAIN) {
+						} else if(((uint64_t)count < total_len - recv_len) && errno == EAGAIN) {
 							recv_len += count;
 							break;
+						} else if (count == 0) {
+							rc = -1;
+							goto error;
 						} else {
 							recv_len = 0;
 							total_len = 0;
@@ -601,11 +611,14 @@ main(int argc, char **argv)
 
 					} else if(read_rem_hdr) {
 						count = test_read_data(events[i].data.fd, (uint8_t *)io_hdr + recv_len, total_len - recv_len);
-						if(count < 0 && errno == EAGAIN) {
+						if (count < 0 && errno == EAGAIN) {
 							break;
 						} else if(((uint64_t)count < total_len - recv_len) && errno == EAGAIN) {
 							recv_len += count;
 							break;
+						} else if (count == 0) {
+							rc = -1;
+							goto error;
 						} else {
 							read_rem_hdr = false;
 							recv_len = 0;
@@ -620,6 +633,9 @@ main(int argc, char **argv)
 							recv_len = count;
 							total_len = io_hdr_len;
 							break;
+						} else if (count == 0) {
+							rc = -1;
+							goto error;
 						}
 						read_rem_hdr = false;
 					}
@@ -642,6 +658,9 @@ main(int argc, char **argv)
 								recv_len = count;
 								total_len = io_hdr->len;
 								break;
+							} else if (count == 0) {
+								rc = -1;
+								goto error;
 							}
 							read_rem_data = false;
 						}
@@ -650,15 +669,15 @@ main(int argc, char **argv)
 					if (io_hdr->opcode == ZVOL_OPCODE_OPEN) {
 						open_ptr = (zvol_op_open_data_t *)data;
 						io_hdr->status = ZVOL_OP_STATUS_OK;
-						REPLICA_LOG("Volume name:%s blocksize:%d timeout:%d\n",
-						    open_ptr->volname, open_ptr->tgt_block_size, open_ptr->timeout);
+						REPLICA_LOG("Volume name:%s blocksize:%d timeout:%d.. replica(%d)\n",
+						    open_ptr->volname, open_ptr->tgt_block_size, open_ptr->timeout, ctrl_port);
 					}
 execute_io:
 					if ((io_cnt > 0) && (io_hdr->opcode == ZVOL_OPCODE_WRITE ||
 							io_hdr->opcode == ZVOL_OPCODE_READ)) {
 						io_cnt --;
 						if (io_cnt == 0) {
-							REPLICA_ERRLOG("sleeping for 60 seconds\n");
+							REPLICA_ERRLOG("sleeping for 60 seconds.. replica(%d)\n", ctrl_port);
 							sleep(60);
 						}
 					}
@@ -686,7 +705,7 @@ execute_io:
 						}
 
 						if (nbytes != io_rw_hdr->len) {
-							REPLICA_ERRLOG("Failed to write data to %s\n", test_vol);
+							REPLICA_ERRLOG("Failed to write data to %s replica(%d)\n", test_vol, ctrl_port);
 							goto error;
 						}
 
@@ -720,8 +739,9 @@ execute_io:
 						}
 
 						if (nbytes != io_hdr->len) {
-							REPLICA_ERRLOG("failed to read completed data from %s off:%lu req:%lu read:%lu\n",
-							    test_vol, io_hdr->offset, io_hdr->len, nbytes);
+							REPLICA_ERRLOG("failed to read completed data from %s off:%lu "
+							    "req:%lu read:%lu replica(%d)\n",
+							    test_vol, io_hdr->offset, io_hdr->len, nbytes, ctrl_port);
 							free(user_data);
 							goto error;
 						}
@@ -734,7 +754,7 @@ execute_io:
 
 					rc = send_io_resp(iofd, io_hdr, data);
 					if (rc) {
-						REPLICA_ERRLOG("Failed to send response\n");
+						REPLICA_ERRLOG("Failed to send response replica(%d)\n", ctrl_port);
 						goto error;
 					}
 
