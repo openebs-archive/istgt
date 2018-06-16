@@ -8,6 +8,7 @@
 #endif
 
 #include "ring_mempool.h"
+#include "assert.h"
 
 int
 init_mempool(rte_smempool_t *obj, size_t count, size_t mem_size,
@@ -18,6 +19,8 @@ init_mempool(rte_smempool_t *obj, size_t count, size_t mem_size,
 	void *mem_entry = NULL;
 	int rc = 0;
 
+	ASSERT(count);
+
 	obj->entry_offset = offset;
 	obj->ring = rte_ring_create(ring_name, count, -1, RING_F_EXACT_SZ);
 	obj->create = mem_init;
@@ -25,6 +28,7 @@ init_mempool(rte_smempool_t *obj, size_t count, size_t mem_size,
 	obj->reclaim = mem_reclaim;
 
 	if (!initialize) {
+		ASSERT0(mem_size);
 		obj->length = count;
 	} else {
 		for (i = 0; i < count; i++, mem_entry = NULL) {
@@ -86,12 +90,7 @@ destroy_mempool(rte_smempool_t *obj)
 		free(entry);
 	}
 
-	if (rte_ring_count(obj->ring) != 0) {
-		REPLICA_ERRLOG("allocation happened while destroying "
-		    "mempool(%s)\n", obj->ring->name);
-		return -1;
-	}
-
+	ASSERT0(rte_ring_count(obj->ring));
 	rte_ring_free(obj->ring);
 	return 0;
 }

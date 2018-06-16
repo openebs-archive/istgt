@@ -8,6 +8,7 @@
 #include "replication.h"
 #include "replication_misc.h"
 #include "ring_mempool.h"
+#include "assert.h"
 
 #define	READ_PARTIAL	1
 #define	READ_COMPLETED	2
@@ -64,6 +65,9 @@ int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 		    ZVOL_OP_STATUS_FAILED;				\
 		rcomm_cmd->resp_list[idx].data_ptr = NULL;		\
 		rcomm_cmd->resp_list[idx].status |= RECEIVED_ERR;	\
+		REPLICA_DEBUGLOG("error set for command(%lu) for "	\
+		    "replica(%s:%d)\n", rcomm_cmd->io_seq, r->ip,	\
+		    r->port);						\
 		if (rcomm_cmd->state != CMD_EXECUTION_DONE)		\
 			pthread_cond_signal(_cond);			\
 		(rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) ? ++_w : ++_r;	\
@@ -208,6 +212,8 @@ respond_with_error_for_all_outstanding_ios(replica_t *r)
 	struct timespec wait_diff, ready_diff, blocked_diff;
 	uint64_t read_cnt = 0, write_cnt = 0;
 
+	ASSERT(r->data_eventfd == -1);
+
 	while ((rcmd = dequeue_replica_cmdq(r)) != NULL)
 		move_to_blocked_or_ready_q(r, rcmd);
 
@@ -349,6 +355,7 @@ read_cmd(replica_t *r)
 
 	switch(state) {
 		case READ_IO_RESP_HDR:
+			ASSERT(r->io_read < sizeof(zvol_io_hdr_t));
 			reqlen = sizeof (zvol_io_hdr_t) - (r->io_read);
 			count = perform_read_write_on_fd(fd,
 			    ((uint8_t *)resp_hdr) + (r->io_read), reqlen, state);
@@ -393,6 +400,12 @@ read_cmd(replica_t *r)
 					return READ_PARTIAL;
 			}
 			return READ_COMPLETED;
+		default:
+			REPLICA_ERRLOG("got invalid read state(%d) for "
+			    "replica(%lu).. aborting..\n", state,
+			    r->zvol_guid);
+			abort();
+			break;
 	}
 	return -1;
 }
@@ -403,6 +416,7 @@ write_cmd(int fd, rcmd_t *cmd)
 	ssize_t rc;
 	int err, i;
 
+	ASSERT(cmd->iovcnt > 0);
 start:
 	rc = writev(fd, cmd->iov, cmd->iovcnt);
 	err = errno;
