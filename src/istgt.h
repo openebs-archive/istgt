@@ -50,6 +50,7 @@
 
 #include <pthread.h>
 #include <signal.h>
+#include <sys/syscall.h>
 #include "istgt_log.h"
 #include "istgt_conf.h"
 
@@ -180,6 +181,8 @@
 			pthread_exit(NULL);				\
 		}							\
 	} while (0)
+
+#define	MTX_LOCKED(MTX)	((MTX)->__data.__owner == syscall(SYS_gettid))
 
 typedef struct istgt_portal_t {
 	char *label;
