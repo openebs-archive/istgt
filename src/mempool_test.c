@@ -15,6 +15,7 @@ struct test_node_entry {
 
 void check_mempool_size(rte_smempool_t *mempool);
 void verify_mempool_values_n_destroy(rte_smempool_t *mempool);
+__thread char  tinfo[50] =  {0};
 
 /*
  * Mempool size must be equal to mempool->length.

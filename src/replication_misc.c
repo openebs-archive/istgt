@@ -51,7 +51,7 @@ replication_connect(const char *host, int port)
 	hints.ai_flags = AI_NUMERICSERV;
 	rc = getaddrinfo(host, portnum, &hints, &res0);
 	if (rc != 0) {
-		ISTGT_ERRLOG("getaddrinfo() failed (errno=%d)\n", errno);
+		ISTGT_ERRLOG("getaddrinfo() failed.. err(%d)\n", rc);
 		return -1;
 	}
 
@@ -72,12 +72,14 @@ retry:
 		rc = connect(sock, res->ai_addr, res->ai_addrlen);
 		if (rc == -1 && errno == EINTR) {
 			/* interrupted? */
+			ISTGT_ERRLOG("connect() failed .. err(%d)\n", errno);
 			close(sock);
 			sock = -1;
 			goto retry;
 		}
 		if (rc != 0) {
 			/* try next family */
+			ISTGT_ERRLOG("connect() failed .. err(%d)\n", errno);
 			close(sock);
 			sock = -1;
 			continue;
@@ -130,7 +132,7 @@ replication_listen(const char *ip, int port, int que, int non_blocking)
 	hints.ai_flags |= AI_NUMERICHOST;
 	rc = getaddrinfo(ip, portnum, &hints, &res0);
 	if (rc != 0) {
-		REPLICA_ERRLOG("getaddrinfo() failed (errno=%d)\n", errno);
+		REPLICA_ERRLOG("getaddrinfo() failed err(%d)\n", rc);
 		return -1;
 	}
 	if (que < 2)
@@ -156,11 +158,13 @@ retry:
 		}
 		rc = bind(sock, res->ai_addr, res->ai_addrlen);
 		if (rc == -1 && errno == EINTR) {
+			REPLICA_ERRLOG("bind() failed err(%d)\n", errno);
 			close(sock);
 			sock = -1;
 			goto retry;
 		}
 		if (rc != 0) {
+			REPLICA_ERRLOG("bind() failed err(%d)\n", errno);
 			close(sock);
 			sock = -1;
 			continue;
@@ -169,6 +173,7 @@ retry:
 			make_socket_non_blocking(sock);
 		rc = listen(sock, que);
 		if (rc != 0) {
+			REPLICA_ERRLOG("listen() failed err(%d)\n", errno);
 			close(sock);
 			sock = -1;
 			break;
@@ -190,7 +195,7 @@ make_socket_non_blocking(int sfd)
 	flags = fcntl(sfd, F_GETFL, 0);
 	if (flags == -1)
 	{
-		REPLICA_ERRLOG("fcntl failed errno:%d\n", errno);
+		REPLICA_ERRLOG("fcntl failed err(%d)\n", errno);
 		return -1;
 	}
 
@@ -198,7 +203,7 @@ make_socket_non_blocking(int sfd)
 	s = fcntl (sfd, F_SETFL, flags);
 	if (s == -1)
 	{
-		REPLICA_ERRLOG("fcntl failed errno:%d\n", errno);
+		REPLICA_ERRLOG("fcntl failed err(%d)\n", errno);
 		return -1;
 	}
 

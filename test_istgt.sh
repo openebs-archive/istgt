@@ -93,10 +93,12 @@ write_and_verify_data(){
 		hash2=$(md5sum /mnt/store/file1 | awk '{print $1}')
 		if [ $hash1 == $hash2 ]; then echo "DI Test: PASSED"
 		else
+			rm file1
 			echo "DI Test: FAILED";
 			tail -20 /var/log/syslog
 			exit 1
 		fi
+		rm file1
 
 		umount /mnt/store
 		logout_of_volume
@@ -332,8 +334,9 @@ run_read_consistency_test ()
 
 	logout_of_volume
 	kill -9 $replica1_pid $replica2_pid $replica3_pid
-	stop_istgt
 	rm -rf ${replica1_vdev}* ${replica2_vdev}* ${replica3_vdev}*
+	rm -rf $file_name $device_file
+	stop_istgt
 }
 
 run_replication_factor_test()

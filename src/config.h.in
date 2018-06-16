@@ -6,6 +6,9 @@
 /* Define if enable debug */
 #undef DEBUG
 
+/* Define if packet data dump or tracedump enable */
+#undef TRACEDUMP
+
 /* Define if enable replication */
 #undef REPLICATION
 

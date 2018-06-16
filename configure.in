@@ -15,7 +15,7 @@ AC_PROG_MKDIR_P
 
 # clagn with -O3
 if test "$CC" = "clang" && test "$ac_test_CFLAGS" != "set"; then
-  CFLAGS="-g -O3"
+  CFLAGS="-g -O3 -DNDEBUG"
 fi
 
 # host OS related
@@ -160,12 +160,28 @@ AC_TRY_COMPILE(,,
 CFLAGS="$saved_CFLAGS"
 
 # check enable features
-AC_MSG_CHECKING([whether to use debug mode])
+AC_MSG_CHECKING([whether to dump packet data (tracedump mode)])
+AC_ARG_ENABLE([tracedump],
+  AS_HELP_STRING([--enable-tracedump], [enable tracedump(logging)]),
+  AC_MSG_RESULT(yes); AC_DEFINE([TRACEDUMP], 1, [Define if enable tracedump]),
+  AC_MSG_RESULT(no))
+AC_SUBST([TRACEDUMP])
+
+AC_MSG_CHECKING([whether to enable debug mode])
 AC_ARG_ENABLE([debug],
-  AS_HELP_STRING([--enable-debug], [enable debug(logging)]),
-  AC_MSG_RESULT(yes); AC_DEFINE([DEBUG], 1, [Define if enable debug]),
+  AS_HELP_STRING([--enable-debug], [enable debug]),
+  AC_MSG_RESULT(yes); AC_DEFINE([DEBUG], 1, [Define if enable debug])
+  CFLAGS="-DDEBUG -Werror -ggdb3 -fstack-check",
   AC_MSG_RESULT(no))
 AC_SUBST([DEBUG])
+
+AC_MSG_CHECKING([whether to enable replication mode])
+AC_ARG_ENABLE([replication],
+  AS_HELP_STRING([--enable-replication], [enable replication feature]),
+  AC_MSG_RESULT(yes); AC_DEFINE([REPLICATION], 1, [Define if enable replication])
+  LIBS="$LIBS -lm",
+  AC_MSG_RESULT(no))
+AC_SUBST([REPLICATION])
 
 AC_MSG_CHECKING([whether to use symlink device])
 AC_ARG_ENABLE([symlink-device],
