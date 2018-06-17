@@ -198,12 +198,12 @@ handle_snap_opcode(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 	uint64_t write_cnt1, write_cnt2;
 
 	if (strchr(zio_cmd->buf, '@') == NULL) {
-		REPLICA_ERRLOG("no @ in buf %s\n", zio_cmd->buf);
+		REPLICA_ERRLOG("no @ in buf %s\n", (char *)zio_cmd->buf);
 		exit(1);
 	}
 
 	if (strncmp(zio_cmd->buf, rargs->volname, strlen(rargs->volname)) != 0) {
-		REPLICA_ERRLOG("name mismatch %s %s\n", zio_cmd->buf, rargs->volname);
+		REPLICA_ERRLOG("name mismatch %s %s\n", (char *)zio_cmd->buf, rargs->volname);
 		exit(1);
 	}
 
