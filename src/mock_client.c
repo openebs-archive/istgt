@@ -111,9 +111,6 @@ writer(void *args)
 
 		build_cmd(cargs, lu_cmd, 0, len);
 
-		while (spec->quiesce == 1)
-			sleep(1);
-
 		rc = replicate(spec, lu_cmd, offset, len);
 		if (rc != len)
 			goto end;
@@ -220,7 +217,7 @@ mgmt_thrd(void *args)
 	char *snapname;
 	int ret;
 
-	snprintf(tinfo, 50, "mgmt%d", cargs->workerid);
+	snprintf(tinfo, 50, "clientmgmt%d", cargs->workerid);
 	prctl(PR_SET_NAME, tinfo, 0, 0, 0);
 
 	snapname = malloc(50);
@@ -267,7 +264,7 @@ void
 create_mock_client(spec_t *spec)
 {
 	int num_threads = 6;
-	int mgmt_threads = 1;
+	int mgmt_threads = 2;
 	int i;
 	cargs_t *cargs;
 	struct timespec now;
@@ -300,8 +297,8 @@ create_mock_client(spec_t *spec)
 	}
 
 	for (i = 0; i < mgmt_threads; i++) {
+		cargs = &(all_cargs[num_threads + i]);
 		cargs->workerid = num_threads + i;
-		cargs = &(all_cargs[cargs->workerid]);
 		cargs->spec = spec;
 		cargs->mtx = &mtx;
 		cargs->cv = &cv;

@@ -62,16 +62,6 @@ static int handle_mgmt_event_fd(replica_t *replica);
 		rcomm_cmd->consistency_factor =				\
 		    spec->consistency_factor;				\
 		rcomm_cmd->state = CMD_ENQUEUED_TO_WAITQ;		\
-		switch (cmd->cdb0) {					\
-			case SBC_WRITE_6:				\
-			case SBC_WRITE_10:				\
-			case SBC_WRITE_12:				\
-			case SBC_WRITE_16:				\
-				cmd_write = true;			\
-				break;					\
-			default:					\
-				break;					\
-		}							\
 		if (cmd_write) {					\
 			rcomm_cmd->opcode = ZVOL_OPCODE_WRITE;		\
 			rcomm_cmd->iovcnt = cmd->iobufindx+1;		\
@@ -1050,6 +1040,13 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	clock_gettime(CLOCK_MONOTONIC, &last);
 	MTX_LOCK(&spec->rq_mtx);
 
+	/* Wait for any ongoing snapshot commands */
+	while (spec->quiesce == 1) {
+		MTX_UNLOCK(&spec->rq_mtx);
+		sleep(1);
+		MTX_LOCK(&spec->rq_mtx);
+	}
+
 	if (is_volume_healthy(spec) == false) {
 		MTX_UNLOCK(&spec->rq_mtx);
 		REPLICA_ERRLOG("volume is not healthy..\n");
@@ -1950,12 +1947,34 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	struct timespec abstime, now;
 	int nsec, err_num = 0;
 
+	switch (cmd->cdb0) {
+		case SBC_WRITE_6:
+		case SBC_WRITE_10:
+		case SBC_WRITE_12:
+		case SBC_WRITE_16:
+			cmd_write = true;
+			break;
+		default:
+			break;
+	}
+
+again:
 	MTX_LOCK(&spec->rq_mtx);
 	if(spec->ready == false) {
 		REPLICA_LOG("SPEC(%s) is not ready\n", spec->lu->name);
 		MTX_UNLOCK(&spec->rq_mtx);
 		return -1;
 	}
+
+	/* Quiesce write IOs based on flag */
+	if (cmd_write && spec->quiesce == 1) { 
+		MTX_UNLOCK(&spec->rq_mtx);
+		sleep(1);
+		goto again;
+	}
+
+	if (cmd_write)
+		spec->inflight_write_io_cnt += 1;
 
 	ASSERT(spec->io_seq);
 	build_rcomm_cmd;
@@ -2011,6 +2030,8 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 
 			MTX_LOCK(&spec->rq_mtx);
 			TAILQ_REMOVE(&spec->rcommon_waitq, rcomm_cmd, wait_cmd_next);
+			if (cmd_write)
+				spec->inflight_write_io_cnt -= 1;
 			MTX_UNLOCK(&spec->rq_mtx);
 
 			put_to_mempool(&spec->rcommon_deadlist, rcomm_cmd);

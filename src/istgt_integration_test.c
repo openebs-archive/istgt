@@ -207,6 +207,9 @@ handle_snap_opcode(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 		exit(1);
 	}
 
+	if (hdr->opcode == ZVOL_OPCODE_SNAP_DESTROY)
+		goto send_response;
+
 	if (rargs->zrepl_status != ZVOL_STATUS_HEALTHY) {
 		REPLICA_ERRLOG("replica not healthy %d\n", rargs->zrepl_status);
 		exit(1);
@@ -221,6 +224,7 @@ handle_snap_opcode(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 		exit(1);
 	}
 
+send_response:
 	if (zio_cmd->buf)
 		free(zio_cmd->buf);
 	zio_cmd->buf = NULL;

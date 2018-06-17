@@ -760,6 +760,8 @@ typedef struct istgt_lu_disk_t {
 	uint32_t rsize;
 	uint32_t rshift;
 	uint32_t rshiftreal;
+
+	/* inflight write IOs in replication layer */
 	uint64_t inflight_write_io_cnt;
 	uint32_t max_unmap_sectors;
 	struct IO_types IO_size[10];	
