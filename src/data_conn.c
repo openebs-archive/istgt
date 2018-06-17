@@ -150,9 +150,6 @@ move_to_blocked_or_ready_q(replica_t *r, rcmd_t *cmd)
 	bool cmd_blocked = false;
 	rcmd_t *pending_rcmd;
 
-	if (cmd->opcode == ZVOL_OPCODE_WRITE)
-		r->replica_inflight_write_io_cnt += 1;
-
 	if (!TAILQ_EMPTY(&r->blockedq)) {
 		clock_gettime(CLOCK_MONOTONIC, &cmd->queued_time);
 		TAILQ_INSERT_TAIL(&r->blockedq, cmd, next);
