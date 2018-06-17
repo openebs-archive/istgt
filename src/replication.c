@@ -1112,8 +1112,9 @@ done:
 	if (r == false)
 		TAILQ_FOREACH(replica, &spec->rq, r_next)
 			send_replica_snapshot(spec, replica, io_seq, snapname, ZVOL_OPCODE_SNAP_DESTROY, NULL);
-	REPLICA_ERRLOG("snap create ioseq: %lu resp: %d\n", io_seq, r);
 	MTX_UNLOCK(&spec->rq_mtx);
+	if (r == false)
+		REPLICA_ERRLOG("snap create ioseq: %lu resp: %d\n", io_seq, r);
 	if (free_rcomm_mgmt == 1)
 		free(rcomm_mgmt);
 	return r;
