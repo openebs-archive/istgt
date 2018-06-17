@@ -464,7 +464,7 @@ update_volstate(spec_t *spec)
 			spec->io_seq = max;
 		}
 		spec->ready = true;
-		REPLICA_NOTICELOG("volume(%s) is read for IOs now.. io_seq(%lu) "
+		REPLICA_NOTICELOG("volume(%s) is ready for IOs now.. io_seq(%lu) "
 		    "healthy_replica(%d) degraded_replica(%d)\n",
 		    spec->volname, spec->io_seq, spec->healthy_rcount,
 		    spec->degraded_rcount);
@@ -1052,12 +1052,14 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 
 	if (is_volume_healthy(spec) == false) {
 		MTX_UNLOCK(&spec->rq_mtx);
+		REPLICA_ERRLOG("volume is not healthy..\n");
 		return false;
 	}
 
 	r = pause_and_timed_wait_for_ongoing_ios(spec, io_wait_time);
 	if (r == false) {
 		MTX_UNLOCK(&spec->rq_mtx);
+		REPLICA_ERRLOG("pausing failed..\n");
 		return false;
 	}
 
@@ -1069,6 +1071,7 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 		rc = send_replica_snapshot(spec, replica, snapname, ZVOL_OPCODE_SNAP_CREATE, rcomm_mgmt);
 		if (rc < 0) {
 			rcomm_mgmt->caller_gone = 1;
+			REPLICA_ERRLOG("caller gone..\n");
 			goto done;
 		}
 	}
@@ -1079,6 +1082,8 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	if (rcomm_mgmt->cmds_sent != spec->replication_factor) {
 		rcomm_mgmt->caller_gone = 1;
 		MTX_UNLOCK(&rcomm_mgmt->mtx);
+		REPLICA_ERRLOG("cmds sent %d not eq repl factor %d..\n",
+		    rcomm_mgmt->cmds_sent, spec->replication_factor);
 		goto done;
 	}
 
@@ -1095,8 +1100,9 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	rcomm_mgmt->caller_gone = 1;
 	if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed)) {
 		free_rcomm_mgmt = 1;
-		if ((rcomm_mgmt->cmds_succeeded == spec->replication_factor) && (rcomm_mgmt->cmds_failed == 0))
+		if ((rcomm_mgmt->cmds_succeeded == spec->replication_factor) && (rcomm_mgmt->cmds_failed == 0)) {
 			r = true;
+		}
 	}
 	MTX_UNLOCK(&rcomm_mgmt->mtx);
 done:
@@ -2199,6 +2205,8 @@ handle_read_data_event(replica_t *replica)
 	return (rc);
 }
 
+int replica_poll_time = 30;
+
 /*
  * initializes replication
  * - by starting listener to accept mgmt connections
@@ -2237,7 +2245,7 @@ init_replication(void *arg __attribute__((__unused__)))
 	}
 
 	events = calloc(MAXEVENTS, sizeof(event));
-	timeout = 60 * 1000;	// 60 seconds
+	timeout = replica_poll_time * 1000;
 	clock_gettime(CLOCK_MONOTONIC, &last);
 
 	while (1) {
@@ -2310,7 +2318,7 @@ init_replication(void *arg __attribute__((__unused__)))
 
 		// send replica_status query to degraded replicas at interval of 60 seconds
 		timesdiff(CLOCK_MONOTONIC, last, now, diff);
-		if (diff.tv_sec >= 60) {
+		if (diff.tv_sec >= replica_poll_time) {
 			spec_t *spec = NULL;
 			MTX_LOCK(&specq_mtx);
 			TAILQ_FOREACH(spec, &spec_q, spec_next) {
