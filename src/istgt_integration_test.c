@@ -26,6 +26,9 @@ typedef struct rebuild_test_s {
 	bool reregister_replica_test;
 } rebuild_test_t;
 
+extern int replica_poll_time;
+extern int replica_timeout;
+
 typedef struct rargs_s {
 	/* IP:Port on which replica is listening */
 	char replica_ip[MAX_IP_LEN];
@@ -102,6 +105,7 @@ zio_cmd_alloc(zvol_io_hdr_t *hdr)
 	    (hdr->opcode == ZVOL_OPCODE_HANDSHAKE) ||
 	    (hdr->opcode == ZVOL_OPCODE_REPLICA_STATUS) ||
 	    (hdr->opcode == ZVOL_OPCODE_OPEN) ||
+	    (hdr->opcode == ZVOL_OPCODE_STATS) ||
 	    (hdr->opcode == ZVOL_OPCODE_START_REBUILD) ||
 	    (hdr->opcode == ZVOL_OPCODE_PREPARE_FOR_REBUILD)) {
 		zio_cmd->buf = malloc(sizeof (char) * hdr->len);
@@ -183,6 +187,35 @@ handle_replica_start_rebuild(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 	hdr->len = 0;
 	zio_cmd->buf = NULL;
 	hdr->status = ZVOL_OP_STATUS_OK;
+}
+
+static void
+handle_stats(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
+{
+	zvol_op_stat_t *stats;
+	zvol_io_hdr_t *hdr = &(zio_cmd->hdr);
+
+	if (strcmp(zio_cmd->buf, rargs->volname) != 0)
+		exit (1);
+
+	if (rargs->zrepl_status != ZVOL_STATUS_HEALTHY)
+		exit (1);
+
+	if (zio_cmd->buf)
+		free(zio_cmd->buf);
+	zio_cmd->buf = NULL;
+	if ((random() % 2) == 0) {
+		hdr->status = ZVOL_OP_STATUS_FAILED;
+		hdr->len = 0;
+	} else {
+		stats = malloc(sizeof (zvol_op_stat_t));
+		strcpy(stats->label, "used");
+		stats->value = 100000;
+		hdr->len = sizeof (zvol_op_stat_t);
+		zio_cmd->buf = stats;
+		hdr->status = ZVOL_OP_STATUS_OK;
+	}
+	REPLICA_LOG("responding %d for stat..\n", hdr->status);
 }
 
 /*
@@ -510,6 +543,9 @@ mock_repl_mgmt_worker(void *args)
 			case ZVOL_OPCODE_REPLICA_STATUS:
 				handle_replica_status(rargs, zio_cmd);
 				break;
+			case ZVOL_OPCODE_STATS:
+				handle_stats(rargs, zio_cmd);
+				break;
 			case ZVOL_OPCODE_START_REBUILD:
 				handle_replica_start_rebuild(rargs, zio_cmd);
 				break;
@@ -679,6 +715,10 @@ mock_repl(void *args)
 	prctl(PR_SET_NAME, tinfo, 0, 0, 0);
 
 	rargs->file_fd = file_fd = open(rargs->file_path, O_RDWR, 0666);
+	if (file_fd < 0) {
+		REPLICA_ERRLOG("file %s open failed, errorno:%d", rargs->file_path, errno);
+		exit(EXIT_FAILURE);
+	}
 
 	//Create listener for io connections from controller and add to epoll
 	if((sfd = cstor_ops.conn_listen(rargs->replica_ip, rargs->replica_port, 32, 0)) < 0) {
@@ -1004,6 +1044,13 @@ main(int argc, char **argv)
 	struct stat sbuf;
 	pthread_t rebuild_test_thread;
 	rebuild_test_t *test_args;
+	struct timespec now;
+
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	srandom(now.tv_sec);
+
+	replica_poll_time = 5;
+	replica_timeout = 10;
 
 	test_args = (rebuild_test_t *)malloc(sizeof (rebuild_test_t));
 	rc = pthread_cond_init(&test_args->test_state_cv, NULL);
