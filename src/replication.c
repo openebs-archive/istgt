@@ -890,7 +890,8 @@ handle_snap_create_resp(replica_t *replica, mgmt_cmd_t *mgmt_cmd)
 }
 
 static int
-send_replica_snapshot(spec_t *spec, replica_t *replica, char *snapname, zvol_op_code_t opcode, rcommon_mgmt_cmd_t *rcomm_mgmt)
+send_replica_snapshot(spec_t *spec, replica_t *replica, uint64_t io_seq,
+    char *snapname, zvol_op_code_t opcode, rcommon_mgmt_cmd_t *rcomm_mgmt)
 {
 	zvol_io_hdr_t *rmgmtio = NULL;
 	size_t data_len;
@@ -908,6 +909,8 @@ send_replica_snapshot(spec_t *spec, replica_t *replica, char *snapname, zvol_op_
 
 	data = (char *)malloc(data_len);
 	snprintf(data, data_len, "%s@%s", spec->volname, snapname);
+
+	rmgmtio->io_seq = io_seq;
 
 	mgmt_cmd->io_hdr = rmgmtio;
 	mgmt_cmd->io_bytes = 0;
@@ -1017,7 +1020,7 @@ int istgt_lu_destroy_snapshot(spec_t *spec, char *snapname)
 {
 	replica_t *replica;
 	TAILQ_FOREACH(replica, &spec->rq, r_next)
-		send_replica_snapshot(spec, replica, snapname, ZVOL_OPCODE_SNAP_DESTROY, NULL);
+		send_replica_snapshot(spec, replica, 0, snapname, ZVOL_OPCODE_SNAP_DESTROY, NULL);
 	return true;
 }
 
@@ -1036,6 +1039,7 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	struct timespec last, now, diff;
 	rcommon_mgmt_cmd_t *rcomm_mgmt;
 	int rc;
+	uint64_t io_seq;
 
 	clock_gettime(CLOCK_MONOTONIC, &last);
 	MTX_LOCK(&spec->rq_mtx);
@@ -1064,8 +1068,9 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	free_rcomm_mgmt = 0;
 
 	r = false;
+	io_seq = ++spec->io_seq;
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
-		rc = send_replica_snapshot(spec, replica, snapname, ZVOL_OPCODE_SNAP_CREATE, rcomm_mgmt);
+		rc = send_replica_snapshot(spec, replica, io_seq, snapname, ZVOL_OPCODE_SNAP_CREATE, rcomm_mgmt);
 		if (rc < 0) {
 			rcomm_mgmt->caller_gone = 1;
 			REPLICA_ERRLOG("caller gone..\n");
@@ -1106,7 +1111,7 @@ done:
 	spec->quiesce = 0;
 	if (r == false)
 		TAILQ_FOREACH(replica, &spec->rq, r_next)
-			send_replica_snapshot(spec, replica, snapname, ZVOL_OPCODE_SNAP_DESTROY, NULL);
+			send_replica_snapshot(spec, replica, io_seq, snapname, ZVOL_OPCODE_SNAP_DESTROY, NULL);
 	MTX_UNLOCK(&spec->rq_mtx);
 	if (free_rcomm_mgmt == 1)
 		free(rcomm_mgmt);

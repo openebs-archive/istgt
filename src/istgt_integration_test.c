@@ -75,6 +75,7 @@ typedef struct rargs_s {
 	zvol_rebuild_status_t zrepl_rebuild_status;
 
 	uint64_t write_cnt;	
+	uint64_t destroy_snap_ioseq;
 	int rebuild_status_enquiry;
 	/* flag to stop replica threads once this is set to 1 */
 	int kill_replica;
@@ -207,9 +208,21 @@ handle_snap_opcode(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 		exit(1);
 	}
 
-	if (hdr->opcode == ZVOL_OPCODE_SNAP_DESTROY)
+	if (hdr->opcode == ZVOL_OPCODE_SNAP_DESTROY) {
+		if (rargs->destroy_snap_ioseq != 0) {
+			if (hdr->io_seq != rargs->destroy_snap_ioseq) {
+				REPLICA_ERRLOG("writes happened during snapshot..\n");
+				exit(1);
+			}
+			rargs->destroy_snap_ioseq = 0;
+		}
 		goto send_response;
-
+	}
+	/* expectation of snap destroy due to prev failue, but, snap create opcode */
+	if (rargs->destroy_snap_ioseq != 0) {
+		REPLICA_ERRLOG("destroy_snap_ioseq should have been emtpy\n");
+		exit(1);
+	}
 	if (rargs->zrepl_status != ZVOL_STATUS_HEALTHY) {
 		REPLICA_ERRLOG("replica not healthy %d\n", rargs->zrepl_status);
 		exit(1);
@@ -220,8 +233,12 @@ handle_snap_opcode(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 	write_cnt2 = rargs->write_cnt;
 
 	if (write_cnt1 != write_cnt2) {
-		REPLICA_ERRLOG("writes still happening %lu %lu\n", write_cnt1, write_cnt2);
-		exit(1);
+		REPLICA_ERRLOG("writes still happening %lu %lu %lu\n", write_cnt1, write_cnt2, hdr->io_seq);
+		/*
+		 * Write IOs still happening, so, destroy snap
+		 * should come with same io_seq
+		 */
+		rargs->destroy_snap_ioseq = hdr->io_seq;
 	}
 
 send_response:
