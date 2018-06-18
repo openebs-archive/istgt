@@ -76,11 +76,11 @@ int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 			    RECEIVED_ERR;				\
 			pthread_cond_signal(_cond);			\
 		} else {						\
-			rcomm_cmd->resp_list[idx].status |= 		\
-			    RECEIVED_ERR;				\
 			REPLICA_DEBUGLOG("error set for command(%lu)"	\
 			    " for replica(%lu)\n",			\
 			    rcomm_cmd->io_seq, r->zvol_guid);		\
+			rcomm_cmd->resp_list[idx].status |= 		\
+			    RECEIVED_ERR;				\
 		}							\
 		if (rcomm_cmd->state != CMD_EXECUTION_DONE)		\
 			pthread_cond_signal(_cond);			\
@@ -649,9 +649,6 @@ replica_thread(void *arg)
 	ev.data.ptr = NULL;
 
 	MTX_LOCK(&r->r_mtx);
-	r->data_eventfd = r_data_eventfd;
-	r->epollfd = r_epollfd;
-	r->mgmt_eventfd2 = r_mgmt_eventfd;
 
 	if ((r->iofd == -1) ||
 	    (epoll_ctl(r_epollfd, EPOLL_CTL_ADD, r->iofd, &ev) == -1)) {
@@ -662,7 +659,7 @@ initialize_error:
 		close(r->mgmt_eventfd2);
 		r->mgmt_eventfd2 = -1;
 
-		if (r_epollfd > 0) {
+		if ((r_epollfd > 0) && (r_data_eventfd > 0)) {
 			/*
 			 * epoll_ctl may fail so we are ignoring return
 			 * value of epoll_ctl
@@ -679,6 +676,11 @@ initialize_error:
 		}
 		return NULL;
 	}
+
+	r->data_eventfd = r_data_eventfd;
+	r->epollfd = r_epollfd;
+	r->mgmt_eventfd2 = r_mgmt_eventfd;
+
 	MTX_UNLOCK(&r->r_mtx);
 
 	prctl(PR_SET_NAME, "replica", 0, 0, 0);
