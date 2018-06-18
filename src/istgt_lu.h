@@ -36,8 +36,10 @@
 #include "istgt.h"
 #include "istgt_queue.h"
 
+#ifdef	REPLICATION
 #include "replication.h"
 #include "ring_mempool.h"
+#endif
 
 #ifdef __linux__
 #include <x86_64-linux-gnu/sys/queue.h>

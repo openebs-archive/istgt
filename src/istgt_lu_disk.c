@@ -64,8 +64,10 @@
 #include "istgt_proto.h"
 #include "istgt_scsi.h"
 #include "istgt_queue.h"
+#ifdef	REPLICATION
 #include "replication.h"
 #include "ring_mempool.h"
+#endif
 
 #ifdef __FreeBSD__
 #include <sys/disk.h>

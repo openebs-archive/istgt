@@ -72,7 +72,9 @@
 #include "istgt_iscsi.h"
 #include "istgt_lu.h"
 #include "istgt_proto.h"
+#ifdef	REPLICATION
 #include "istgt_integration.h"
+#endif
 #include "istgt_misc.h"
 
 #include <sys/time.h>
@@ -2627,6 +2629,7 @@ void *timerfn(void *ptr __attribute__((__unused__)))
 	ISTGT_QUEUE backupconns;
 	istgt_queue_init(&backupconns);
 	CONN *conn;
+#ifdef	REPLICATION
 	spec_t *spec;
 	ISTGT_LU_TASK_Ptr lu_task;
 	ISTGT_LU_CMD_Ptr lu_cmd;
@@ -2634,6 +2637,7 @@ void *timerfn(void *ptr __attribute__((__unused__)))
 	struct timespec now, diff, last_check;
 	int check_interval = (replica_timeout / 4) * 1000;
 	clock_gettime(clockid, &last_check);
+#endif
 
 	while(1)
 	{
@@ -2647,6 +2651,7 @@ void *timerfn(void *ptr __attribute__((__unused__)))
 		while((conn = (CONN *)(istgt_queue_dequeue(&backupconns))) != NULL)
 			istgt_queue_enqueue(&closedconns, conn);
 
+#ifdef	REPLICATION
 		clock_gettime(clockid, &now);
 		timesdiff(clockid, last_check, now, diff);
 		ms = diff.tv_sec * 1000;
@@ -2686,6 +2691,7 @@ void *timerfn(void *ptr __attribute__((__unused__)))
 			MTX_UNLOCK(&specq_mtx);
 			clock_gettime(clockid, &last_check);
 		}
+#endif
 
 		sleep(60);
 	}
