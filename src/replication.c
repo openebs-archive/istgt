@@ -970,7 +970,9 @@ is_volume_healthy(spec_t *spec)
  * If volume is not healthy or timeout happens while waiting for ongoing IOs,
  * write IOs will be allowed, and false will be returned.
  * If there are no pending write IOs and volume is healthy, true will be returned.
- * rq_mtx is required to be held by caller
+ * rq_mtx is required to be held by caller.
+ * Returns true when IOs are paused and no ongoing IOs within a given time
+ * else returns false.
  */
 static bool
 pause_and_timed_wait_for_ongoing_ios(spec_t *spec, int sec)
@@ -1003,6 +1005,7 @@ pause_and_timed_wait_for_ongoing_ios(spec_t *spec, int sec)
 			break;
 		}
 		MTX_UNLOCK(&spec->rq_mtx);
+		/* inflight write IOs in spec, or in replica, so, wait for some time */
 		sleep (1);
 		MTX_LOCK(&spec->rq_mtx);
 		timesdiff(CLOCK_MONOTONIC, last, now, diff);
