@@ -60,7 +60,8 @@ int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 		rcomm_cmd = rcmd->rcommq_ptr;				\
 		_cond = rcomm_cmd->cond_var;				\
 		if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE)		\
-			r->replica_inflight_write_io_cnt -= 1;		\
+			__sync_fetch_and_sub(				\
+			    &r->replica_inflight_write_io_cnt, 1); 	\
 		rcomm_cmd->resp_list[idx].io_resp_hdr.status =		\
 		    ZVOL_OP_STATUS_FAILED;				\
 		rcomm_cmd->resp_list[idx].data_ptr = NULL;		\
@@ -161,9 +162,6 @@ move_to_blocked_or_ready_q(replica_t *r, rcmd_t *cmd)
 {
 	bool cmd_blocked = false;
 	rcmd_t *pending_rcmd;
-
-	if (cmd->opcode == ZVOL_OPCODE_WRITE)
-		r->replica_inflight_write_io_cnt += 1;
 
 	if (!TAILQ_EMPTY(&r->blockedq)) {
 		clock_gettime(CLOCK_MONOTONIC, &cmd->queued_time);
@@ -533,7 +531,8 @@ start:
 		rcomm_cmd->resp_list[idx].io_resp_hdr = *(r->io_resp_hdr);
 		rcomm_cmd->resp_list[idx].data_ptr = r->ongoing_io_buf;
 		if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE)
-			r->replica_inflight_write_io_cnt -= 1;
+			__sync_fetch_and_sub(&r->replica_inflight_write_io_cnt,
+			    1);
 
 		/*
 		 * cleanup_deadlist thread performs cleanup of rcomm_cmd.

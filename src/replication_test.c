@@ -222,6 +222,7 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 	zvol_io_hdr_t *mgmt_ack_hdr = NULL;
 	mgmt_ack_t *mgmt_ack_data = NULL;
 	int ret = -1;
+	zvol_op_stat_t stats;
 
 	/* Init mgmt_ack_hdr */
 	build_mgmt_ack_hdr;
@@ -269,6 +270,13 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 		zrepl_status->rebuild_status = ZVOL_REBUILDING_IN_PROGRESS;
 		mgmt_ack_hdr->len = 0;
 		iovec_count = 3;
+	} else if (opcode == ZVOL_OPCODE_STATS) {
+		strcpy(stats.label, "used");
+		stats.value = 10000;
+		mgmt_ack_hdr->len = sizeof (zvol_op_stat_t);
+		iovec[3].iov_base = &stats;
+		iovec[3].iov_len = sizeof (zvol_op_stat_t);
+		iovec_count = 4;
 	} else {
 		build_mgmt_ack_data;
 

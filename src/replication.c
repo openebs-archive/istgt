@@ -34,6 +34,7 @@ rte_smempool_t rcommon_cmd_mempool;
 size_t rcmd_mempool_count = RCMD_MEMPOOL_ENTRIES;
 size_t rcommon_cmd_mempool_count = RCOMMON_CMD_MEMPOOL_ENTRIES;
 
+static int start_rebuild(void *buf, replica_t *replica, uint64_t data_len);
 static void handle_mgmt_conn_error(replica_t *r, int sfd, struct epoll_event *events,
     int ev_count);
 static int read_io_resp(spec_t *spec, replica_t *replica, io_event_t *revent, mgmt_cmd_t *mgmt_cmd);
@@ -62,16 +63,6 @@ static int handle_mgmt_event_fd(replica_t *replica);
 		rcomm_cmd->consistency_factor =				\
 		    spec->consistency_factor;				\
 		rcomm_cmd->state = CMD_ENQUEUED_TO_WAITQ;		\
-		switch (cmd->cdb0) {					\
-			case SBC_WRITE_6:				\
-			case SBC_WRITE_10:				\
-			case SBC_WRITE_12:				\
-			case SBC_WRITE_16:				\
-				cmd_write = true;			\
-				break;					\
-			default:					\
-				break;					\
-		}							\
 		if (cmd_write) {					\
 			rcomm_cmd->opcode = ZVOL_OPCODE_WRITE;		\
 			rcomm_cmd->iovcnt = cmd->iobufindx+1;		\
@@ -189,6 +180,15 @@ check_header_sanity(zvol_io_hdr_t *resp_hdr)
 			}
 			break;
 		
+		case ZVOL_OPCODE_STATS:
+			if((resp_hdr->len % sizeof (zvol_op_stat_t)) != 0) {
+				REPLICA_ERRLOG("hdr->len length(%lu) is non "
+				    "matching with zvol_op_stat..\n",
+				    resp_hdr->len);
+				return -1;
+			}
+			break;
+
 		case ZVOL_OPCODE_SNAP_CREATE:
 		case ZVOL_OPCODE_START_REBUILD:
 		case ZVOL_OPCODE_SNAP_DESTROY:
@@ -206,59 +206,105 @@ check_header_sanity(zvol_io_hdr_t *resp_hdr)
 	return 0;
 }
 
+static int
+enqueue_prepare_for_rebuild(spec_t *spec, replica_t *replica,
+    struct rcommon_mgmt_cmd *rcomm_mgmt,
+    zvol_op_code_t opcode)
+{
+	int ret = 0;
+	uint64_t num = 1;
+	zvol_io_hdr_t *rmgmtio = NULL;
+    	mgmt_cmd_t *mgmt_cmd;
+	uint64_t data_len = strlen(spec->volname) + 1;
+
+	mgmt_cmd = malloc(sizeof (mgmt_cmd_t));
+	BUILD_REPLICA_MGMT_HDR(rmgmtio, opcode, data_len);
+
+	mgmt_cmd->io_hdr = rmgmtio;
+	mgmt_cmd->io_bytes = 0;
+	mgmt_cmd->data = (char *)malloc(data_len);
+	snprintf((char *)mgmt_cmd->data, data_len, "%s", spec->volname);
+	mgmt_cmd->mgmt_cmd_state = WRITE_IO_SEND_HDR;
+	mgmt_cmd->rcomm_mgmt = rcomm_mgmt;
+
+	MTX_LOCK(&replica->r_mtx);
+	TAILQ_INSERT_TAIL(&replica->mgmt_cmd_queue, mgmt_cmd, mgmt_cmd_next);
+	MTX_UNLOCK(&replica->r_mtx);
+
+	rcomm_mgmt->cmds_sent++;
+
+	if (write(replica->mgmt_eventfd1, &num, sizeof (num)) != sizeof (num)) {
+		REPLICA_NOTICELOG("Failed to inform to mgmt_eventfd "
+		    "for replica(%p)\n", replica);
+		ret = -1;
+		rcomm_mgmt->cmds_failed++;
+		/*
+		 * Since insertion and processing/deletion happens in same
+		 * thread(mgmt_thread), it is safe to remove cmd from queue
+		 * in error case. Be cautious when you replicate this code.  
+		 */
+		MTX_LOCK(&replica->r_mtx);
+		clear_mgmt_cmd(replica, mgmt_cmd);
+		MTX_UNLOCK(&replica->r_mtx);
+	}
+	return ret; 
+}
+
 /*
  * Case 1: Rebuild from healthy replica
- * Case 2: Mesh rebuild i.e all replicas are downgrade
+ * Case 2: Mesh rebuild i.e all replicas are downgraded
  */
 static int 
-send_prepare_for_rebuild(spec_t *spec, replica_t *target_replica,
+send_prepare_for_rebuild_or_trigger_rebuild(spec_t *spec,
+    replica_t *target_replica,
     replica_t *healthy_replica)
 {
 	int ret = 0;
 	int replica_cnt;
 	uint64_t size;
-	uint64_t num = 1;
+	uint64_t data_len;
+	mgmt_ack_t *mgmt_data;
 	replica_t *replica;
-	zvol_io_hdr_t *rmgmtio = NULL;
-	uint64_t data_len = strlen(spec->volname) + 1;
-	zvol_op_code_t mgmt_opcode = ZVOL_OPCODE_PREPARE_FOR_REBUILD;
 	struct rcommon_mgmt_cmd *rcomm_mgmt;
-	mgmt_cmd_t *mgmt_cmd;
 
-	/* Store target_replica ptr and mark rebuild_in_progress to true */
 	spec->target_replica = target_replica;
 	spec->rebuild_in_progress = true;
 
 	replica_cnt = count_of_replicas_helping_rebuild(spec, healthy_replica);
-	assert(replica_cnt);
+	assert(replica_cnt || (spec->replication_factor ==  1));
+
+	/*
+	 * If replication_factor is 1 i.e. single replica,
+	 * trigger rebuild directly from here to change 
+	 * state at replica side to make it healthy.
+	 */
+	if (replica_cnt == 0) {
+		assert(spec->ready == true);
+
+		data_len = strlen(spec->volname) + 1;
+		mgmt_data = (mgmt_ack_t *)malloc(sizeof (*mgmt_data));
+		memset(mgmt_data, 0, sizeof (*mgmt_data));
+		snprintf(mgmt_data->dw_volname, data_len, "%s",
+		    spec->volname);
+		ret = start_rebuild(mgmt_data, spec->target_replica, sizeof (*mgmt_data));
+		if (ret == -1) {
+			spec->target_replica = NULL;
+			spec->rebuild_in_progress = false;
+		}
+		return ret;
+	}
+
+
 	size = replica_cnt * sizeof (mgmt_ack_t); 
 	rcomm_mgmt = allocate_rcommon_mgmt_cmd(size);
+
 	// Case 1
 	if (healthy_replica != NULL) {
 		replica = healthy_replica;
-		mgmt_cmd = malloc(sizeof (mgmt_cmd_t));
-		BUILD_REPLICA_MGMT_HDR(rmgmtio, mgmt_opcode, data_len);
-
-		mgmt_cmd->io_hdr = rmgmtio;
-		mgmt_cmd->io_bytes = 0;
-		mgmt_cmd->data = (char *)malloc(data_len);
-		snprintf((char *)mgmt_cmd->data, data_len, "%s", spec->volname);
-		mgmt_cmd->mgmt_cmd_state = WRITE_IO_SEND_HDR;
-		mgmt_cmd->rcomm_mgmt = rcomm_mgmt;
-
-		MTX_LOCK(&replica->r_mtx);
-		TAILQ_INSERT_TAIL(&replica->mgmt_cmd_queue, mgmt_cmd,
-		    mgmt_cmd_next);
-		MTX_UNLOCK(&replica->r_mtx);
-
-		rcomm_mgmt->cmds_sent++;
-	
-		if (write(replica->mgmt_eventfd1, &num,
-		    sizeof (num)) != sizeof (num)) {
-			REPLICA_NOTICELOG("Failed to inform to mgmt_eventfd "
-			    "for replica(%lu)\n", replica->zvol_guid);
-			ret = -1;
-			rcomm_mgmt->cmds_failed++;
+		ret = enqueue_prepare_for_rebuild(spec, replica, rcomm_mgmt,
+		    ZVOL_OPCODE_PREPARE_FOR_REBUILD);
+		if (ret == -1) {
+			goto exit;
 		}
 		replica_cnt--;
 		goto exit;
@@ -271,29 +317,10 @@ send_prepare_for_rebuild(spec_t *spec, replica_t *target_replica,
 		
 		if (replica_cnt == 0)
 			break;
-
-		mgmt_cmd = malloc(sizeof (mgmt_cmd_t));
-		BUILD_REPLICA_MGMT_HDR(rmgmtio, mgmt_opcode, data_len);
-
-		mgmt_cmd->io_hdr = rmgmtio;
-		mgmt_cmd->io_bytes = 0;
-		mgmt_cmd->data = (char *)malloc(data_len);
-		snprintf((char *)mgmt_cmd->data, data_len, "%s", spec->volname);
-		mgmt_cmd->mgmt_cmd_state = WRITE_IO_SEND_HDR;
-		mgmt_cmd->rcomm_mgmt = rcomm_mgmt;
-	
-		MTX_LOCK(&replica->r_mtx);
-		TAILQ_INSERT_TAIL(&replica->mgmt_cmd_queue, mgmt_cmd,
-		    mgmt_cmd_next);
-		MTX_UNLOCK(&replica->r_mtx);
-		rcomm_mgmt->cmds_sent++;
-
-		if (write(replica->mgmt_eventfd1, &num, sizeof (num)) !=
-		    sizeof (num)) {
-			REPLICA_NOTICELOG("Failed to inform to mgmt_eventfd "
-			    "for replica(%lu)\n", replica->zvol_guid);
-			ret = -1;
-			rcomm_mgmt->cmds_failed++;
+    
+		ret = enqueue_prepare_for_rebuild(spec, replica, rcomm_mgmt,
+		    ZVOL_OPCODE_PREPARE_FOR_REBUILD);
+		if (ret == -1) {
 			goto exit;
 		}
 		replica_cnt--;
@@ -301,14 +328,6 @@ send_prepare_for_rebuild(spec_t *spec, replica_t *target_replica,
 
 exit:
 	if (ret == -1) {
-		/*
-		 * Since insertion and processing/deletion happens in same
-		 * thread(mgmt_thread), it is safe to remove cmd from queue
-		 * in error case. Be cautious when you replicate this code.  
-		 */
-		MTX_LOCK(&replica->r_mtx);
-		clear_mgmt_cmd(replica, mgmt_cmd);
-		MTX_UNLOCK(&replica->r_mtx);
 		if (rcomm_mgmt->cmds_failed == rcomm_mgmt->cmds_sent) {
 			free_rcommon_mgmt_cmd(rcomm_mgmt);
 			spec->target_replica = NULL;
@@ -406,8 +425,8 @@ trigger_rebuild(spec_t *spec)
 
 		timesdiff(CLOCK_MONOTONIC, replica->create_time, now, diff);
 		if (diff.tv_sec <= replica_timeout) {
-			REPLICA_LOG("Replica(%lu) added very recently, "
-			    "skipping rebuild on it\n", replica->zvol_guid);
+			REPLICA_LOG("Replica:%p added very recently, "
+			    "skipping rebuild.\n", replica);
 			continue;
 		}
 
@@ -425,7 +444,8 @@ trigger_rebuild(spec_t *spec)
 	    spec->degraded_rcount, spec->consistency_factor,
 	    spec->replication_factor);
 
-	ret = send_prepare_for_rebuild(spec, target_replica, healthy_replica);
+	ret = send_prepare_for_rebuild_or_trigger_rebuild(spec,
+	    target_replica, healthy_replica);
 	if (ret == 0) {
 		REPLICA_LOG("%s rebuild will be attempted on replica(%lu) "
 		    "state:%d\n", (healthy_replica ? "Normal" : "Mesh"),
@@ -483,7 +503,7 @@ update_volstate(spec_t *spec)
 			spec->io_seq = max;
 		}
 		spec->ready = true;
-		REPLICA_NOTICELOG("volume(%s) is read for IOs now.. io_seq(%lu) "
+		REPLICA_NOTICELOG("volume(%s) is ready for IOs now.. io_seq(%lu) "
 		    "healthy_replica(%d) degraded_replica(%d)\n",
 		    spec->volname, spec->io_seq, spec->healthy_rcount,
 		    spec->degraded_rcount);
@@ -935,7 +955,8 @@ handle_snap_create_resp(replica_t *replica, mgmt_cmd_t *mgmt_cmd)
 }
 
 static int
-send_replica_snapshot(spec_t *spec, replica_t *replica, char *snapname, zvol_op_code_t opcode, rcommon_mgmt_cmd_t *rcomm_mgmt)
+send_replica_snapshot(spec_t *spec, replica_t *replica, uint64_t io_seq,
+    char *snapname, zvol_op_code_t opcode, rcommon_mgmt_cmd_t *rcomm_mgmt)
 {
 	zvol_io_hdr_t *rmgmtio = NULL;
 	size_t data_len;
@@ -953,6 +974,8 @@ send_replica_snapshot(spec_t *spec, replica_t *replica, char *snapname, zvol_op_
 
 	data = (char *)malloc(data_len);
 	snprintf(data, data_len, "%s@%s", spec->volname, snapname);
+
+	rmgmtio->io_seq = io_seq;
 
 	mgmt_cmd->io_hdr = rmgmtio;
 	mgmt_cmd->io_bytes = 0;
@@ -1012,7 +1035,9 @@ is_volume_healthy(spec_t *spec)
  * If volume is not healthy or timeout happens while waiting for ongoing IOs,
  * write IOs will be allowed, and false will be returned.
  * If there are no pending write IOs and volume is healthy, true will be returned.
- * rq_mtx is required to be held by caller
+ * rq_mtx is required to be held by caller.
+ * Returns true when IOs are paused and no ongoing IOs within a given time
+ * else returns false.
  */
 static bool
 pause_and_timed_wait_for_ongoing_ios(spec_t *spec, int sec)
@@ -1030,16 +1055,14 @@ pause_and_timed_wait_for_ongoing_ios(spec_t *spec, int sec)
 
 	while ((diff.tv_sec < sec) && (is_volume_healthy(spec) == true)) {
 		write_io_found = false;
-		TAILQ_FOREACH(replica, &spec->rq, r_next) {
-			if (replica->replica_inflight_write_io_cnt != 0) {
-				write_io_found = true;
-				break;
-			}
-		}
-		if (write_io_found == false) {
-			if (spec->inflight_write_io_cnt != 0) {
-				write_io_found = true;
-				break;
+		if (spec->inflight_write_io_cnt != 0)
+			write_io_found = true;
+		else {
+			TAILQ_FOREACH(replica, &spec->rq, r_next) {
+				if (replica->replica_inflight_write_io_cnt != 0) {
+					write_io_found = true;
+					break;
+				}
 			}
 		}
 		if (write_io_found == false) {
@@ -1047,6 +1070,7 @@ pause_and_timed_wait_for_ongoing_ios(spec_t *spec, int sec)
 			break;
 		}
 		MTX_UNLOCK(&spec->rq_mtx);
+		/* inflight write IOs in spec, or in replica, so, wait for some time */
 		sleep (1);
 		MTX_LOCK(&spec->rq_mtx);
 		timesdiff(CLOCK_MONOTONIC, last, now, diff);
@@ -1062,7 +1086,7 @@ int istgt_lu_destroy_snapshot(spec_t *spec, char *snapname)
 {
 	replica_t *replica;
 	TAILQ_FOREACH(replica, &spec->rq, r_next)
-		send_replica_snapshot(spec, replica, snapname, ZVOL_OPCODE_SNAP_DESTROY, NULL);
+		send_replica_snapshot(spec, replica, 0, snapname, ZVOL_OPCODE_SNAP_DESTROY, NULL);
 	return true;
 }
 
@@ -1081,18 +1105,28 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	struct timespec last, now, diff;
 	rcommon_mgmt_cmd_t *rcomm_mgmt;
 	int rc;
+	uint64_t io_seq;
 
 	clock_gettime(CLOCK_MONOTONIC, &last);
 	MTX_LOCK(&spec->rq_mtx);
 
+	/* Wait for any ongoing snapshot commands */
+	while (spec->quiesce == 1) {
+		MTX_UNLOCK(&spec->rq_mtx);
+		sleep(1);
+		MTX_LOCK(&spec->rq_mtx);
+	}
+
 	if (is_volume_healthy(spec) == false) {
 		MTX_UNLOCK(&spec->rq_mtx);
+		REPLICA_ERRLOG("volume is not healthy..\n");
 		return false;
 	}
 
 	r = pause_and_timed_wait_for_ongoing_ios(spec, io_wait_time);
 	if (r == false) {
 		MTX_UNLOCK(&spec->rq_mtx);
+		REPLICA_ERRLOG("pausing failed..\n");
 		return false;
 	}
 
@@ -1100,10 +1134,12 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	free_rcomm_mgmt = 0;
 
 	r = false;
+	io_seq = ++spec->io_seq;
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
-		rc = send_replica_snapshot(spec, replica, snapname, ZVOL_OPCODE_SNAP_CREATE, rcomm_mgmt);
+		rc = send_replica_snapshot(spec, replica, io_seq, snapname, ZVOL_OPCODE_SNAP_CREATE, rcomm_mgmt);
 		if (rc < 0) {
 			rcomm_mgmt->caller_gone = 1;
+			REPLICA_ERRLOG("caller gone..\n");
 			goto done;
 		}
 	}
@@ -1114,6 +1150,8 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	if (rcomm_mgmt->cmds_sent != spec->replication_factor) {
 		rcomm_mgmt->caller_gone = 1;
 		MTX_UNLOCK(&rcomm_mgmt->mtx);
+		REPLICA_ERRLOG("cmds sent %d not eq repl factor %d..\n",
+		    rcomm_mgmt->cmds_sent, spec->replication_factor);
 		goto done;
 	}
 
@@ -1130,16 +1168,19 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	rcomm_mgmt->caller_gone = 1;
 	if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed)) {
 		free_rcomm_mgmt = 1;
-		if ((rcomm_mgmt->cmds_succeeded == spec->replication_factor) && (rcomm_mgmt->cmds_failed == 0))
+		if ((rcomm_mgmt->cmds_succeeded == spec->replication_factor) && (rcomm_mgmt->cmds_failed == 0)) {
 			r = true;
+		}
 	}
 	MTX_UNLOCK(&rcomm_mgmt->mtx);
 done:
 	spec->quiesce = 0;
 	if (r == false)
 		TAILQ_FOREACH(replica, &spec->rq, r_next)
-			send_replica_snapshot(spec, replica, snapname, ZVOL_OPCODE_SNAP_DESTROY, NULL);
+			send_replica_snapshot(spec, replica, io_seq, snapname, ZVOL_OPCODE_SNAP_DESTROY, NULL);
 	MTX_UNLOCK(&spec->rq_mtx);
+	if (r == false)
+		REPLICA_ERRLOG("snap create ioseq: %lu resp: %d\n", io_seq, r);
 	if (free_rcomm_mgmt == 1)
 		free(rcomm_mgmt);
 	return r;
@@ -1149,15 +1190,13 @@ done:
  * This function sends status query for a volume to replica
  */
 static int
-send_replica_status_query(replica_t *replica, spec_t *spec)
+send_replica_query(replica_t *replica, spec_t *spec, zvol_op_code_t opcode)
 {
 	zvol_io_hdr_t *rmgmtio = NULL;
 	size_t data_len;
 	char *data;
-	zvol_op_code_t mgmt_opcode = ZVOL_OPCODE_REPLICA_STATUS;
+	zvol_op_code_t mgmt_opcode = opcode;
 	mgmt_cmd_t *mgmt_cmd;
-
-	ASSERT(replica->state == ZVOL_STATUS_DEGRADED);
 
 	mgmt_cmd = malloc(sizeof(mgmt_cmd_t));
 	data_len = strlen(spec->volname) + 1;
@@ -1180,6 +1219,34 @@ send_replica_status_query(replica_t *replica, spec_t *spec)
 }
 
 /*
+ * get_replica_stats will send stats query to any healthy replica
+ */
+static void
+get_replica_stats(spec_t *spec)
+{
+	int ret;
+	replica_t *replica;
+
+again:
+	MTX_LOCK(&spec->rq_mtx);
+	TAILQ_FOREACH(replica, &spec->rq, r_next) {
+		if (replica->state != ZVOL_STATUS_HEALTHY)
+			continue;
+
+		ret = send_replica_query(replica, spec, ZVOL_OPCODE_STATS);
+		if (ret == -1) {
+			REPLICA_ERRLOG("Failed to send stats "
+			    "on replica(%lu) ..\n", replica->zvol_guid);
+			MTX_UNLOCK(&spec->rq_mtx);
+			handle_mgmt_conn_error(replica, 0, NULL, 0);
+			goto again;
+		} else
+			break;
+	}
+	MTX_UNLOCK(&spec->rq_mtx);
+}
+
+/*
  * ask_replica_status will send replica_status query to all degraded replica
  */
 static void
@@ -1188,19 +1255,19 @@ ask_replica_status_all(spec_t *spec)
 	int ret;
 	replica_t *replica;
 
+again:
 	MTX_LOCK(&spec->rq_mtx);
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
-		if (replica->state == ZVOL_STATUS_HEALTHY) {
+		if (replica->state == ZVOL_STATUS_HEALTHY)
 			continue;
-		}
 
-		ret = send_replica_status_query(replica, spec);
+		ret = send_replica_query(replica, spec, ZVOL_OPCODE_REPLICA_STATUS);
 		if (ret == -1) {
 			REPLICA_ERRLOG("Failed to send mgmtIO for querying "
 			    "status on replica(%lu) ..\n", replica->zvol_guid);
 			MTX_UNLOCK(&spec->rq_mtx);
 			handle_mgmt_conn_error(replica, 0, NULL, 0);
-			return;
+			goto again;
 		}
 	}
 	MTX_UNLOCK(&spec->rq_mtx);
@@ -1225,12 +1292,16 @@ handle_prepare_for_rebuild_resp(spec_t *spec, zvol_io_hdr_t *hdr,
 {
 
 	int ret = 0;
+	size_t data_len;
 	rcommon_mgmt_cmd_t *rcomm_mgmt = mgmt_cmd->rcomm_mgmt;
 	mgmt_ack_t *buf = (mgmt_ack_t *)rcomm_mgmt->buf;
 	
 	if (hdr->status != ZVOL_OP_STATUS_OK) {
 		rcomm_mgmt->cmds_failed++;
 	} else {
+		data_len = strlen(spec->volname) + 1;
+		snprintf((char *)ack_data->dw_volname, data_len, "%s",
+		    spec->volname);
 		memcpy(&buf[rcomm_mgmt->cmds_succeeded++], ack_data,
 		    sizeof (mgmt_ack_t));
 	}
@@ -1263,6 +1334,21 @@ handle_prepare_for_rebuild_resp(spec_t *spec, zvol_io_hdr_t *hdr,
 		    "state:%d\n", spec->target_replica->zvol_guid,
 		    spec->target_replica->state);
 	}
+}
+
+/*
+ * Handler for stats opcode response from replica
+ */
+static void
+update_spec_stats(spec_t *spec, zvol_io_hdr_t *hdr, void *resp)
+{
+	zvol_op_stat_t *stats = (zvol_op_stat_t *)resp;
+	if (hdr->status != ZVOL_OP_STATUS_OK)
+		return;
+	if (strcmp(stats->label, "used") == 0)
+		spec->stats.used = stats->value;
+	clock_gettime(CLOCK_MONOTONIC, &spec->stats.updated_stats_time);
+	return;
 }
 
 static int
@@ -1613,6 +1699,10 @@ read_io_resp_hdr:
 					free(*resp_data);
 					break;
 
+				case ZVOL_OPCODE_STATS:
+					update_spec_stats(spec, resp_hdr, *resp_data);
+					break;
+
 				case ZVOL_OPCODE_PREPARE_FOR_REBUILD:
 				
 					/* replica status must come from mgmt connection */
@@ -1745,6 +1835,7 @@ close_fd(int epollfd, int fd)
 	rc = epoll_ctl(epollfd, EPOLL_CTL_DEL, fd, NULL);
 	ASSERT0(rc);
 
+	shutdown(fd, SHUT_RDWR);
 	close(fd);
 }
 
@@ -1765,6 +1856,10 @@ empty_mgmt_q_of_replica(replica_t *r)
 			case ZVOL_OPCODE_PREPARE_FOR_REBUILD:
 				handle_prepare_for_rebuild_resp(r->spec,
 				    mgmt_cmd->io_hdr, NULL, mgmt_cmd);
+				break;
+			case ZVOL_OPCODE_STATS:
+				update_spec_stats(r->spec, mgmt_cmd->io_hdr,
+				    NULL);
 				break;
 			default:
 				break;
@@ -1979,12 +2074,34 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	struct timespec abstime, now;
 	int nsec, err_num = 0;
 
+	switch (cmd->cdb0) {
+		case SBC_WRITE_6:
+		case SBC_WRITE_10:
+		case SBC_WRITE_12:
+		case SBC_WRITE_16:
+			cmd_write = true;
+			break;
+		default:
+			break;
+	}
+
+again:
 	MTX_LOCK(&spec->rq_mtx);
 	if(spec->ready == false) {
 		REPLICA_LOG("SPEC(%s) is not ready\n", spec->lu->name);
 		MTX_UNLOCK(&spec->rq_mtx);
 		return -1;
 	}
+
+	/* Quiesce write IOs based on flag */
+	if (cmd_write && spec->quiesce == 1) { 
+		MTX_UNLOCK(&spec->rq_mtx);
+		sleep(1);
+		goto again;
+	}
+
+	if (cmd_write)
+		spec->inflight_write_io_cnt += 1;
 
 	ASSERT(spec->io_seq);
 	build_rcomm_cmd;
@@ -2009,7 +2126,12 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 
 		rcomm_cmd->copies_sent++;
 		build_rcmd();
+
+		if (cmd_write)
+			__sync_fetch_and_add(&replica->replica_inflight_write_io_cnt, 1);
+
 		put_to_mempool(&replica->cmdq, rcmd);
+
 		eventfd_write(replica->data_eventfd, 1);
 
 		if (cmd_sent)
@@ -2041,6 +2163,8 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 
 			MTX_LOCK(&spec->rq_mtx);
 			TAILQ_REMOVE(&spec->rcommon_waitq, rcomm_cmd, wait_cmd_next);
+			if (cmd_write)
+				spec->inflight_write_io_cnt -= 1;
 			MTX_UNLOCK(&spec->rq_mtx);
 
 			put_to_mempool(&spec->rcommon_deadlist, rcomm_cmd);
@@ -2235,6 +2359,8 @@ handle_read_data_event(replica_t *replica)
 	return (rc);
 }
 
+int replica_poll_time = 30;
+
 /*
  * initializes replication
  * - by starting listener to accept mgmt connections
@@ -2273,7 +2399,7 @@ init_replication(void *arg __attribute__((__unused__)))
 	}
 
 	events = calloc(MAXEVENTS, sizeof(event));
-	timeout = 60 * 1000;	// 60 seconds
+	timeout = replica_poll_time * 1000;
 	clock_gettime(CLOCK_MONOTONIC, &last);
 
 	while (1) {
@@ -2343,13 +2469,14 @@ init_replication(void *arg __attribute__((__unused__)))
 			}
 		}
 
-		// send replica_status query to degraded replicas at interval of 60 seconds
+		// send replica_status query to degraded replicas at max interval of '2*replica_poll_time' seconds
 		timesdiff(CLOCK_MONOTONIC, last, now, diff);
-		if (diff.tv_sec >= 60) {
+		if (diff.tv_sec >= replica_poll_time) {
 			spec_t *spec = NULL;
 			MTX_LOCK(&specq_mtx);
 			TAILQ_FOREACH(spec, &spec_q, spec_next) {
 				ask_replica_status_all(spec);
+				get_replica_stats(spec);
 			}
 			MTX_UNLOCK(&specq_mtx);
 			clock_gettime(CLOCK_MONOTONIC, &last);
