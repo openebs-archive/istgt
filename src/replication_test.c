@@ -541,7 +541,7 @@ main(int argc, char **argv)
 				continue;
 			} else if (events[i].data.fd == mgmtfd) {
 				count = test_read_data(events[i].data.fd, (uint8_t *)mgmtio, sizeof(zvol_io_hdr_t));
-				if (count<0)
+				if (count < 0)
 				{
 					if (errno != EAGAIN)
 					{
@@ -550,6 +550,11 @@ main(int argc, char **argv)
 					}
 					break;
 				}
+				if (count == 0) {
+					rc = -1;
+					goto error;
+				}
+
 				if(mgmtio->len) {
 					data = data_ptr_cpy = malloc(mgmtio->len);
 					count = test_read_data(events[i].data.fd, (uint8_t *)data, mgmtio->len);
@@ -595,11 +600,14 @@ main(int argc, char **argv)
 				while(1) {
 					if(read_rem_data) {
 						count = test_read_data(events[i].data.fd, (uint8_t *)data + recv_len, total_len - recv_len);
-						if(count < 0 && errno == EAGAIN) {
+						if (count < 0 && errno == EAGAIN) {
 							break;
-						}else if(((uint64_t)count < total_len - recv_len) && errno == EAGAIN) {
+						} else if(((uint64_t)count < total_len - recv_len) && errno == EAGAIN) {
 							recv_len += count;
 							break;
+						} else if (count == 0) {
+							rc = -1;
+							goto error;
 						} else {
 							recv_len = 0;
 							total_len = 0;
@@ -614,6 +622,9 @@ main(int argc, char **argv)
 						} else if(((uint64_t)count < total_len - recv_len) && errno == EAGAIN) {
 							recv_len += count;
 							break;
+						} else if (count == 0) {
+							rc = -1;
+							goto error;
 						} else {
 							read_rem_hdr = false;
 							recv_len = 0;
@@ -628,6 +639,9 @@ main(int argc, char **argv)
 							recv_len = count;
 							total_len = io_hdr_len;
 							break;
+						} else if (count == 0) {
+							rc = -1;
+							goto error;
 						}
 						read_rem_hdr = false;
 					}
