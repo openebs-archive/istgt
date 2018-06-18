@@ -86,35 +86,9 @@ extern clockid_t clockid;
 
 //#define ISTGT_TRACE_DISK
 
-#define timesdiffX(_st, _now, _re)                   \
-{                                                    \
-	if (_now.tv_sec == 0) {							 \
-		_now.tv_sec = _st.tv_sec; _now.tv_nsec = _st.tv_nsec; \
-	}												\
-	if ((_now.tv_nsec - _st.tv_nsec)<0) {            \
-		_re.tv_sec  = _now.tv_sec - _st.tv_sec - 1;  \
-		_re.tv_nsec = 1000000000 + _now.tv_nsec - _st.tv_nsec; \
-	} else {                                         \
-		_re.tv_sec  = _now.tv_sec - _st.tv_sec;      \
-		_re.tv_nsec = _now.tv_nsec - _st.tv_nsec;    \
-	}                                                \
-}
-
-#define timesdiff(_st, _now, _re)                    \
-{                                                    \
-	clock_gettime(clockid, &_now);                   \
-	if ((_now.tv_nsec - _st.tv_nsec)<0) {            \
-		_re.tv_sec  = _now.tv_sec - _st.tv_sec - 1;  \
-		_re.tv_nsec = 1000000000 + _now.tv_nsec - _st.tv_nsec; \
-	} else {                                         \
-		_re.tv_sec  = _now.tv_sec - _st.tv_sec;      \
-		_re.tv_nsec = _now.tv_nsec - _st.tv_nsec;    \
-	}                                                \
-}
-
 #ifdef	REPLICATION
 #define	IS_SPEC_READY(_spec)						\
-		(_spec->state == ISTGT_LUN_BUSY || 			\
+		(_spec->state == ISTGT_LUN_BUSY ||			\
 		    _spec->ready == false)
 #else
 #define	IS_SPEC_READY(_spec)	\
@@ -459,10 +433,10 @@ istgt_lu_disk_close(ISTGT_LU_Ptr lu, int i)
 	MTX_UNLOCK(&spec->state_mutex);
 	disk_ref = spec->ludsk_ref;
 	
-	timesdiff(spec->close_started, _wrkx, _s1)
+	timesdiff(clockid, spec->close_started, _wrkx, _s1)
 	if (!spec->lu->readonly) {
 		rc = spec->sync(spec, 0, spec->size);
-		timesdiff(_wrkx, _wrk, _s2)
+		timesdiff(clockid, _wrkx, _wrk, _s2)
 		if (rc < 0) { 
 			/* Ignore error */
 			ISTGT_ERRLOG("LU%d: LUN%d: failed to sync\n", lu->num, i);
@@ -473,7 +447,7 @@ istgt_lu_disk_close(ISTGT_LU_Ptr lu, int i)
 		_s2.tv_sec = 0; _s2.tv_nsec = 0;
 	}
 	rc = spec->close(spec);
-	timesdiff(_wrk, _wrkx, _s3)
+	timesdiff(clockid, _wrk, _wrkx, _s3)
 	if (rc < 0) {
 		/* Ignore error */
 		ISTGT_ERRLOG("LU%d: LUN%d failed to close device\n", lu->num, i);
@@ -621,7 +595,7 @@ istgt_lu_disk_open(ISTGT_LU_Ptr lu, int i)
 	_wrk.tv_sec = spec->open_started.tv_sec;
 	_wrk.tv_nsec = spec->open_started.tv_nsec;
 
-	timesdiff(_wrk, _wrkx, _s1)
+	timesdiff(clockid, _wrk, _wrkx, _s1)
 	old_rsize = spec->rsize;
 	old_size = spec->size;
 	old_blocklen = spec->blocklen;
@@ -697,7 +671,7 @@ istgt_lu_disk_open(ISTGT_LU_Ptr lu, int i)
 
 		flags = lu->readonly ? O_RDONLY : O_RDWR;
 		rc = spec->open(spec, flags, 0666);
-		timesdiff(_wrkx, _wrk, _s2)
+		timesdiff(clockid, _wrkx, _wrk, _s2)
 		if (rc < 0) {
 			ISTGT_ERRLOG("LU%d: LUN%d: open error(errno=%d/%d)[%s]\n",
 						lu->num, i, spec->fderr, spec->fderrno, spec->file);
@@ -1213,7 +1187,7 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 				flags = lu->readonly ? O_RDONLY : O_RDWR;
 				clock_gettime(clockid, &_wrk);
 				rc = spec->open(spec, flags, 0666);
-				timesdiff(_wrk, _wrkx, _s1)
+				timesdiff(clockid, _wrk, _wrkx, _s1)
 				if (rc < 0) {
 					ISTGT_ERRLOG("LU%d: LUN%d: open error(errno=%d/%d)[%s]\n",
 						    lu->num, i, spec->fderr, spec->fderrno, spec->file);
@@ -1286,7 +1260,7 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
                                 	spec->ex_state = ISTGT_LUN_OPEN;
                                		MTX_UNLOCK(&spec->state_mutex);
 				}
-				timesdiff(_wrkx, _wrk, _s2)
+				timesdiff(clockid, _wrkx, _wrk, _s2)
 
 				gb_size = spec->size / ISTGT_LU_1GB;
 				mb_size = (spec->size % ISTGT_LU_1GB) / ISTGT_LU_1MB;
@@ -1388,7 +1362,7 @@ istgt_lu_disk_shutdown(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr
 					sleep(1);
 			} while ((workers_signaled == 0) && (++loop  < 10));
 
-			timesdiff(_wrk, _wrkx, _s1)
+			timesdiff(clockid, _wrk, _wrkx, _s1)
 			if (!spec->lu->readonly) {
 				rc = spec->sync(spec, 0, spec->size);
 				if (rc < 0) {
@@ -1396,7 +1370,7 @@ istgt_lu_disk_shutdown(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr
 					/* ignore error */
 				}
 			}
-			timesdiff(_wrkx, _wrk, _s2)
+			timesdiff(clockid, _wrkx, _wrk, _s2)
 			rc = spec->close(spec);
 			if (rc < 0) {
 				//ISTGT_ERRLOG("LU%d: lu_disk_close() failed\n", lu->num);
@@ -1405,7 +1379,7 @@ istgt_lu_disk_shutdown(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr
 			MTX_LOCK(&spec->state_mutex);
 			spec->ex_state = ISTGT_LUN_CLOSE;
 			MTX_UNLOCK(&spec->state_mutex);
-			timesdiff(_wrk, _wrkx, _s3)
+			timesdiff(clockid, _wrk, _wrkx, _s3)
 			ISTGT_LOG("LU%d: LUN%d %s: storage_offlinex %s [%s %"PRIu64" blocks, %"PRIu64" bytes/block] [%ld.%ld %ld.%ld %ld.%ld]\n",
 					lu->num, i, lu->name ? lu->name : "-", lu->readonly ? "readonly " : "",
 					spec->file, spec->blockcnt, spec->blocklen,
@@ -6752,7 +6726,7 @@ istgt_lu_disk_stop(ISTGT_LU_Ptr lu, int lun)
          * CloudByte Supports/Configures one LUN per Logical Unit so making complete LU to be offline.
          */
 	lu->online = 0;
-	timesdiff(_wrk, _wrkx, _s1)
+	timesdiff(clockid, _wrk, _wrkx, _s1)
 	do {
 		MTX_LOCK(&spec->state_mutex);
 		spec->state = ISTGT_LUN_BUSY;
@@ -6763,7 +6737,7 @@ istgt_lu_disk_stop(ISTGT_LU_Ptr lu, int lun)
 		if (workers_signaled == 0)
 			sleep(1);
 	} while ((workers_signaled == 0) && (++loop  < 10));
-	timesdiff(_wrkx, _wrk, _s2)
+	timesdiff(clockid, _wrkx, _wrk, _s2)
 
 	/* re-open file */
 	if (!spec->lu->readonly) {
@@ -6776,7 +6750,7 @@ istgt_lu_disk_stop(ISTGT_LU_Ptr lu, int lun)
 		}
 	}
 	rc = spec->close(spec);
-	timesdiff(_wrk, _wrkx, _s3)
+	timesdiff(clockid, _wrk, _wrkx, _s3)
 	if (rc < 0) {
 		ISTGT_ERRLOG("LU%d: LUN%d: lu_disk_close() failed\n",
 		    lu->num, lun);
@@ -6830,7 +6804,7 @@ istgt_lu_disk_modify(ISTGT *istgt, int dofake)
 				++skipped;
 		}
 	}
-	timesdiff(st,wrk,dif1)
+	timesdiff(clockid, st,wrk,dif1)
 
 	notyet = signaled;	
 
@@ -6849,7 +6823,7 @@ istgt_lu_disk_modify(ISTGT *istgt, int dofake)
 			}
 		}
 	}
-	timesdiff(wrk,wrkx,dif2)
+	timesdiff(clockid, wrk,wrkx,dif2)
 	ISTGT_LOG("istgtcontrol modify %s done signaled:%d notdone:%d [%ld.%ld - %ld.%ld]\n",
 			mode, signaled, notyet, dif1.tv_sec, dif1.tv_nsec, dif2.tv_sec, dif2.tv_nsec);
 	return  (failsignal || notyet) ? -1 : 0;

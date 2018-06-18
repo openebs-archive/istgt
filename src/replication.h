@@ -187,6 +187,5 @@ int initialize_volume(spec_t *spec, int, int);
 #else
 #define REPLICA_DEBUGLOG(fmt, ...)
 #endif
-
 #endif /* _REPLICATION_H */
 
