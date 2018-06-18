@@ -43,39 +43,39 @@ int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 	}								\
 }
 
-#define SEND_ERROR_RESPONSES(head, _cond, _cnt, _time_diff, _r, _w) {	\
-	_cnt = 0;							\
-	memset(&_time_diff, 0, sizeof (_time_diff));			\
-	rcmd = TAILQ_FIRST(head);					\
-	if (rcmd != NULL) {						\
-		struct timespec now;					\
-		clock_gettime(CLOCK_MONOTONIC, &now);			\
-		timesdiff(CLOCK_MONOTONIC, rcmd->queued_time, 		\
-		    now, _time_diff);					\
-	}								\
-	while (rcmd != NULL) {						\
-		next_rcmd = TAILQ_NEXT(rcmd, next);			\
-		TAILQ_REMOVE(head, rcmd, next);				\
-		idx = rcmd->idx;					\
-		rcomm_cmd = rcmd->rcommq_ptr;				\
-		_cond = rcomm_cmd->cond_var;				\
-		if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE)		\
-			r->replica_inflight_write_io_cnt -= 1;		\
-		rcomm_cmd->resp_list[idx].io_resp_hdr.status =		\
-		    ZVOL_OP_STATUS_FAILED;				\
-		rcomm_cmd->resp_list[idx].data_ptr = NULL;		\
-		rcomm_cmd->resp_list[idx].status |= RECEIVED_ERR;	\
-		REPLICA_DEBUGLOG("error set for command(%lu) for "	\
-		    "replica(%s:%d)\n", rcomm_cmd->io_seq, r->ip,	\
-		    r->port);						\
-		if (rcomm_cmd->state != CMD_EXECUTION_DONE)		\
-			pthread_cond_signal(_cond);			\
-		(rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) ? ++_w : ++_r;	\
-		free(rcmd->iov_data);					\
-		put_to_mempool(&rcmd_mempool, rcmd);			\
-		rcmd = next_rcmd;					\
-		_cnt++;							\
-	}								\
+#define SEND_ERROR_RESPONSES(head, _cond, _cnt, _time_diff, _r, _w) {			\
+	_cnt = 0;									\
+	memset(&_time_diff, 0, sizeof (_time_diff));					\
+	rcmd = TAILQ_FIRST(head);							\
+	if (rcmd != NULL) {								\
+		struct timespec now;							\
+		clock_gettime(CLOCK_MONOTONIC, &now);					\
+		timesdiff(CLOCK_MONOTONIC, rcmd->queued_time, 				\
+		    now, _time_diff);							\
+	}										\
+	while (rcmd != NULL) {								\
+		next_rcmd = TAILQ_NEXT(rcmd, next);					\
+		TAILQ_REMOVE(head, rcmd, next);						\
+		idx = rcmd->idx;							\
+		rcomm_cmd = rcmd->rcommq_ptr;						\
+		_cond = rcomm_cmd->cond_var;						\
+		if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE)				\
+			__sync_fetch_and_sub(&r->replica_inflight_write_io_cnt, 1);	\
+		rcomm_cmd->resp_list[idx].io_resp_hdr.status =				\
+		    ZVOL_OP_STATUS_FAILED;						\
+		rcomm_cmd->resp_list[idx].data_ptr = NULL;				\
+		rcomm_cmd->resp_list[idx].status |= RECEIVED_ERR;			\
+		REPLICA_DEBUGLOG("error set for command(%lu) for "			\
+		    "replica(%s:%d)\n", rcomm_cmd->io_seq, r->ip,			\
+		    r->port);								\
+		if (rcomm_cmd->state != CMD_EXECUTION_DONE)				\
+			pthread_cond_signal(_cond);					\
+		(rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) ? ++_w : ++_r;			\
+		free(rcmd->iov_data);							\
+		put_to_mempool(&rcmd_mempool, rcmd);					\
+		rcmd = next_rcmd;							\
+		_cnt++;									\
+	}										\
 }
 
 #define	CHECK_REPLICA_TIMEOUT(_head, _diff, _ret, _exit_label, etimeout)\
@@ -516,7 +516,7 @@ start:
 		rcomm_cmd->resp_list[idx].io_resp_hdr = *(r->io_resp_hdr);
 		rcomm_cmd->resp_list[idx].data_ptr = r->ongoing_io_buf;
 		if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE)
-			r->replica_inflight_write_io_cnt -= 1;
+			__sync_fetch_and_sub(&r->replica_inflight_write_io_cnt, 1);
 		rcomm_cmd->resp_list[idx].status |= RECEIVED_OK;
 
 		if (rcomm_cmd->state != CMD_EXECUTION_DONE) {

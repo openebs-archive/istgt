@@ -988,16 +988,14 @@ pause_and_timed_wait_for_ongoing_ios(spec_t *spec, int sec)
 
 	while ((diff.tv_sec < sec) && (is_volume_healthy(spec) == true)) {
 		write_io_found = false;
-		TAILQ_FOREACH(replica, &spec->rq, r_next) {
-			if (replica->replica_inflight_write_io_cnt != 0) {
-				write_io_found = true;
-				break;
-			}
-		}
-		if (write_io_found == false) {
-			if (spec->inflight_write_io_cnt != 0) {
-				write_io_found = true;
-				break;
+		if (spec->inflight_write_io_cnt != 0)
+			write_io_found = true;
+		else {
+			TAILQ_FOREACH(replica, &spec->rq, r_next) {
+				if (replica->replica_inflight_write_io_cnt != 0) {
+					write_io_found = true;
+					break;
+				}
 			}
 		}
 		if (write_io_found == false) {
