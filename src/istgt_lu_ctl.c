@@ -62,6 +62,10 @@
 #define MAX_LINEBUF 4096
 //#define MAX_LINEBUF 8192
 
+#ifdef	REPLICATION
+extern int replication_initialized;
+#endif
+
 typedef struct istgt_uctl_t {
 	int id;
 
@@ -3152,6 +3156,19 @@ istgt_uctl_cmd_execute(UCTL_Ptr uctl)
 		}
 		return UCTL_CMD_ERR;
 	}
+
+#ifdef	REPLICATION
+	if (!replication_initialized) {
+		ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "uctl_cmd:%d ERR replication"
+		    " not initialized\n", i);
+		istgt_uctl_snprintf(uctl, "ERR replication module not initialized\n");
+		rc = istgt_uctl_writeline(uctl);
+		if (rc != UCTL_CMD_OK) {
+			return UCTL_CMD_DISCON;
+		}
+		return UCTL_CMD_ERR;
+	}
+#endif
 
 	if (uctl->no_auth
 	    && (strcasecmp(cmd, "AUTH") == 0)) {

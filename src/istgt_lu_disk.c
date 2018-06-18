@@ -6823,7 +6823,11 @@ istgt_lu_disk_status(ISTGT_LU_Ptr lu, int lun)
 		return -1;
 
 	MTX_LOCK(&spec->state_mutex);
-	status = spec->state;
+	MTX_LOCK(&spec->rq_mtx);
+	if (spec->state == ISTGT_LUN_BUSY || spec->ready == false) {
+		status = ISTGT_LUN_BUSY;
+	}
+	MTX_UNLOCK(&spec->rq_mtx);
 	MTX_UNLOCK(&spec->state_mutex);
 
 	return (status);

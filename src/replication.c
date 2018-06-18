@@ -34,6 +34,8 @@ rte_smempool_t rcommon_cmd_mempool;
 size_t rcmd_mempool_count = RCMD_MEMPOOL_ENTRIES;
 size_t rcommon_cmd_mempool_count = RCOMMON_CMD_MEMPOOL_ENTRIES;
 
+int replication_initialized = 0;
+
 static int start_rebuild(void *buf, replica_t *replica, uint64_t data_len);
 static void handle_mgmt_conn_error(replica_t *r, int sfd, struct epoll_event *events,
     int ev_count);
@@ -1786,6 +1788,7 @@ void
 close_fd(int epollfd, int fd)
 {
 	int rc;
+	(void)rc;
 	rc = epoll_ctl(epollfd, EPOLL_CTL_DEL, fd, NULL);
 	ASSERT0(rc);
 
@@ -2325,6 +2328,12 @@ init_replication(void *arg __attribute__((__unused__)))
 	events = calloc(MAXEVENTS, sizeof(event));
 	timeout = replica_poll_time * 1000;
 	clock_gettime(CLOCK_MONOTONIC, &last);
+
+	/*
+	 * we have successfully initialized replication module.
+	 * we can change value of replication_initialized to 1.
+	 */
+	replication_initialized = 1;
 
 	while (1) {
 		//Wait for management connections(on sfd) and management commands(on mgmt_rfds[]) from replicas
