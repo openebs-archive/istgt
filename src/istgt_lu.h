@@ -906,6 +906,7 @@ typedef struct istgt_lu_disk_t {
 	uint64_t io_seq;
 	int quiesce;
 
+#ifndef	REPLICATION
 	/* entry */
 	int (*open)(struct istgt_lu_disk_t *spec, int flags, int mode);
 	int (*close)(struct istgt_lu_disk_t *spec);
@@ -914,6 +915,7 @@ typedef struct istgt_lu_disk_t {
 	int64_t (*sync)(struct istgt_lu_disk_t *spec, uint64_t offset, uint64_t nbytes);
 	int (*allocate)(struct istgt_lu_disk_t *spec);
 	int (*setcache)(struct istgt_lu_disk_t *spec);
+#endif
 } ISTGT_LU_DISK;
 
 #ifdef CB_COMPILE

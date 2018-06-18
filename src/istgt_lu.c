@@ -2521,13 +2521,17 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 				}
 				old_rsize = lu->lun[i].u.storage.rsize;
 				old_size = lu->lun[i].u.storage.size;
+#ifndef	REPLICATION
 				if ((strcasecmp(size, "Auto") == 0
 				    || strcasecmp(size, "Size") == 0)
 				    && lu->istgt->OperationalMode == 0) {
-					new_size = istgt_lu_get_filesize(file);
+				        new_size = istgt_lu_get_filesize(file);
 				} else {
-					new_size = istgt_lu_parse_size(size);
+				        new_size = istgt_lu_parse_size(size);
 				}
+#else
+				new_size = istgt_lu_parse_size(size);
+#endif
 				new_rsize = 0;
 				if (rsz != NULL) {
 					uint64_t vall;
@@ -2765,6 +2769,7 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 					lu->lun[i].dpofua ? " DPOFUA" : "",
 					lu->lun[i].wzero ? " WZERO" : ""
 					);
+#ifndef	REPLICATION
 			if(lu->istgt->OperationalMode) {
 				clock_gettime(clockid, &spec->close_started);
 				rc = istgt_lu_disk_close(lu, i);
@@ -2777,6 +2782,7 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 				lu->lun[i].u.storage.size = old_size;
 				lu->lun[i].u.storage.rsize = old_rsize;
 				flags = lu->readonly ? O_RDONLY : O_RDWR;
+
 				rc = spec->open(spec, flags, 0666);
 				if (rc < 0) {
 					ISTGT_ERRLOG("LU%d: LUN%d: open error(errno=%d)\n",
@@ -2791,6 +2797,7 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 					nexus->ua_pending |= ISTGT_UA_LUN_CHANGE;
 				}
 			}
+#endif
 		}
 	}
 
@@ -3435,11 +3442,13 @@ istgt_lu_shutdown_unit(ISTGT_Ptr istgt, ISTGT_LU_Ptr lu)
 		break;
 
 	case ISTGT_LU_TYPE_DISK:
+#ifndef	REPLICATION
 		rc = istgt_lu_disk_shutdown(istgt, lu);
 		if (rc < 0) {
 			ISTGT_ERRLOG("LU%d: lu_disk_shutdown() failed\n", lu->num);
 			/* ignore error */
 		}
+#endif
 		break;
 
 	case ISTGT_LU_TYPE_DVD:
@@ -4217,11 +4226,13 @@ again:
 				} else if (spec->ex_state == ISTGT_LUN_OPEN_PENDING) {
 						do_open = 1;
 				}
+#ifndef	REPLICATION
 				MTX_UNLOCK(&spec->state_mutex);
 				if (do_close == 1)
 					rc = istgt_lu_disk_close(spec->lu, spec->lun);
 				if (do_open == 1)
 					rc = istgt_lu_disk_open(spec->lu, spec->lun);
+#endif
 
 				MTX_LOCK(&spec->complete_queue_mutex);
 				if(rc == 0) 
