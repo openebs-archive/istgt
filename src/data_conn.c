@@ -71,6 +71,7 @@ int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 		 * rcomm_cmd, we will update response status in 	\
 		 * rcomm_cmd at last.					\
 		 */							\
+		(rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) ? ++_w : ++_r;	\
 		if (rcomm_cmd->state != CMD_EXECUTION_DONE) {		\
 			rcomm_cmd->resp_list[idx].status |= 		\
 			    RECEIVED_ERR;				\
@@ -82,9 +83,6 @@ int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 			rcomm_cmd->resp_list[idx].status |= 		\
 			    RECEIVED_ERR;				\
 		}							\
-		if (rcomm_cmd->state != CMD_EXECUTION_DONE)		\
-			pthread_cond_signal(_cond);			\
-		(rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) ? ++_w : ++_r;	\
 		free(rcmd->iov_data);					\
 		put_to_mempool(&rcmd_mempool, rcmd);			\
 		rcmd = next_rcmd;					\
