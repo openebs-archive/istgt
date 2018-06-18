@@ -96,9 +96,6 @@ typedef struct rargs_s {
 	int kill_is_over;
 } rargs_t;
 
-extern int replica_poll_time;
-extern int replica_timeout;
-
 typedef struct zvol_io_cmd_s {
 	TAILQ_ENTRY(zvol_io_cmd_s) next;
 	zvol_io_hdr_t 	hdr;
