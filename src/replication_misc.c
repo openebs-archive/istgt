@@ -9,7 +9,6 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include "replication.h"
-#include "istgt_integration.h"
 #include "replication_misc.h"
 
 #define POLLWAIT 5000

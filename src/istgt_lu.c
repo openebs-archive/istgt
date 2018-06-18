@@ -1640,6 +1640,11 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 		goto error_return;
 	} else {
 		lu->replication_factor = (int) strtol(val, NULL, 10);
+		if (lu->replication_factor > MAXREPLICA) {
+			ISTGT_ERRLOG("Max replication factor is %d.. "
+			    "given %d\n", MAXREPLICA, lu->replication_factor);
+			goto error_return;
+		}
 	}
 
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "ReplicationFactor %d\n",
@@ -1775,6 +1780,16 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 		}
 	} else {
 		lu->blocklen = (int) strtol(val, NULL, 10);
+	}
+
+	for (i = 0; i < lu->replication_factor; i++) {
+		val = istgt_get_nmval(sp, "ReplicaID", 0, i);
+		if (val == NULL) {
+			ISTGT_ERRLOG("Invalid ReplicaId for replica %d\n", i);
+			goto error_return;
+		} else {
+			lu->replica_id[i] = strtoul(val, NULL, 10);
+		}
 	}
 
 	lu->rshift = 0;

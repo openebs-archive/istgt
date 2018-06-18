@@ -36,8 +36,10 @@
 #include "istgt.h"
 #include "istgt_queue.h"
 
+#ifdef	REPLICATION
 #include "replication.h"
 #include "ring_mempool.h"
+#endif
 
 #ifdef __linux__
 #include <x86_64-linux-gnu/sys/queue.h>
@@ -326,6 +328,7 @@ typedef struct istgt_lu_t {
 	ISTGT_LU_MAP map[MAX_LU_MAP];
 	int conns;
 #ifdef REPLICATION
+	uint64_t replica_id[MAXREPLICA];
 	uint8_t replication_factor;
 	uint8_t consistency_factor;
 #endif
