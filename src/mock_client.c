@@ -311,6 +311,9 @@ create_mock_client(spec_t *spec)
 		pthread_cond_wait(&cv, &mtx);
 	MTX_UNLOCK(&mtx);
 
+	free(all_cargs);
+	free(all_cthreads);
+
 	return;
 }
 

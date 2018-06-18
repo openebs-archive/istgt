@@ -836,6 +836,12 @@ typedef struct istgt_lu_disk_t {
 	pthread_mutex_t rcommonq_mtx; 
 	pthread_mutex_t luworker_rmutex[ISTGT_MAX_NUM_LUWORKERS];
 	pthread_cond_t luworker_rcond[ISTGT_MAX_NUM_LUWORKERS];
+
+	/* stats */
+	struct {
+		uint64_t	used;
+		struct timespec	updated_stats_time;
+	} stats;
 #endif
 
 	/*Queue containing all the tasks. Instead of going to separate 

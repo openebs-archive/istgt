@@ -18,13 +18,27 @@
 
 __thread char tinfo[50] = {0};
 int g_trace_flag = 0;
+
+typedef enum unit_test_state {
+        UNIT_TEST_STATE_NONE = 0,
+        UNIT_TEST_STATE_KILL_SINGLE_REPLICA,
+        UNIT_TEST_STATE_REREGISTER_REPLICA,
+        UNIT_TEST_STATE_READ_WRITE_REPLICA,
+        UNIT_TEST_STATE_KILL_ALL_REPLICA,
+        UNIT_TEST_STATE_REGISTER_NEW_REPLICA,
+ 	UNIT_TEST_STATE_READ_WRITE_SINGLE_REPLICA,
+} unit_test_state_t;
+
 typedef struct rebuild_test_s {
 	pthread_cond_t test_state_cv;
 	pthread_mutex_t test_mtx;
 	spec_t *spec;
-	bool replica_killing;
-	bool reregister_replica_test;
+	unit_test_state_t state;
+	bool data_read_write_test_done;
 } rebuild_test_t;
+
+extern int replica_poll_time;
+extern int replica_timeout;
 
 typedef struct rargs_s {
 	/* IP:Port on which replica is listening */
@@ -108,6 +122,7 @@ zio_cmd_alloc(zvol_io_hdr_t *hdr)
 	    (hdr->opcode == ZVOL_OPCODE_OPEN) ||
 	    (hdr->opcode == ZVOL_OPCODE_SNAP_CREATE) ||
 	    (hdr->opcode == ZVOL_OPCODE_SNAP_DESTROY) ||
+	    (hdr->opcode == ZVOL_OPCODE_STATS) ||
 	    (hdr->opcode == ZVOL_OPCODE_START_REBUILD) ||
 	    (hdr->opcode == ZVOL_OPCODE_PREPARE_FOR_REBUILD)) {
 		zio_cmd->buf = malloc(sizeof (char) * hdr->len);
@@ -180,9 +195,15 @@ static void
 handle_replica_start_rebuild(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 {
 	zvol_io_hdr_t *hdr = &(zio_cmd->hdr);
+	mgmt_ack_t *mgmt_ack_data = (mgmt_ack_t *)zio_cmd->buf;
 
 	/* Mark rebuild is in progress */
-	rargs->zrepl_rebuild_status = ZVOL_REBUILDING_IN_PROGRESS;
+	if ((strcmp(mgmt_ack_data->volname, "")) == 0) {
+		rargs->zrepl_status = ZVOL_STATUS_HEALTHY;
+		rargs->zrepl_rebuild_status = ZVOL_REBUILDING_DONE;
+	} else {
+		rargs->zrepl_rebuild_status = ZVOL_REBUILDING_IN_PROGRESS;
+	}
 
 	if (zio_cmd->buf)
 		free(zio_cmd->buf);
@@ -251,6 +272,35 @@ send_response:
 		hdr->status = ZVOL_OP_STATUS_FAILED;
 	else
 		hdr->status = ZVOL_OP_STATUS_OK;
+}
+
+static void
+handle_stats(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
+{
+	zvol_op_stat_t *stats;
+	zvol_io_hdr_t *hdr = &(zio_cmd->hdr);
+
+	if (strcmp(zio_cmd->buf, rargs->volname) != 0)
+		exit (1);
+
+	if (rargs->zrepl_status != ZVOL_STATUS_HEALTHY)
+		exit (1);
+
+	if (zio_cmd->buf)
+		free(zio_cmd->buf);
+	zio_cmd->buf = NULL;
+	if ((random() % 2) == 0) {
+		hdr->status = ZVOL_OP_STATUS_FAILED;
+		hdr->len = 0;
+	} else {
+		stats = malloc(sizeof (zvol_op_stat_t));
+		strcpy(stats->label, "used");
+		stats->value = 100000;
+		hdr->len = sizeof (zvol_op_stat_t);
+		zio_cmd->buf = stats;
+		hdr->status = ZVOL_OP_STATUS_OK;
+	}
+	REPLICA_LOG("responding %d for stat..\n", hdr->status);
 }
 
 /*
@@ -583,6 +633,9 @@ mock_repl_mgmt_worker(void *args)
 			case ZVOL_OPCODE_REPLICA_STATUS:
 				handle_replica_status(rargs, zio_cmd);
 				break;
+			case ZVOL_OPCODE_STATS:
+				handle_stats(rargs, zio_cmd);
+				break;
 			case ZVOL_OPCODE_START_REBUILD:
 				handle_replica_start_rebuild(rargs, zio_cmd);
 				break;
@@ -752,6 +805,10 @@ mock_repl(void *args)
 	prctl(PR_SET_NAME, tinfo, 0, 0, 0);
 
 	rargs->file_fd = file_fd = open(rargs->file_path, O_RDWR, 0666);
+	if (file_fd < 0) {
+		REPLICA_ERRLOG("file %s open failed, errorno:%d", rargs->file_path, errno);
+		exit(EXIT_FAILURE);
+	}
 
 	//Create listener for io connections from controller and add to epoll
 	if((sfd = cstor_ops.conn_listen(rargs->replica_ip, rargs->replica_port, 32, 0)) < 0) {
@@ -1010,56 +1067,108 @@ process_options(int argc, char **argv)
 	    total_time_in_sec, test_id);
 }
 
+static void
+reregister_replica(spec_t *spec, rargs_t *rargs, int port)
+{
+	char filepath[50];
+	pthread_t replica_thread;
+
+	sleep(60);
+	strncpy(rargs->replica_ip, "127.0.0.1", MAX_IP_LEN);
+	rargs->replica_port = port;
+	rargs->kill_replica = false;
+	rargs->kill_is_over = false;	
+
+	strncpy(rargs->ctrl_ip, "127.0.0.1", MAX_IP_LEN);
+	rargs->ctrl_port = 6060;
+
+	strncpy(rargs->volname, spec->volname, MAX_NAME_LEN);
+
+	snprintf(filepath, 45, "/tmp/test_vol%d", 1);
+	strncpy(rargs->file_path, filepath, MAX_NAME_LEN);
+
+	REPLICA_ERRLOG("Reconnecting new replica:%s port:%d\n",
+	    rargs->replica_ip, rargs->replica_port);
+	pthread_create(&replica_thread, NULL, &mock_repl, rargs);
+}
+
+static void
+kill_all_replicas(int replication_factor)
+{
+	int i; 
+
+	for (i = 0; i < replication_factor; i++) {
+		all_rargs[i].kill_replica = true;
+	}
+}
+
 static void *
 rebuild_test(void *arg)
 {
 	rebuild_test_t *test_args = (rebuild_test_t *)arg;
 	spec_t *spec = test_args->spec;
 	rargs_t *rargs = &(all_rargs[0]);
-	pthread_t replica_thread;
-	char filepath[50];
 
 	while (1) {
 		sleep(5);
 
-		if ((test_args->replica_killing == false) &&
-		    (spec->degraded_rcount == 0)) {
-			rargs = &(all_rargs[0]);
-			rargs->kill_replica = true;
-			test_args->replica_killing = true;
-			continue;
-		}
+		switch(test_args->state) {
 		
-		if (rargs->kill_is_over == true) {
-			sleep(60);
+        		case UNIT_TEST_STATE_NONE:
+				if (spec->degraded_rcount == 0) {
+					test_args->state++;
+				}
+				break;
+        	
+			case UNIT_TEST_STATE_KILL_SINGLE_REPLICA:
+				rargs = &(all_rargs[0]);
+				rargs->kill_replica = true;
+				test_args->state++;
+				break; 
 
-			strncpy(rargs->replica_ip, "127.0.0.1", MAX_IP_LEN);
-			rargs->replica_port = 6161 + spec->replication_factor + 1;
-			rargs->kill_replica = false;
-			rargs->kill_is_over = false;	
+        		case UNIT_TEST_STATE_REREGISTER_REPLICA:
+				if (rargs->kill_is_over == true) {
+					reregister_replica(spec, rargs, 6165);
+					test_args->state++;
+				}
+				break;
 
-			strncpy(rargs->ctrl_ip, "127.0.0.1", MAX_IP_LEN);
-			rargs->ctrl_port = 6060;
+        		case UNIT_TEST_STATE_READ_WRITE_REPLICA:
+				if (spec->degraded_rcount == 0) {
+					MTX_LOCK(&test_args->test_mtx);
+					pthread_cond_signal(&test_args->test_state_cv);
+					MTX_UNLOCK(&test_args->test_mtx);
+					test_args->state++;
+				}
+				break;
 
-			strncpy(rargs->volname, spec->volname, MAX_NAME_LEN);
+        		case UNIT_TEST_STATE_KILL_ALL_REPLICA:
+		    		if (test_args->data_read_write_test_done) {
+					kill_all_replicas(spec->replication_factor);
+					test_args->state++;
+				}
+ 				break;
 
-			snprintf(filepath, 45, "/tmp/test_vol%d", 1);
-			strncpy(rargs->file_path, filepath, MAX_NAME_LEN);
-
-			REPLICA_ERRLOG("Reconnecting new replica:%s port:%d\n",
-			    rargs->replica_ip, rargs->replica_port);
-			pthread_create(&replica_thread, NULL, &mock_repl, rargs);
-			test_args->reregister_replica_test = true;
-			continue;
-		}
-
-		if ((test_args->replica_killing == true) &&
-		    (test_args->reregister_replica_test == true) &&
-		    (spec->degraded_rcount == 0)) {
-			MTX_LOCK(&test_args->test_mtx);
-			pthread_cond_signal(&test_args->test_state_cv);
-			MTX_UNLOCK(&test_args->test_mtx);
-			goto exit;
+	       		case UNIT_TEST_STATE_REGISTER_NEW_REPLICA:
+				if ((spec->degraded_rcount == 0) &&
+				    (spec->healthy_rcount == 0)) {
+					spec->replication_factor = 1;
+					spec->consistency_factor = 1;
+					reregister_replica(spec, rargs, 6166);
+					test_args->state++;
+				}
+				break;
+       
+ 			case UNIT_TEST_STATE_READ_WRITE_SINGLE_REPLICA:
+				if (spec->degraded_rcount == 0) {
+					MTX_LOCK(&test_args->test_mtx);
+					pthread_cond_signal(&test_args->test_state_cv);
+					MTX_UNLOCK(&test_args->test_mtx);
+					goto exit;
+				}
+				break;
+			default:
+				break;
 		}
 	}
 exit:
@@ -1093,8 +1202,7 @@ main(int argc, char **argv)
 
 	pthread_mutex_init(&test_args->test_mtx, NULL);
 	test_args->spec = spec;
-	test_args->replica_killing = false;
-	test_args->reregister_replica_test = false;
+	test_args->data_read_write_test_done = false;
 
 	process_options(argc, argv);
 	rc = pthread_mutexattr_init(&mutex_attr);
@@ -1144,6 +1252,13 @@ main(int argc, char **argv)
 	pthread_create(&rebuild_test_thread, NULL, &rebuild_test, (void *)test_args);
 
 	MTX_LOCK(&test_args->test_mtx);
+	pthread_cond_wait(&test_args->test_state_cv, &test_args->test_mtx);
+	MTX_UNLOCK(&test_args->test_mtx);
+
+	create_mock_client(spec);
+
+	MTX_LOCK(&test_args->test_mtx);
+	test_args->data_read_write_test_done = true;
 	pthread_cond_wait(&test_args->test_state_cv, &test_args->test_mtx);
 	MTX_UNLOCK(&test_args->test_mtx);
 
