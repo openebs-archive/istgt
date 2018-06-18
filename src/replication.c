@@ -63,16 +63,6 @@ static int handle_mgmt_event_fd(replica_t *replica);
 		rcomm_cmd->consistency_factor =				\
 		    spec->consistency_factor;				\
 		rcomm_cmd->state = CMD_ENQUEUED_TO_WAITQ;		\
-		switch (cmd->cdb0) {					\
-			case SBC_WRITE_6:				\
-			case SBC_WRITE_10:				\
-			case SBC_WRITE_12:				\
-			case SBC_WRITE_16:				\
-				cmd_write = true;			\
-				break;					\
-			default:					\
-				break;					\
-		}							\
 		if (cmd_write) {					\
 			rcomm_cmd->opcode = ZVOL_OPCODE_WRITE;		\
 			rcomm_cmd->iovcnt = cmd->iobufindx+1;		\
@@ -930,7 +920,8 @@ handle_snap_create_resp(replica_t *replica, mgmt_cmd_t *mgmt_cmd)
 }
 
 static int
-send_replica_snapshot(spec_t *spec, replica_t *replica, char *snapname, zvol_op_code_t opcode, rcommon_mgmt_cmd_t *rcomm_mgmt)
+send_replica_snapshot(spec_t *spec, replica_t *replica, uint64_t io_seq,
+    char *snapname, zvol_op_code_t opcode, rcommon_mgmt_cmd_t *rcomm_mgmt)
 {
 	zvol_io_hdr_t *rmgmtio = NULL;
 	size_t data_len;
@@ -948,6 +939,8 @@ send_replica_snapshot(spec_t *spec, replica_t *replica, char *snapname, zvol_op_
 
 	data = (char *)malloc(data_len);
 	snprintf(data, data_len, "%s@%s", spec->volname, snapname);
+
+	rmgmtio->io_seq = io_seq;
 
 	mgmt_cmd->io_hdr = rmgmtio;
 	mgmt_cmd->io_bytes = 0;
@@ -1007,7 +1000,9 @@ is_volume_healthy(spec_t *spec)
  * If volume is not healthy or timeout happens while waiting for ongoing IOs,
  * write IOs will be allowed, and false will be returned.
  * If there are no pending write IOs and volume is healthy, true will be returned.
- * rq_mtx is required to be held by caller
+ * rq_mtx is required to be held by caller.
+ * Returns true when IOs are paused and no ongoing IOs within a given time
+ * else returns false.
  */
 static bool
 pause_and_timed_wait_for_ongoing_ios(spec_t *spec, int sec)
@@ -1025,16 +1020,14 @@ pause_and_timed_wait_for_ongoing_ios(spec_t *spec, int sec)
 
 	while ((diff.tv_sec < sec) && (is_volume_healthy(spec) == true)) {
 		write_io_found = false;
-		TAILQ_FOREACH(replica, &spec->rq, r_next) {
-			if (replica->replica_inflight_write_io_cnt != 0) {
-				write_io_found = true;
-				break;
-			}
-		}
-		if (write_io_found == false) {
-			if (spec->inflight_write_io_cnt != 0) {
-				write_io_found = true;
-				break;
+		if (spec->inflight_write_io_cnt != 0)
+			write_io_found = true;
+		else {
+			TAILQ_FOREACH(replica, &spec->rq, r_next) {
+				if (replica->replica_inflight_write_io_cnt != 0) {
+					write_io_found = true;
+					break;
+				}
 			}
 		}
 		if (write_io_found == false) {
@@ -1042,6 +1035,7 @@ pause_and_timed_wait_for_ongoing_ios(spec_t *spec, int sec)
 			break;
 		}
 		MTX_UNLOCK(&spec->rq_mtx);
+		/* inflight write IOs in spec, or in replica, so, wait for some time */
 		sleep (1);
 		MTX_LOCK(&spec->rq_mtx);
 		timesdiff(CLOCK_MONOTONIC, last, now, diff);
@@ -1057,7 +1051,7 @@ int istgt_lu_destroy_snapshot(spec_t *spec, char *snapname)
 {
 	replica_t *replica;
 	TAILQ_FOREACH(replica, &spec->rq, r_next)
-		send_replica_snapshot(spec, replica, snapname, ZVOL_OPCODE_SNAP_DESTROY, NULL);
+		send_replica_snapshot(spec, replica, 0, snapname, ZVOL_OPCODE_SNAP_DESTROY, NULL);
 	return true;
 }
 
@@ -1076,18 +1070,28 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	struct timespec last, now, diff;
 	rcommon_mgmt_cmd_t *rcomm_mgmt;
 	int rc;
+	uint64_t io_seq;
 
 	clock_gettime(CLOCK_MONOTONIC, &last);
 	MTX_LOCK(&spec->rq_mtx);
 
+	/* Wait for any ongoing snapshot commands */
+	while (spec->quiesce == 1) {
+		MTX_UNLOCK(&spec->rq_mtx);
+		sleep(1);
+		MTX_LOCK(&spec->rq_mtx);
+	}
+
 	if (is_volume_healthy(spec) == false) {
 		MTX_UNLOCK(&spec->rq_mtx);
+		REPLICA_ERRLOG("volume is not healthy..\n");
 		return false;
 	}
 
 	r = pause_and_timed_wait_for_ongoing_ios(spec, io_wait_time);
 	if (r == false) {
 		MTX_UNLOCK(&spec->rq_mtx);
+		REPLICA_ERRLOG("pausing failed..\n");
 		return false;
 	}
 
@@ -1095,10 +1099,12 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	free_rcomm_mgmt = 0;
 
 	r = false;
+	io_seq = ++spec->io_seq;
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
-		rc = send_replica_snapshot(spec, replica, snapname, ZVOL_OPCODE_SNAP_CREATE, rcomm_mgmt);
+		rc = send_replica_snapshot(spec, replica, io_seq, snapname, ZVOL_OPCODE_SNAP_CREATE, rcomm_mgmt);
 		if (rc < 0) {
 			rcomm_mgmt->caller_gone = 1;
+			REPLICA_ERRLOG("caller gone..\n");
 			goto done;
 		}
 	}
@@ -1109,6 +1115,8 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	if (rcomm_mgmt->cmds_sent != spec->replication_factor) {
 		rcomm_mgmt->caller_gone = 1;
 		MTX_UNLOCK(&rcomm_mgmt->mtx);
+		REPLICA_ERRLOG("cmds sent %d not eq repl factor %d..\n",
+		    rcomm_mgmt->cmds_sent, spec->replication_factor);
 		goto done;
 	}
 
@@ -1125,16 +1133,19 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	rcomm_mgmt->caller_gone = 1;
 	if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed)) {
 		free_rcomm_mgmt = 1;
-		if ((rcomm_mgmt->cmds_succeeded == spec->replication_factor) && (rcomm_mgmt->cmds_failed == 0))
+		if ((rcomm_mgmt->cmds_succeeded == spec->replication_factor) && (rcomm_mgmt->cmds_failed == 0)) {
 			r = true;
+		}
 	}
 	MTX_UNLOCK(&rcomm_mgmt->mtx);
 done:
 	spec->quiesce = 0;
 	if (r == false)
 		TAILQ_FOREACH(replica, &spec->rq, r_next)
-			send_replica_snapshot(spec, replica, snapname, ZVOL_OPCODE_SNAP_DESTROY, NULL);
+			send_replica_snapshot(spec, replica, io_seq, snapname, ZVOL_OPCODE_SNAP_DESTROY, NULL);
 	MTX_UNLOCK(&spec->rq_mtx);
+	if (r == false)
+		REPLICA_ERRLOG("snap create ioseq: %lu resp: %d\n", io_seq, r);
 	if (free_rcomm_mgmt == 1)
 		free(rcomm_mgmt);
 	return r;
@@ -2028,12 +2039,34 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	struct timespec abstime, now;
 	int nsec, err_num = 0;
 
+	switch (cmd->cdb0) {
+		case SBC_WRITE_6:
+		case SBC_WRITE_10:
+		case SBC_WRITE_12:
+		case SBC_WRITE_16:
+			cmd_write = true;
+			break;
+		default:
+			break;
+	}
+
+again:
 	MTX_LOCK(&spec->rq_mtx);
 	if(spec->ready == false) {
 		REPLICA_LOG("SPEC(%s) is not ready\n", spec->lu->name);
 		MTX_UNLOCK(&spec->rq_mtx);
 		return -1;
 	}
+
+	/* Quiesce write IOs based on flag */
+	if (cmd_write && spec->quiesce == 1) { 
+		MTX_UNLOCK(&spec->rq_mtx);
+		sleep(1);
+		goto again;
+	}
+
+	if (cmd_write)
+		spec->inflight_write_io_cnt += 1;
 
 	ASSERT(spec->io_seq);
 	build_rcomm_cmd;
@@ -2058,7 +2091,12 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 
 		rcomm_cmd->copies_sent++;
 		build_rcmd();
+
+		if (cmd_write)
+			__sync_fetch_and_add(&replica->replica_inflight_write_io_cnt, 1);
+
 		put_to_mempool(&replica->cmdq, rcmd);
+
 		eventfd_write(replica->data_eventfd, 1);
 
 		if (cmd_sent)
@@ -2089,6 +2127,8 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 
 			MTX_LOCK(&spec->rq_mtx);
 			TAILQ_REMOVE(&spec->rcommon_waitq, rcomm_cmd, wait_cmd_next);
+			if (cmd_write)
+				spec->inflight_write_io_cnt -= 1;
 			MTX_UNLOCK(&spec->rq_mtx);
 
 			put_to_mempool(&spec->rcommon_deadlist, rcomm_cmd);

@@ -14,4 +14,5 @@ install:
     - sudo make
 script:
     # run ztest and test supported zio backends
+    - sudo bash ./print_debug_info.sh &
     - travis_wait 60 sudo bash ./test_istgt.sh || travis_terminate 1;
