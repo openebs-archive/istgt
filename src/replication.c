@@ -34,6 +34,7 @@ rte_smempool_t rcommon_cmd_mempool;
 size_t rcmd_mempool_count = RCMD_MEMPOOL_ENTRIES;
 size_t rcommon_cmd_mempool_count = RCOMMON_CMD_MEMPOOL_ENTRIES;
 
+static int start_rebuild(void *buf, replica_t *replica, uint64_t data_len);
 static void handle_mgmt_conn_error(replica_t *r, int sfd, struct epoll_event *events,
     int ev_count);
 static int read_io_resp(spec_t *spec, replica_t *replica, io_event_t *revent, mgmt_cmd_t *mgmt_cmd);
@@ -215,59 +216,105 @@ check_header_sanity(zvol_io_hdr_t *resp_hdr)
 	return 0;
 }
 
+static int
+enqueue_prepare_for_rebuild(spec_t *spec, replica_t *replica,
+    struct rcommon_mgmt_cmd *rcomm_mgmt,
+    zvol_op_code_t opcode)
+{
+	int ret = 0;
+	uint64_t num = 1;
+	zvol_io_hdr_t *rmgmtio = NULL;
+    	mgmt_cmd_t *mgmt_cmd;
+	uint64_t data_len = strlen(spec->volname) + 1;
+
+	mgmt_cmd = malloc(sizeof (mgmt_cmd_t));
+	BUILD_REPLICA_MGMT_HDR(rmgmtio, opcode, data_len);
+
+	mgmt_cmd->io_hdr = rmgmtio;
+	mgmt_cmd->io_bytes = 0;
+	mgmt_cmd->data = (char *)malloc(data_len);
+	snprintf((char *)mgmt_cmd->data, data_len, "%s", spec->volname);
+	mgmt_cmd->mgmt_cmd_state = WRITE_IO_SEND_HDR;
+	mgmt_cmd->rcomm_mgmt = rcomm_mgmt;
+
+	MTX_LOCK(&replica->r_mtx);
+	TAILQ_INSERT_TAIL(&replica->mgmt_cmd_queue, mgmt_cmd, mgmt_cmd_next);
+	MTX_UNLOCK(&replica->r_mtx);
+
+	rcomm_mgmt->cmds_sent++;
+
+	if (write(replica->mgmt_eventfd1, &num, sizeof (num)) != sizeof (num)) {
+		REPLICA_NOTICELOG("Failed to inform to mgmt_eventfd "
+		    "for replica(%p)\n", replica);
+		ret = -1;
+		rcomm_mgmt->cmds_failed++;
+		/*
+		 * Since insertion and processing/deletion happens in same
+		 * thread(mgmt_thread), it is safe to remove cmd from queue
+		 * in error case. Be cautious when you replicate this code.  
+		 */
+		MTX_LOCK(&replica->r_mtx);
+		clear_mgmt_cmd(replica, mgmt_cmd);
+		MTX_UNLOCK(&replica->r_mtx);
+	}
+	return ret; 
+}
+
 /*
  * Case 1: Rebuild from healthy replica
- * Case 2: Mesh rebuild i.e all replicas are downgrade
+ * Case 2: Mesh rebuild i.e all replicas are downgraded
  */
 static int 
-send_prepare_for_rebuild(spec_t *spec, replica_t *target_replica,
+send_prepare_for_rebuild_or_trigger_rebuild(spec_t *spec,
+    replica_t *target_replica,
     replica_t *healthy_replica)
 {
 	int ret = 0;
 	int replica_cnt;
 	uint64_t size;
-	uint64_t num = 1;
+	uint64_t data_len;
+	mgmt_ack_t *mgmt_data;
 	replica_t *replica;
-	zvol_io_hdr_t *rmgmtio = NULL;
-	uint64_t data_len = strlen(spec->volname) + 1;
-	zvol_op_code_t mgmt_opcode = ZVOL_OPCODE_PREPARE_FOR_REBUILD;
 	struct rcommon_mgmt_cmd *rcomm_mgmt;
-	mgmt_cmd_t *mgmt_cmd;
 
-	/* Store target_replica ptr and mark rebuild_in_progress to true */
 	spec->target_replica = target_replica;
 	spec->rebuild_in_progress = true;
 
 	replica_cnt = count_of_replicas_helping_rebuild(spec, healthy_replica);
-	assert(replica_cnt);
+	assert(replica_cnt || (spec->replication_factor ==  1));
+
+	/*
+	 * If replication_factor is 1 i.e. single replica,
+	 * trigger rebuild directly from here to change 
+	 * state at replica side to make it healthy.
+	 */
+	if (replica_cnt == 0) {
+		assert(spec->ready == true);
+
+		data_len = strlen(spec->volname) + 1;
+		mgmt_data = (mgmt_ack_t *)malloc(sizeof (*mgmt_data));
+		memset(mgmt_data, 0, sizeof (*mgmt_data));
+		snprintf(mgmt_data->dw_volname, data_len, "%s",
+		    spec->volname);
+		ret = start_rebuild(mgmt_data, spec->target_replica, sizeof (*mgmt_data));
+		if (ret == -1) {
+			spec->target_replica = NULL;
+			spec->rebuild_in_progress = false;
+		}
+		return ret;
+	}
+
+
 	size = replica_cnt * sizeof (mgmt_ack_t); 
 	rcomm_mgmt = allocate_rcommon_mgmt_cmd(size);
+
 	// Case 1
 	if (healthy_replica != NULL) {
 		replica = healthy_replica;
-		mgmt_cmd = malloc(sizeof (mgmt_cmd_t));
-		BUILD_REPLICA_MGMT_HDR(rmgmtio, mgmt_opcode, data_len);
-
-		mgmt_cmd->io_hdr = rmgmtio;
-		mgmt_cmd->io_bytes = 0;
-		mgmt_cmd->data = (char *)malloc(data_len);
-		snprintf((char *)mgmt_cmd->data, data_len, "%s", spec->volname);
-		mgmt_cmd->mgmt_cmd_state = WRITE_IO_SEND_HDR;
-		mgmt_cmd->rcomm_mgmt = rcomm_mgmt;
-
-		MTX_LOCK(&replica->r_mtx);
-		TAILQ_INSERT_TAIL(&replica->mgmt_cmd_queue, mgmt_cmd,
-		    mgmt_cmd_next);
-		MTX_UNLOCK(&replica->r_mtx);
-
-		rcomm_mgmt->cmds_sent++;
-	
-		if (write(replica->mgmt_eventfd1, &num,
-		    sizeof (num)) != sizeof (num)) {
-			REPLICA_NOTICELOG("Failed to inform to mgmt_eventfd "
-			    "for replica(%lu)\n", replica->zvol_guid);
-			ret = -1;
-			rcomm_mgmt->cmds_failed++;
+		ret = enqueue_prepare_for_rebuild(spec, replica, rcomm_mgmt,
+		    ZVOL_OPCODE_PREPARE_FOR_REBUILD);
+		if (ret == -1) {
+			goto exit;
 		}
 		replica_cnt--;
 		goto exit;
@@ -280,29 +327,10 @@ send_prepare_for_rebuild(spec_t *spec, replica_t *target_replica,
 		
 		if (replica_cnt == 0)
 			break;
-
-		mgmt_cmd = malloc(sizeof (mgmt_cmd_t));
-		BUILD_REPLICA_MGMT_HDR(rmgmtio, mgmt_opcode, data_len);
-
-		mgmt_cmd->io_hdr = rmgmtio;
-		mgmt_cmd->io_bytes = 0;
-		mgmt_cmd->data = (char *)malloc(data_len);
-		snprintf((char *)mgmt_cmd->data, data_len, "%s", spec->volname);
-		mgmt_cmd->mgmt_cmd_state = WRITE_IO_SEND_HDR;
-		mgmt_cmd->rcomm_mgmt = rcomm_mgmt;
-	
-		MTX_LOCK(&replica->r_mtx);
-		TAILQ_INSERT_TAIL(&replica->mgmt_cmd_queue, mgmt_cmd,
-		    mgmt_cmd_next);
-		MTX_UNLOCK(&replica->r_mtx);
-		rcomm_mgmt->cmds_sent++;
-
-		if (write(replica->mgmt_eventfd1, &num, sizeof (num)) !=
-		    sizeof (num)) {
-			REPLICA_NOTICELOG("Failed to inform to mgmt_eventfd "
-			    "for replica(%lu)\n", replica->zvol_guid);
-			ret = -1;
-			rcomm_mgmt->cmds_failed++;
+    
+		ret = enqueue_prepare_for_rebuild(spec, replica, rcomm_mgmt,
+		    ZVOL_OPCODE_PREPARE_FOR_REBUILD);
+		if (ret == -1) {
 			goto exit;
 		}
 		replica_cnt--;
@@ -310,14 +338,6 @@ send_prepare_for_rebuild(spec_t *spec, replica_t *target_replica,
 
 exit:
 	if (ret == -1) {
-		/*
-		 * Since insertion and processing/deletion happens in same
-		 * thread(mgmt_thread), it is safe to remove cmd from queue
-		 * in error case. Be cautious when you replicate this code.  
-		 */
-		MTX_LOCK(&replica->r_mtx);
-		clear_mgmt_cmd(replica, mgmt_cmd);
-		MTX_UNLOCK(&replica->r_mtx);
 		if (rcomm_mgmt->cmds_failed == rcomm_mgmt->cmds_sent) {
 			free_rcommon_mgmt_cmd(rcomm_mgmt);
 			spec->target_replica = NULL;
@@ -415,8 +435,8 @@ trigger_rebuild(spec_t *spec)
 
 		timesdiff(CLOCK_MONOTONIC, replica->create_time, now, diff);
 		if (diff.tv_sec <= replica_timeout) {
-			REPLICA_LOG("Replica(%lu) added very recently, "
-			    "skipping rebuild on it\n", replica->zvol_guid);
+			REPLICA_LOG("Replica:%p added very recently, "
+			    "skipping rebuild.\n", replica);
 			continue;
 		}
 
@@ -434,7 +454,8 @@ trigger_rebuild(spec_t *spec)
 	    spec->degraded_rcount, spec->consistency_factor,
 	    spec->replication_factor);
 
-	ret = send_prepare_for_rebuild(spec, target_replica, healthy_replica);
+	ret = send_prepare_for_rebuild_or_trigger_rebuild(spec,
+	    target_replica, healthy_replica);
 	if (ret == 0) {
 		REPLICA_LOG("%s rebuild will be attempted on replica(%lu) "
 		    "state:%d\n", (healthy_replica ? "Normal" : "Mesh"),
@@ -1225,12 +1246,16 @@ handle_prepare_for_rebuild_resp(spec_t *spec, zvol_io_hdr_t *hdr,
 {
 
 	int ret = 0;
+	size_t data_len;
 	rcommon_mgmt_cmd_t *rcomm_mgmt = mgmt_cmd->rcomm_mgmt;
 	mgmt_ack_t *buf = (mgmt_ack_t *)rcomm_mgmt->buf;
 	
 	if (hdr->status != ZVOL_OP_STATUS_OK) {
 		rcomm_mgmt->cmds_failed++;
 	} else {
+		data_len = strlen(spec->volname) + 1;
+		snprintf((char *)ack_data->dw_volname, data_len, "%s",
+		    spec->volname);
 		memcpy(&buf[rcomm_mgmt->cmds_succeeded++], ack_data,
 		    sizeof (mgmt_ack_t));
 	}
