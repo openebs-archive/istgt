@@ -190,6 +190,15 @@ check_header_sanity(zvol_io_hdr_t *resp_hdr)
 			}
 			break;
 		
+		case ZVOL_OPCODE_STATS:
+			if((resp_hdr->len % sizeof (zvol_op_stat_t)) != 0) {
+				REPLICA_ERRLOG("hdr->len length(%lu) is non "
+				    "matching with zvol_op_stat..\n",
+				    resp_hdr->len);
+				return -1;
+			}
+			break;
+
 		case ZVOL_OPCODE_SNAP_CREATE:
 		case ZVOL_OPCODE_START_REBUILD:
 		case ZVOL_OPCODE_SNAP_DESTROY:
@@ -485,7 +494,7 @@ update_volstate(spec_t *spec)
 			spec->io_seq = max;
 		}
 		spec->ready = true;
-		REPLICA_NOTICELOG("volume(%s) is read for IOs now.. io_seq(%lu) "
+		REPLICA_NOTICELOG("volume(%s) is ready for IOs now.. io_seq(%lu) "
 		    "healthy_replica(%d) degraded_replica(%d)\n",
 		    spec->volname, spec->io_seq, spec->healthy_rcount,
 		    spec->degraded_rcount);
@@ -1135,15 +1144,13 @@ done:
  * This function sends status query for a volume to replica
  */
 static int
-send_replica_status_query(replica_t *replica, spec_t *spec)
+send_replica_query(replica_t *replica, spec_t *spec, zvol_op_code_t opcode)
 {
 	zvol_io_hdr_t *rmgmtio = NULL;
 	size_t data_len;
 	char *data;
-	zvol_op_code_t mgmt_opcode = ZVOL_OPCODE_REPLICA_STATUS;
+	zvol_op_code_t mgmt_opcode = opcode;
 	mgmt_cmd_t *mgmt_cmd;
-
-	ASSERT(replica->state == ZVOL_STATUS_DEGRADED);
 
 	mgmt_cmd = malloc(sizeof(mgmt_cmd_t));
 	data_len = strlen(spec->volname) + 1;
@@ -1166,6 +1173,34 @@ send_replica_status_query(replica_t *replica, spec_t *spec)
 }
 
 /*
+ * get_replica_stats will send stats query to any healthy replica
+ */
+static void
+get_replica_stats(spec_t *spec)
+{
+	int ret;
+	replica_t *replica;
+
+again:
+	MTX_LOCK(&spec->rq_mtx);
+	TAILQ_FOREACH(replica, &spec->rq, r_next) {
+		if (replica->state != ZVOL_STATUS_HEALTHY)
+			continue;
+
+		ret = send_replica_query(replica, spec, ZVOL_OPCODE_STATS);
+		if (ret == -1) {
+			REPLICA_ERRLOG("Failed to send stats "
+			    "on replica(%lu) ..\n", replica->zvol_guid);
+			MTX_UNLOCK(&spec->rq_mtx);
+			handle_mgmt_conn_error(replica, 0, NULL, 0);
+			goto again;
+		} else
+			break;
+	}
+	MTX_UNLOCK(&spec->rq_mtx);
+}
+
+/*
  * ask_replica_status will send replica_status query to all degraded replica
  */
 static void
@@ -1174,19 +1209,19 @@ ask_replica_status_all(spec_t *spec)
 	int ret;
 	replica_t *replica;
 
+again:
 	MTX_LOCK(&spec->rq_mtx);
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
-		if (replica->state == ZVOL_STATUS_HEALTHY) {
+		if (replica->state == ZVOL_STATUS_HEALTHY)
 			continue;
-		}
 
-		ret = send_replica_status_query(replica, spec);
+		ret = send_replica_query(replica, spec, ZVOL_OPCODE_REPLICA_STATUS);
 		if (ret == -1) {
 			REPLICA_ERRLOG("Failed to send mgmtIO for querying "
 			    "status on replica(%lu) ..\n", replica->zvol_guid);
 			MTX_UNLOCK(&spec->rq_mtx);
 			handle_mgmt_conn_error(replica, 0, NULL, 0);
-			return;
+			goto again;
 		}
 	}
 	MTX_UNLOCK(&spec->rq_mtx);
@@ -1253,6 +1288,21 @@ handle_prepare_for_rebuild_resp(spec_t *spec, zvol_io_hdr_t *hdr,
 		    "state:%d\n", spec->target_replica->zvol_guid,
 		    spec->target_replica->state);
 	}
+}
+
+/*
+ * Handler for stats opcode response from replica
+ */
+static void
+update_spec_stats(spec_t *spec, zvol_io_hdr_t *hdr, void *resp)
+{
+	zvol_op_stat_t *stats = (zvol_op_stat_t *)resp;
+	if (hdr->status != ZVOL_OP_STATUS_OK)
+		return;
+	if (strcmp(stats->label, "used") == 0)
+		spec->stats.used = stats->value;
+	clock_gettime(CLOCK_MONOTONIC, &spec->stats.updated_stats_time);
+	return;
 }
 
 static int
@@ -1603,6 +1653,10 @@ read_io_resp_hdr:
 					free(*resp_data);
 					break;
 
+				case ZVOL_OPCODE_STATS:
+					update_spec_stats(spec, resp_hdr, *resp_data);
+					break;
+
 				case ZVOL_OPCODE_PREPARE_FOR_REBUILD:
 				
 					/* replica status must come from mgmt connection */
@@ -1735,6 +1789,7 @@ close_fd(int epollfd, int fd)
 	rc = epoll_ctl(epollfd, EPOLL_CTL_DEL, fd, NULL);
 	ASSERT0(rc);
 
+	shutdown(fd, SHUT_RDWR);
 	close(fd);
 }
 
@@ -1755,6 +1810,10 @@ empty_mgmt_q_of_replica(replica_t *r)
 			case ZVOL_OPCODE_PREPARE_FOR_REBUILD:
 				handle_prepare_for_rebuild_resp(r->spec,
 				    mgmt_cmd->io_hdr, NULL, mgmt_cmd);
+				break;
+			case ZVOL_OPCODE_STATS:
+				update_spec_stats(r->spec, mgmt_cmd->io_hdr,
+				    NULL);
 				break;
 			default:
 				break;
@@ -2224,6 +2283,8 @@ handle_read_data_event(replica_t *replica)
 	return (rc);
 }
 
+int replica_poll_time = 30;
+
 /*
  * initializes replication
  * - by starting listener to accept mgmt connections
@@ -2262,7 +2323,7 @@ init_replication(void *arg __attribute__((__unused__)))
 	}
 
 	events = calloc(MAXEVENTS, sizeof(event));
-	timeout = 60 * 1000;	// 60 seconds
+	timeout = replica_poll_time * 1000;
 	clock_gettime(CLOCK_MONOTONIC, &last);
 
 	while (1) {
@@ -2333,13 +2394,14 @@ init_replication(void *arg __attribute__((__unused__)))
 			}
 		}
 
-		// send replica_status query to degraded replicas at interval of 60 seconds
+		// send replica_status query to degraded replicas at max interval of '2*replica_poll_time' seconds
 		timesdiff(CLOCK_MONOTONIC, last, now, diff);
-		if (diff.tv_sec >= 60) {
+		if (diff.tv_sec >= replica_poll_time) {
 			spec_t *spec = NULL;
 			MTX_LOCK(&specq_mtx);
 			TAILQ_FOREACH(spec, &spec_q, spec_next) {
 				ask_replica_status_all(spec);
+				get_replica_stats(spec);
 			}
 			MTX_UNLOCK(&specq_mtx);
 			clock_gettime(CLOCK_MONOTONIC, &last);
