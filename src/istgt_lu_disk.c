@@ -6118,7 +6118,11 @@ istgt_lu_disk_lbsync(ISTGT_LU_DISK *spec, CONN_Ptr conn __attribute__((__unused_
 		exitblockingcall(endofmacro3)
 		return -1;
 	}
+#ifdef REPLICATION
+	rc = replicate(spec, lu_cmd, offset, nbytes);
+#else
 	rc = spec->sync(spec, offset, nbytes);
+#endif
 	exitblockingcall(endofmacro2)
 	timediffw(lu_cmd, 'D');
 	if (markedForFree == 1 || markedForReturn == 1) {

@@ -43,7 +43,7 @@ static void inform_data_conn(replica_t *r);
 static void free_replica(replica_t *r);
 static int handle_mgmt_event_fd(replica_t *replica);
 
-#define build_rcomm_cmd 						\
+#define build_rcomm_cmd(rcomm_cmd, cmd, offset, nbytes) 						\
 	do {								\
 		rcomm_cmd = get_from_mempool(&rcommon_cmd_mempool);	\
 		rcomm_cmd->copies_sent = 0;				\
@@ -63,12 +63,31 @@ static int handle_mgmt_event_fd(replica_t *replica);
 		rcomm_cmd->consistency_factor =				\
 		    spec->consistency_factor;				\
 		rcomm_cmd->state = CMD_ENQUEUED_TO_WAITQ;		\
-		if (cmd_write) {					\
-			rcomm_cmd->opcode = ZVOL_OPCODE_WRITE;		\
-			rcomm_cmd->iovcnt = cmd->iobufindx+1;		\
-		} else {						\
-			rcomm_cmd->opcode = ZVOL_OPCODE_READ;		\
-			rcomm_cmd->iovcnt = 0;				\
+		switch (cmd->cdb0) {					\
+			case SBC_WRITE_6:				\
+			case SBC_WRITE_10:				\
+			case SBC_WRITE_12:				\
+			case SBC_WRITE_16:				\
+				cmd_write = true;			\
+				rcomm_cmd->opcode = ZVOL_OPCODE_WRITE;	\
+				rcomm_cmd->iovcnt = cmd->iobufindx + 1;	\
+				break;					\
+									\
+			case SBC_READ_6:				\
+			case SBC_READ_10:				\
+			case SBC_READ_12:				\
+			case SBC_READ_16:				\
+				rcomm_cmd->opcode = ZVOL_OPCODE_READ;	\
+				rcomm_cmd->iovcnt = 0;			\
+				break;					\
+									\
+			case SBC_SYNCHRONIZE_CACHE_10:			\
+			case SBC_SYNCHRONIZE_CACHE_16:			\
+				rcomm_cmd->opcode = ZVOL_OPCODE_SYNC;	\
+				rcomm_cmd->iovcnt = 0;			\
+				break;					\
+			default:					\
+				break;					\
 		}							\
 		if (cmd_write) {					\
 			for (i=1; i < iovcnt + 1; i++) {		\
@@ -2000,7 +2019,8 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 			    rcomm_cmd->copies_sent);
 			rc = -1;
 		}
-	} else if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) {
+	} else if ((rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) ||
+		   (rcomm_cmd->opcode == ZVOL_OPCODE_SYNC)) {
 		if (healthy_response >= rcomm_cmd->consistency_factor) {
 			/*
 			 * We got the successful response from required healthy
@@ -2069,7 +2089,7 @@ again:
 		spec->inflight_write_io_cnt += 1;
 
 	ASSERT(spec->io_seq);
-	build_rcomm_cmd;
+	build_rcomm_cmd(rcomm_cmd, cmd, offset, nbytes);
 
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
 		/*
