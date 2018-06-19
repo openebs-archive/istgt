@@ -400,7 +400,7 @@ run_lu_add_test ()
   Luworkers 6
   UnitInquiry "CloudByte" "iscsi" "0" "4059aab98f093c5d95207f7af09d1413"
   PhysRecordLength 4096
-  LUN0 Storage /tmp/cstor/vol1 5G 32k
+  LUN0 Storage 5G 32k
   LUN0 Option Unmap Disable
   LUN0 Option WZero Disable
   LUN0 Option ATS Disable
