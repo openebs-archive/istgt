@@ -475,6 +475,25 @@ trigger_rebuild(spec_t *spec)
 	}
 }
 
+static bool
+is_rf_replicas_connected(spec_t *spec, replica_t *replica)
+{
+	int replica_count;
+	bool ret = false;
+
+	ASSERT(MTX_LOCKED(&spec->rq_mtx));
+
+	replica_count = spec->healthy_rcount + spec->degraded_rcount;
+	if (replica_count >= spec->replication_factor) {
+		REPLICA_ERRLOG("removing replica(%s:%d) since max replica "
+		    "connection limit(%d) reached\n", replica->ip,
+		    replica->port, spec->replication_factor);
+		ret = true;
+	}
+
+	return ret;
+}
+
 void
 update_volstate(spec_t *spec)
 {
@@ -828,6 +847,16 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 		goto replica_error;
 	}
 
+	MTX_LOCK(&spec->rq_mtx);
+	if(is_rf_replicas_connected(spec, replica)) {
+		MTX_UNLOCK(&spec->rq_mtx);
+		ISTGT_ERRLOG("failed to verify replica(ip:%s port:%d "
+		    "guid:%lu)\n", replica->ip, replica->port,
+		    replica->zvol_guid);
+		goto replica_error;
+	}
+	MTX_UNLOCK(&spec->rq_mtx);
+
 	rc = pthread_create(&r_thread, NULL, &replica_thread,
 			(void *)replica);
 	if (rc != 0) {
@@ -844,24 +873,30 @@ replica_error:
 	free(rio_hdr);
 	free(rio_payload);
 
-	for (i = 0; (i < 10) && (replica->mgmt_eventfd2 == -1); i++)
+	MTX_LOCK(&replica->r_mtx);
+	for (i = 0; (i < 10) && (replica->mgmt_eventfd2 == -1); i++) {
+		MTX_UNLOCK(&replica->r_mtx);
 		sleep(1);
+		MTX_LOCK(&replica->r_mtx);
+	}
 
 	if (replica->mgmt_eventfd2 == -1) {
 		REPLICA_ERRLOG("unable to set mgmteventfd2 for more than 10 "
 		    "seconfs for replica(%lu)\n", replica->zvol_guid);
-		MTX_LOCK(&replica->r_mtx);
 		replica->dont_free = 1;
 		replica->iofd = -1;
 		MTX_UNLOCK(&replica->r_mtx);
+		shutdown(iofd, SHUT_RDWR);
 		close(iofd);
 		return -1;
 	}
+	MTX_UNLOCK(&replica->r_mtx);
 
 	MTX_LOCK(&spec->rq_mtx);
 
 	spec->degraded_rcount++;
 	TAILQ_REMOVE(&spec->rwaitq, replica, r_waitnext);
+
 	TAILQ_INSERT_TAIL(&spec->rq, replica, r_next);
 
 	/* Update the volume ready state */
@@ -2129,7 +2164,6 @@ again:
 
 	// now wait for command to complete
 	while (1) {
-		MTX_LOCK(rcomm_cmd->mutex);
 		// check for status of rcomm_cmd
 		rc = check_for_command_completion(spec, rcomm_cmd, cmd);
 		if (rc) {
@@ -2138,12 +2172,14 @@ again:
 			}
 			rcomm_cmd->state = CMD_EXECUTION_DONE;
 
+#ifdef	DEBUG
 			/*
 			 * NOTE: This is for debugging purpose only
 			 */
 			if (err_num == ETIMEDOUT)
 				fprintf(stderr, "last errno(%d) "
 				    "opcode(%d)\n", errno, rcomm_cmd->opcode);
+#endif
 
 			MTX_LOCK(&spec->rq_mtx);
 			TAILQ_REMOVE(&spec->rcommon_waitq, rcomm_cmd, wait_cmd_next);
@@ -2152,7 +2188,6 @@ again:
 			MTX_UNLOCK(&spec->rq_mtx);
 
 			put_to_mempool(&spec->rcommon_deadlist, rcomm_cmd);
-			MTX_UNLOCK(rcomm_cmd->mutex);
 			break;
 		}
 
@@ -2167,6 +2202,7 @@ again:
 			abstime.tv_nsec = 500000000 - nsec;
 		}
 
+		MTX_LOCK(rcomm_cmd->mutex);
 		rc = pthread_cond_timedwait(rcomm_cmd->cond_var,
 		    rcomm_cmd->mutex, &abstime);
 		err_num = errno;
@@ -2441,13 +2477,12 @@ init_replication(void *arg __attribute__((__unused__)))
 						else
 							rc = handle_mgmt_event_fd(r);
 					}
-					if (rc == -1)
-						handle_mgmt_conn_error(r, sfd, events, event_count);
 
-					rc = 0;
-					if (events[i].events & EPOLLOUT)
+					if ((rc != -1) &&
+					    (events[i].events & EPOLLOUT)) {
 						ASSERT(mevent->fd == r->mgmt_fd);
 						rc = handle_write_data_event(r);
+					}
 					if (rc == -1)
 						handle_mgmt_conn_error(r, sfd, events, event_count);
 				}
