@@ -328,7 +328,6 @@ typedef struct istgt_lu_t {
 	ISTGT_LU_MAP map[MAX_LU_MAP];
 	int conns;
 #ifdef REPLICATION
-	uint64_t replica_id[MAXREPLICA];
 	uint8_t replication_factor;
 	uint8_t consistency_factor;
 #endif

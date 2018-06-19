@@ -207,6 +207,8 @@ test_read_data(int fd, uint8_t *data, uint64_t len)
 			break;
 		}
 	}
+	if (rc == 0)
+		return -1;
 	return nbytes;
 }
 
@@ -390,6 +392,7 @@ usage(void)
 	printf(" -p target port\n");
 	printf(" -I replica ip\n");
 	printf(" -P replica port\n");
+	printf(" -r retry if failed to connect\n");
 	printf(" -V volume path\n");
 	printf(" -n number of IOs to serve before sleeping for 60 seconds\n");
 	printf(" -d run in degraded mode only\n");
@@ -430,8 +433,9 @@ main(int argc, char **argv)
 	int check = 1;
 	struct timespec now;
 	int delay = 0;
+	bool retry = false;
 
-	while ((ch = getopt(argc, argv, "i:p:I:P:V:n:e:t:d")) != -1) {
+	while ((ch = getopt(argc, argv, "i:p:I:P:V:n:e:t:dr")) != -1) {
 		switch (ch) {
 			case 'i':
 				strncpy(ctrl_ip, optarg, sizeof(ctrl_ip));
@@ -465,6 +469,9 @@ main(int argc, char **argv)
 					usage();
 					exit(EXIT_FAILURE);
 				}
+				break;
+			case 'r':
+				retry = true;
 				break;
 			case 't':
 				delay = atoi(optarg);
@@ -514,10 +521,18 @@ main(int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 
+	events = calloc(MAXEVENTS, sizeof(event));
+
+again:
 	//Connect to controller to start handshake and connect to epoll
 	if((mgmtfd = cstor_ops.conn_connect(ctrl_ip, ctrl_port)) < 0) {
 		REPLICA_ERRLOG("conn_connect() failed errno:%d\n", errno);
+		if (retry) {
+			sleep(1);
+			goto again;
+		}
 		close(vol_fd);
+		free(events);
 		destroy_mdlist();
 		exit(EXIT_FAILURE);
 	}
@@ -530,7 +545,6 @@ main(int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 
-	events = calloc(MAXEVENTS, sizeof(event));
 	while (1) {
 		event_count = epoll_wait(epfd, events, MAXEVENTS, -1);
 		for(i=0; i< event_count; i++) {
@@ -541,23 +555,37 @@ main(int argc, char **argv)
 				continue;
 			} else if (events[i].data.fd == mgmtfd) {
 				count = test_read_data(events[i].data.fd, (uint8_t *)mgmtio, sizeof(zvol_io_hdr_t));
-				if (count < 0)
-				{
-					if (errno != EAGAIN)
-					{
-						perror("read");
-						//done = 1;
+				if (count < 0) {
+					if (errno != EAGAIN) {
+						if (retry) {
+							REPLICA_ERRLOG("Failed to read from %d\n", events[i].data.fd);
+							epoll_ctl(epfd, EPOLL_CTL_DEL, mgmtfd, NULL);
+							close(mgmtfd);
+							sleep(1);
+							goto again;
+						} else {
+							rc = -1;
+							goto error;
+						}
 					}
-					break;
-				}
-				if (count == 0) {
-					rc = -1;
-					goto error;
+					/*
+					 * If connection with target is successfully established then
+					 * there is no need to re-connect if error occurs.
+					 */
+					retry = false;
+					continue;
 				}
 
 				if(mgmtio->len) {
 					data = data_ptr_cpy = malloc(mgmtio->len);
 					count = test_read_data(events[i].data.fd, (uint8_t *)data, mgmtio->len);
+					if (count < 0) {
+						if (errno != EAGAIN) {
+							rc = -1;
+							goto error;
+						}
+						continue;
+					}
 				}
 				opcode = mgmtio->opcode;
 				send_mgmt_ack(mgmtfd, opcode, data, replica_ip, replica_port, zrepl_status, &zrepl_status_msg_cnt);
@@ -602,12 +630,12 @@ main(int argc, char **argv)
 						count = test_read_data(events[i].data.fd, (uint8_t *)data + recv_len, total_len - recv_len);
 						if (count < 0 && errno == EAGAIN) {
 							break;
+						} else if (count < 0) {
+							rc = -1;
+							goto error;
 						} else if(((uint64_t)count < total_len - recv_len) && errno == EAGAIN) {
 							recv_len += count;
 							break;
-						} else if (count == 0) {
-							rc = -1;
-							goto error;
 						} else {
 							recv_len = 0;
 							total_len = 0;
@@ -617,14 +645,14 @@ main(int argc, char **argv)
 
 					} else if(read_rem_hdr) {
 						count = test_read_data(events[i].data.fd, (uint8_t *)io_hdr + recv_len, total_len - recv_len);
-						if(count < 0 && errno == EAGAIN) {
+						if (count < 0 && errno == EAGAIN) {
 							break;
+						} else if (count < 0) {
+							rc = -1;
+							goto error;
 						} else if(((uint64_t)count < total_len - recv_len) && errno == EAGAIN) {
 							recv_len += count;
 							break;
-						} else if (count == 0) {
-							rc = -1;
-							goto error;
 						} else {
 							read_rem_hdr = false;
 							recv_len = 0;
@@ -634,14 +662,14 @@ main(int argc, char **argv)
 						count = test_read_data(events[i].data.fd, (uint8_t *)io_hdr, io_hdr_len);
 						if((count < 0) && (errno == EAGAIN)) {
 							break;
+						} else if (count < 0) {
+							rc = -1;
+							goto error;
 						} else if(((uint64_t)count < io_hdr_len) && (errno == EAGAIN)) {
 							read_rem_hdr = true;
 							recv_len = count;
 							total_len = io_hdr_len;
 							break;
-						} else if (count == 0) {
-							rc = -1;
-							goto error;
 						}
 						read_rem_hdr = false;
 					}
@@ -659,6 +687,9 @@ main(int argc, char **argv)
 								recv_len = 0;
 								total_len = io_hdr->len;
 								break;
+							} else if (count < 0) {
+								rc = -1;
+								goto error;
 							} else if ((uint64_t)count < io_hdr->len && errno == EAGAIN) {
 								read_rem_data = true;
 								recv_len = count;

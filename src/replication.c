@@ -1455,6 +1455,7 @@ accept_mgmt_conns(int epfd, int sfd)
 
 		if (!spec) {
 			REPLICA_ERRLOG("Spec is not configured\n");
+			shutdown(mgmt_fd, SHUT_RDWR);
 			close(mgmt_fd);
 			continue;
 		}
@@ -1470,6 +1471,7 @@ accept_mgmt_conns(int epfd, int sfd)
 		if (!replica) {
 			REPLICA_ERRLOG("Failed to create replica for fd(%d) "
 			    "closing it..", mgmt_fd);
+			shutdown(mgmt_fd, SHUT_RDWR);
 			close(mgmt_fd);
 			continue;
 		}
@@ -1521,6 +1523,7 @@ cleanup:
 				TAILQ_REMOVE(&spec->rwaitq, replica, r_waitnext);
 				MTX_UNLOCK(&spec->rq_mtx);
 			}
+			shutdown(mgmt_fd, SHUT_RDWR);
 			close(mgmt_fd);
 			continue;
 		}

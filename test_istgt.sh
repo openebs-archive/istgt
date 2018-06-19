@@ -7,6 +7,7 @@ TEST_SNAPSHOT=$DIR/test_snapshot.sh
 MEMPOOL_TEST=$DIR/src/mempool_test
 ISTGT_INTEGRATION=$DIR/src/istgt_integration
 ISCSIADM=iscsiadm
+ISTGTCONTROL=istgtcontrol
 SETUP_PID=-1
 device_name=""
 
@@ -339,6 +340,76 @@ run_read_consistency_test ()
 	stop_istgt
 }
 
+run_lu_add_test ()
+{
+	local replica1_port="6161"
+	local replica2_port="6162"
+	local replica3_port="6163"
+	local replica1_ip="127.0.0.1"
+	local replica2_ip="127.0.0.1"
+	local replica3_ip="127.0.0.1"
+	local replica1_vdev="/tmp/test_vol1"
+	local replica2_vdev="/tmp/test_vol2"
+	local replica3_vdev="/tmp/test_vol3"
+
+	>/var/log/syslog
+	sed -i -n '/LogicalUnit section/,$!p' src/istgt.conf
+	setup_test_env
+
+	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev -r &
+	replica1_pid=$!
+
+	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V $replica2_vdev  -r &
+	replica2_pid=$!
+
+	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V $replica3_vdev -r &
+	replica3_pid=$!
+	sleep 5
+
+	git checkout src/istgt.conf
+	echo "# LogicalUnit section
+[LogicalUnit2]
+  TargetName vol1
+  TargetAlias nicknamefor-vol1
+  Mapping PortalGroup1 InitiatorGroup1
+  AuthMethod None
+  AuthGroup None
+  UseDigest Auto
+  ReadOnly No
+  ReplicationFactor 3
+  ConsistencyFactor 2
+  UnitType Disk
+  UnitOnline Yes
+  BlockLength 512
+  QueueDepth 32
+  Luworkers 6
+  UnitInquiry "CloudByte" "iscsi" "0" "4059aab98f093c5d95207f7af09d1413"
+  PhysRecordLength 4096
+  LUN0 Storage /tmp/cstor/vol1 5G 32k
+  LUN0 Option Unmap Disable
+  LUN0 Option WZero Disable
+  LUN0 Option ATS Disable
+  LUN0 Option XCOPY Disable"	>> /usr/local/etc/istgt/istgt.conf
+
+	$ISTGTCONTROL refresh
+
+	sleep 10
+
+	kill -9 $replica1_pid $replica2_pid $replica3_pid
+	rm -rf ${replica1_vdev}* ${replica2_vdev}* ${replica3_vdev}*
+	stop_istgt
+
+	cat /var/log/syslog | grep "is ready for IOs now" > /dev/null 2>&1
+	if [ $? -eq 0 ]; then
+		echo "lun refresh passed"
+	else
+		echo "lun refresh failed"
+		cat /var/log/syslog
+		exit 1
+	fi
+}
+
+run_lu_add_test
 run_data_integrity_test
 run_mempool_test
 run_istgt_integration

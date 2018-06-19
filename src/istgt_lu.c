@@ -1782,16 +1782,6 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 		lu->blocklen = (int) strtol(val, NULL, 10);
 	}
 
-	for (i = 0; i < lu->replication_factor; i++) {
-		val = istgt_get_nmval(sp, "ReplicaID", 0, i);
-		if (val == NULL) {
-			ISTGT_ERRLOG("Invalid ReplicaId for replica %d\n", i);
-			goto error_return;
-		} else {
-			lu->replica_id[i] = strtoul(val, NULL, 10);
-		}
-	}
-
 	lu->rshift = 0;
 	lu->recordsize = lu->blocklen; //old volumes
 	val = istgt_get_val(sp, "PhysRecordLength");
