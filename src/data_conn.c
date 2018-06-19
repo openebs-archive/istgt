@@ -224,6 +224,8 @@ respond_with_error_for_all_outstanding_ios(replica_t *r)
 
 	ASSERT(r->data_eventfd == -1);
 
+	ASSERT(r->data_eventfd == -1);
+
 	while ((rcmd = dequeue_replica_cmdq(r)) != NULL)
 		move_to_blocked_or_ready_q(r, rcmd);
 
