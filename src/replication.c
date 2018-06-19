@@ -34,6 +34,8 @@ rte_smempool_t rcommon_cmd_mempool;
 size_t rcmd_mempool_count = RCMD_MEMPOOL_ENTRIES;
 size_t rcommon_cmd_mempool_count = RCOMMON_CMD_MEMPOOL_ENTRIES;
 
+int replication_initialized = 0;
+
 static int start_rebuild(void *buf, replica_t *replica, uint64_t data_len);
 static void handle_mgmt_conn_error(replica_t *r, int sfd, struct epoll_event *events,
     int ev_count);
@@ -1473,7 +1475,7 @@ accept_mgmt_conns(int epfd, int sfd)
 {
 	struct epoll_event event;
 	int rc, rcount=0;
-	spec_t *spec;
+	spec_t *spec = NULL;
 	int mgmt_fd;
 	mgmt_event_t *mevent1, *mevent2;
 
@@ -1518,6 +1520,13 @@ accept_mgmt_conns(int epfd, int sfd)
                 }
                 MTX_UNLOCK(&specq_mtx);
 
+		if (!spec) {
+			REPLICA_ERRLOG("Spec is not configured\n");
+			shutdown(mgmt_fd, SHUT_RDWR);
+			close(mgmt_fd);
+			continue;
+		}
+
 		/*
 		 * As of now, we are supporting single spec_t per target
 		 * So, we can assign spec to replica here.
@@ -1529,6 +1538,7 @@ accept_mgmt_conns(int epfd, int sfd)
 		if (!replica) {
 			REPLICA_ERRLOG("Failed to create replica for fd(%d) "
 			    "closing it..", mgmt_fd);
+			shutdown(mgmt_fd, SHUT_RDWR);
 			close(mgmt_fd);
 			continue;
 		}
@@ -1580,6 +1590,7 @@ cleanup:
 				TAILQ_REMOVE(&spec->rwaitq, replica, r_waitnext);
 				MTX_UNLOCK(&spec->rq_mtx);
 			}
+			shutdown(mgmt_fd, SHUT_RDWR);
 			close(mgmt_fd);
 			continue;
 		}
@@ -1851,6 +1862,7 @@ void
 close_fd(int epollfd, int fd)
 {
 	int rc;
+	(void)rc;
 	rc = epoll_ctl(epollfd, EPOLL_CTL_DEL, fd, NULL);
 	ASSERT0(rc);
 
@@ -2421,6 +2433,27 @@ init_replication(void *arg __attribute__((__unused__)))
 	events = calloc(MAXEVENTS, sizeof(event));
 	timeout = replica_poll_time * 1000;
 	clock_gettime(CLOCK_MONOTONIC, &last);
+
+#ifdef	DEBUG
+	/*
+	 * This is added to test istgtcontrol execution path if
+	 * replication module is not initialized
+	 */
+	const char* replication_delay = getenv("ReplicationDelay");
+	unsigned int seconds = 0;
+	if (replication_delay) {
+		seconds = (unsigned int)strtol(replication_delay, NULL, 10);
+		fprintf(stderr, "sleep in replication module for %d seconds\n",
+		    seconds);
+		sleep(seconds);
+	}
+#endif
+
+	/*
+	 * we have successfully initialized replication module.
+	 * we can change value of replication_initialized to 1.
+	 */
+	replication_initialized = 1;
 
 	while (1) {
 		//Wait for management connections(on sfd) and management commands(on mgmt_rfds[]) from replicas
