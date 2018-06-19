@@ -2329,6 +2329,21 @@ init_replication(void *arg __attribute__((__unused__)))
 	timeout = replica_poll_time * 1000;
 	clock_gettime(CLOCK_MONOTONIC, &last);
 
+#ifdef	DEBUG
+	/*
+	 * This is added to test istgtcontrol execution path if
+	 * replication module is not initialized
+	 */
+	const char* replication_delay = getenv("ReplicationDelay");
+	unsigned int seconds = 0;
+	if (replication_delay) {
+		seconds = (unsigned int)strtol(replication_delay, NULL, 10);
+		fprintf(stderr, "sleep in replication module for %d seconds\n",
+		    seconds);
+		sleep(seconds);
+	}
+#endif
+
 	/*
 	 * we have successfully initialized replication module.
 	 * we can change value of replication_initialized to 1.

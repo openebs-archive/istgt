@@ -266,7 +266,23 @@ run_read_consistency_test ()
 	local device_file="/root/device_file"
 	local w_pid
 
+	# Test to check if replication module is not initialized then
+	# istgtcontrol should return an error
+	export ReplicationDelay=40
 	setup_test_env
+	sleep 2
+	istgtcontrol status >/dev/null  2>&1
+	if [ $? -ne 0 ]; then
+		echo "ISTGTCONTROL returned error as replication module not initialized"
+	else
+		echo "ISTGTCONTROL returned success .. something went wrong"
+		stop_istgt
+		exit 1
+	fi
+
+	unset ReplicationDelay
+
+	sleep 60
 	rm -rf $file_name $device_file
 
 	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev &
