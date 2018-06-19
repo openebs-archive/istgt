@@ -526,6 +526,20 @@ handle_write(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 	zio_cmd->buf = NULL;
 }
 
+static void
+handle_sync(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
+{
+	int rc;
+	uint64_t nbytes = 0;
+	zvol_io_hdr_t *hdr = &(zio_cmd->hdr);
+	uint8_t *data = zio_cmd->buf;
+
+	hdr->status = ZVOL_OP_STATUS_OK;
+	if (zio_cmd->buf)
+		free(zio_cmd->buf);
+	zio_cmd->buf = NULL;
+}
+
 /*
  * This thread takes IOs from io_recv_list, executes them, and,
  * adds responses to io_send_list
@@ -536,7 +550,7 @@ mock_repl_io_worker(void *args)
 	rargs_t *rargs = (rargs_t *)args;
 	zvol_io_cmd_t *zio_cmd;
 	zvol_io_hdr_t *hdr;
-	int read_count = 0, write_count = 0;
+	int read_count = 0, write_count = 0, sync_count = 0;
 	struct timespec now, prev;
 
 	snprintf(tinfo, 50, "mockiowork%d", rargs->replica_port);
@@ -570,6 +584,10 @@ mock_repl_io_worker(void *args)
 				handle_write(rargs, zio_cmd);
 				write_count++;
 				break;
+			case ZVOL_OPCODE_SYNC:
+				handle_sync(rargs, zio_cmd);
+				sync_count++;
+				break;
 			default:
 				break;
 		}
@@ -577,7 +595,8 @@ mock_repl_io_worker(void *args)
 		clock_gettime(CLOCK_MONOTONIC, &now);
 		if (now.tv_sec - prev.tv_sec > 1) {
 			prev = now;
-			REPLICA_ERRLOG("read %d wrote %d from %s\n", read_count, write_count, tinfo);
+			REPLICA_LOG("read %d wrote %d sync %d from %s\n",
+			    read_count, write_count, sync_count, tinfo);
 		}
 		MTX_LOCK(&rargs->io_send_mtx);
 		TAILQ_INSERT_TAIL(&rargs->io_send_list, zio_cmd, next);

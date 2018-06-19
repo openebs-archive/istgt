@@ -29,31 +29,43 @@ void *reader(void *args);
 void *mgmt_thrd(void *args);
 void *writer(void *args);
 void check_settings(spec_t *spec);
-static void build_cmd(cargs_t *cargs, ISTGT_LU_CMD_Ptr lu_cmd, int opcode,
+static void build_cmd(cargs_t *cargs, ISTGT_LU_CMD_Ptr lu_cmd, SBC_OPCODE opcode,
     int len);
 
 cargs_t *all_cargs;
 pthread_t *all_cthreads;
 
 static void
-build_cmd(cargs_t *cargs, ISTGT_LU_CMD_Ptr cmd, int opcode,
+build_cmd(cargs_t *cargs, ISTGT_LU_CMD_Ptr cmd, SBC_OPCODE opcode,
     int len)
 {
 	char *buf;
 	int i;
 
 	cmd->luworkerindx = cargs->workerid;
-	if (opcode == 0) {
-		buf = xmalloc(len);
-		for (i = 0; i < len; i++)
-			buf[i] = random() % 200;
-		cmd->cdb0 = SBC_WRITE_16;
-		cmd->iobuf[0].iov_base = buf;
-		cmd->iobuf[0].iov_len = len;
-		cmd->iobufsize = len;
-	} else {
-		cmd->cdb0 = SBC_READ_16;
-		cmd->iobufsize = len;
+	switch(opcode) {
+		case SBC_WRITE_16:
+			buf = xmalloc(len);
+			for (i = 0; i < len; i++)
+				buf[i] = random() % 200;
+			cmd->cdb0 = SBC_WRITE_16;
+			cmd->iobuf[0].iov_base = buf;
+			cmd->iobuf[0].iov_len = len;
+			cmd->iobufsize = len;
+			break;
+
+		case SBC_READ_16:
+			cmd->cdb0 = SBC_READ_16;
+			cmd->iobufsize = len;
+			break;
+
+		case SBC_SYNCHRONIZE_CACHE_16:
+			cmd->cdb0 = SBC_SYNCHRONIZE_CACHE_16;
+			cmd->iobufsize = 0;
+			break;
+
+		default:
+			break;
 	}
 }
 
@@ -88,6 +100,7 @@ writer(void *args)
 	pthread_mutex_t *mtx = cargs->mtx;
 	pthread_cond_t *cv = cargs->cv;
 	int *cnt = cargs->count;
+	SBC_OPCODE opcode; 
 
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	srandom(now.tv_sec);
@@ -104,12 +117,18 @@ writer(void *args)
 	while (1) {
 		check_settings(spec);
 
+		opcode = SBC_WRITE_16; 
 		blk_offset = random() % num_blocks;
 		offset = blk_offset * blklen;
 		len_in_blocks = random() % 15;
 		len = len_in_blocks * blklen;
 
-		build_cmd(cargs, lu_cmd, 0, len);
+		if ((random() % 200) == 0) {
+			opcode = SBC_SYNCHRONIZE_CACHE_16;
+			len = 0;
+		}
+
+		build_cmd(cargs, lu_cmd, opcode, len);
 
 		rc = replicate(spec, lu_cmd, offset, len);
 		if (rc != len)
@@ -154,6 +173,7 @@ reader(void *args)
 	pthread_mutex_t *mtx = cargs->mtx;
 	pthread_cond_t *cv = cargs->cv;
 	int *cnt = cargs->count;
+	SBC_OPCODE opcode = SBC_READ_16; 
 
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	srandom(now.tv_sec);
@@ -175,7 +195,7 @@ reader(void *args)
 		len_in_blocks = random() & 15;
 		len = len_in_blocks * blklen;
 
-		build_cmd(cargs, lu_cmd, 1, len);
+		build_cmd(cargs, lu_cmd, opcode, len);
 
 		rc = replicate(spec, lu_cmd, offset, len);
 		if (rc != len)
