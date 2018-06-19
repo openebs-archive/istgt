@@ -60,17 +60,30 @@ int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 		rcomm_cmd = rcmd->rcommq_ptr;				\
 		_cond = rcomm_cmd->cond_var;				\
 		if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE)		\
-			r->replica_inflight_write_io_cnt -= 1;		\
+			__sync_fetch_and_sub(				\
+			    &r->replica_inflight_write_io_cnt, 1); 	\
 		rcomm_cmd->resp_list[idx].io_resp_hdr.status =		\
 		    ZVOL_OP_STATUS_FAILED;				\
 		rcomm_cmd->resp_list[idx].data_ptr = NULL;		\
-		rcomm_cmd->resp_list[idx].status |= RECEIVED_ERR;	\
-		REPLICA_DEBUGLOG("error set for command(%lu) for "	\
-		    "replica(%s:%d)\n", rcomm_cmd->io_seq, r->ip,	\
-		    r->port);						\
-		if (rcomm_cmd->state != CMD_EXECUTION_DONE)		\
-			pthread_cond_signal(_cond);			\
+		/*							\
+		 * cleanup_deadlist thread performs cleanup of 		\
+		 * rcomm_cmd. if the response from all replica is 	\
+		 * received. Since we are avoiding locking for 		\
+		 * rcomm_cmd, we will update response status in 	\
+		 * rcomm_cmd at last.					\
+		 */							\
 		(rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) ? ++_w : ++_r;	\
+		if (rcomm_cmd->state != CMD_EXECUTION_DONE) {		\
+			rcomm_cmd->resp_list[idx].status |= 		\
+			    RECEIVED_ERR;				\
+			pthread_cond_signal(_cond);			\
+		} else {						\
+			REPLICA_DEBUGLOG("error set for command(%lu)"	\
+			    " for replica(%lu)\n",			\
+			    rcomm_cmd->io_seq, r->zvol_guid);		\
+			rcomm_cmd->resp_list[idx].status |= 		\
+			    RECEIVED_ERR;				\
+		}							\
 		free(rcmd->iov_data);					\
 		put_to_mempool(&rcmd_mempool, rcmd);			\
 		rcmd = next_rcmd;					\
@@ -149,9 +162,6 @@ move_to_blocked_or_ready_q(replica_t *r, rcmd_t *cmd)
 {
 	bool cmd_blocked = false;
 	rcmd_t *pending_rcmd;
-
-	if (cmd->opcode == ZVOL_OPCODE_WRITE)
-		r->replica_inflight_write_io_cnt += 1;
 
 	if (!TAILQ_EMPTY(&r->blockedq)) {
 		clock_gettime(CLOCK_MONOTONIC, &cmd->queued_time);
@@ -262,12 +272,14 @@ handle_data_conn_error(replica_t *r)
 		MTX_UNLOCK(&spec->rq_mtx);
 		return -1;
 	}
+
 	TAILQ_REMOVE(&spec->rq, r, r_next);
 
 	if (r->state == ZVOL_STATUS_HEALTHY)
 		spec->healthy_rcount--;
 	else if (r->state == ZVOL_STATUS_DEGRADED)
 		spec->degraded_rcount--;
+
 	update_volstate(r->spec);
 
 	mgmt_eventfd2 = r->mgmt_eventfd2;
@@ -519,12 +531,20 @@ start:
 		rcomm_cmd->resp_list[idx].io_resp_hdr = *(r->io_resp_hdr);
 		rcomm_cmd->resp_list[idx].data_ptr = r->ongoing_io_buf;
 		if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE)
-			r->replica_inflight_write_io_cnt -= 1;
-		rcomm_cmd->resp_list[idx].status |= RECEIVED_OK;
+			__sync_fetch_and_sub(&r->replica_inflight_write_io_cnt,
+			    1);
 
+		/*
+		 * cleanup_deadlist thread performs cleanup of rcomm_cmd.
+		 * if the response from all replica is received. Since we are
+		 * avoiding locking for rcomm_cmd, we will update response
+		 * status in rcomm_cmd at last.
+		 */
 		if (rcomm_cmd->state != CMD_EXECUTION_DONE) {
+			rcomm_cmd->resp_list[idx].status |= RECEIVED_OK;
 			pthread_cond_signal(cond_var);
-		}
+		} else
+			rcomm_cmd->resp_list[idx].status |= RECEIVED_OK;
 
 		free(r->ongoing_io->iov_data);
 		put_to_mempool(&rcmd_mempool, r->ongoing_io);
@@ -585,18 +605,18 @@ replica_thread(void *arg)
 
 	snprintf(tinfo, sizeof tinfo, "r#%d.%lu", (int)(((uint64_t *)self)[0]), r->zvol_guid);
 
-	r->data_eventfd = r_data_eventfd = eventfd(0, EFD_NONBLOCK);
+	r_data_eventfd = eventfd(0, EFD_NONBLOCK);
 	if (r_data_eventfd < 0) {
 		REPLICA_ERRLOG("error for replica(%s:%d) data_eventfd:%d\n",
 		    r->ip, r->port, r_data_eventfd);
 		return NULL;
 	}
 
-	r->epollfd = r_epollfd = epoll_create1(0);
+	r_epollfd = epoll_create1(0);
 	if (r_epollfd < 0) {
 		REPLICA_ERRLOG("epoll_create error for replica(%s:%d) "
-		    "err(%d)\n", r->ip, r->port, errno);
-		return NULL;
+		    "errno(%d)\n", r->ip, r->port, errno);
+		goto initialize_error;
 	}
 
 	ev.events = EPOLLIN;
@@ -604,34 +624,60 @@ replica_thread(void *arg)
 	if (epoll_ctl(r_epollfd, EPOLL_CTL_ADD, r_data_eventfd, &ev) == -1) {
 		REPLICA_ERRLOG("epoll error for replica(%s:%d) err(%d)\n",
 		    r->ip, r->port, errno);
-		return NULL;
+		goto initialize_error;
 	}
 
-	r->mgmt_eventfd2 = r_mgmt_eventfd = eventfd(0, EFD_NONBLOCK);
+	r_mgmt_eventfd = eventfd(0, EFD_NONBLOCK);
 	if (r_mgmt_eventfd < 0) {
 		REPLICA_ERRLOG("epoll error for replica(%s:%d) err(%d)\n",
 		    r->ip, r->port, errno);
-		return NULL;
+		goto initialize_error;
 	}
 
 	ev.data.fd = r_mgmt_eventfd;
 	if (epoll_ctl(r_epollfd, EPOLL_CTL_ADD, r_mgmt_eventfd, &ev) == -1) {
 		REPLICA_ERRLOG("epoll error for replica(%s:%d) err(%d)\n",
 		    r->ip, r->port, errno);
-		return NULL;
+		goto initialize_error;
 	}
 
-	ev.events = EPOLLIN | EPOLLOUT | EPOLLHUP | EPOLLERR | EPOLLET | EPOLLRDHUP;
+	ev.events = EPOLLIN | EPOLLOUT | EPOLLHUP | EPOLLERR | EPOLLET |
+	    EPOLLRDHUP;
 	ev.data.ptr = NULL;
 
 	MTX_LOCK(&r->r_mtx);
+
 	if ((r->iofd == -1) ||
 	    (epoll_ctl(r_epollfd, EPOLL_CTL_ADD, r->iofd, &ev) == -1)) {
 		MTX_UNLOCK(&r->r_mtx);
 		REPLICA_ERRLOG("epoll error for replica(%s:%d) err(%d)\n",
 		    r->ip, r->port, errno);
+initialize_error:
+		close(r->mgmt_eventfd2);
+		r->mgmt_eventfd2 = -1;
+
+		if ((r_epollfd > 0) && (r_data_eventfd > 0)) {
+			/*
+			 * epoll_ctl may fail so we are ignoring return
+			 * value of epoll_ctl
+			 */
+			(void) epoll_ctl(r_epollfd, EPOLL_CTL_DEL,
+			    r_data_eventfd, NULL);
+			close(r_epollfd);
+			r->epollfd = -1;
+		}
+
+		if (r_data_eventfd) {
+			close(r_data_eventfd);
+			r->data_eventfd = -1;
+		}
 		return NULL;
 	}
+
+	r->data_eventfd = r_data_eventfd;
+	r->epollfd = r_epollfd;
+	r->mgmt_eventfd2 = r_mgmt_eventfd;
+
 	MTX_UNLOCK(&r->r_mtx);
 
 	prctl(PR_SET_NAME, "replica", 0, 0, 0);

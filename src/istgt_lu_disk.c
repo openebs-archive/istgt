@@ -5675,10 +5675,6 @@ freeiovcnt:
 			sleep(8);
 		}
 
-	MTX_LOCK(&spec->rq_mtx);
-	spec->inflight_write_io_cnt += 1;
-	MTX_UNLOCK(&spec->rq_mtx);
-
 	timediffw(lu_cmd, 'w');
 	if (spec->wzero && nthbitset == nbits) {
 		msg = "wzero";
@@ -5721,10 +5717,6 @@ freeiovcnt:
 		}
 #endif
 	}
-
-	MTX_LOCK(&spec->rq_mtx);
-	spec->inflight_write_io_cnt -= 1;
-	MTX_UNLOCK(&spec->rq_mtx);
 
 	lu_cmd->iobufsize = 0;
 	lu_cmd->iobufindx = -1;

@@ -87,13 +87,14 @@ typedef struct rargs_s {
 
 	zvol_status_t 	zrepl_status;
 	zvol_rebuild_status_t zrepl_rebuild_status;
-	
+
+	uint64_t write_cnt;	
+	uint64_t destroy_snap_ioseq;
 	int rebuild_status_enquiry;
 	/* flag to stop replica threads once this is set to 1 */
 	int kill_replica;
 	int kill_is_over;
 } rargs_t;
-
 
 typedef struct zvol_io_cmd_s {
 	TAILQ_ENTRY(zvol_io_cmd_s) next;
@@ -116,6 +117,8 @@ zio_cmd_alloc(zvol_io_hdr_t *hdr)
 	    (hdr->opcode == ZVOL_OPCODE_HANDSHAKE) ||
 	    (hdr->opcode == ZVOL_OPCODE_REPLICA_STATUS) ||
 	    (hdr->opcode == ZVOL_OPCODE_OPEN) ||
+	    (hdr->opcode == ZVOL_OPCODE_SNAP_CREATE) ||
+	    (hdr->opcode == ZVOL_OPCODE_SNAP_DESTROY) ||
 	    (hdr->opcode == ZVOL_OPCODE_STATS) ||
 	    (hdr->opcode == ZVOL_OPCODE_START_REBUILD) ||
 	    (hdr->opcode == ZVOL_OPCODE_PREPARE_FOR_REBUILD)) {
@@ -204,6 +207,68 @@ handle_replica_start_rebuild(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 	hdr->len = 0;
 	zio_cmd->buf = NULL;
 	hdr->status = ZVOL_OP_STATUS_OK;
+}
+
+/* Handle SNAP commands */
+static void
+handle_snap_opcode(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
+{
+	zvol_io_hdr_t *hdr = &(zio_cmd->hdr);
+	uint64_t write_cnt1, write_cnt2;
+
+	if (strchr(zio_cmd->buf, '@') == NULL) {
+		REPLICA_ERRLOG("no @ in buf %s\n", (char *)zio_cmd->buf);
+		exit(1);
+	}
+
+	if (strncmp(zio_cmd->buf, rargs->volname, strlen(rargs->volname)) != 0) {
+		REPLICA_ERRLOG("name mismatch %s %s\n", (char *)zio_cmd->buf, rargs->volname);
+		exit(1);
+	}
+
+	if (hdr->opcode == ZVOL_OPCODE_SNAP_DESTROY) {
+		if (rargs->destroy_snap_ioseq != 0) {
+			if (hdr->io_seq != rargs->destroy_snap_ioseq) {
+				REPLICA_ERRLOG("writes happened during snapshot..\n");
+				exit(1);
+			}
+			rargs->destroy_snap_ioseq = 0;
+		}
+		goto send_response;
+	}
+	/* expectation of snap destroy due to prev failue, but, snap create opcode */
+	if (rargs->destroy_snap_ioseq != 0) {
+		REPLICA_ERRLOG("destroy_snap_ioseq should have been emtpy\n");
+		exit(1);
+	}
+	if (rargs->zrepl_status != ZVOL_STATUS_HEALTHY) {
+		REPLICA_ERRLOG("replica not healthy %d\n", rargs->zrepl_status);
+		exit(1);
+	}
+
+	write_cnt1 = rargs->write_cnt;
+	sleep(1);
+	write_cnt2 = rargs->write_cnt;
+
+	if (write_cnt1 != write_cnt2) {
+		REPLICA_ERRLOG("writes still happening %lu %lu %lu\n", write_cnt1, write_cnt2, hdr->io_seq);
+		/*
+		 * Write IOs still happening, so, destroy snap
+		 * should come with same io_seq
+		 */
+		rargs->destroy_snap_ioseq = hdr->io_seq;
+	}
+
+send_response:
+	if (zio_cmd->buf)
+		free(zio_cmd->buf);
+	zio_cmd->buf = NULL;
+	hdr->len = 0;
+
+	if ((random() % 10) == 0)
+		hdr->status = ZVOL_OP_STATUS_FAILED;
+	else
+		hdr->status = ZVOL_OP_STATUS_OK;
 }
 
 static void
@@ -501,6 +566,7 @@ mock_repl_io_worker(void *args)
 				read_count++;
 				break;
 			case ZVOL_OPCODE_WRITE:
+				rargs->write_cnt++;
 				handle_write(rargs, zio_cmd);
 				write_count++;
 				break;
@@ -556,6 +622,10 @@ mock_repl_mgmt_worker(void *args)
 			case ZVOL_OPCODE_HANDSHAKE:
 			case ZVOL_OPCODE_PREPARE_FOR_REBUILD:
 				handle_handshake(rargs, zio_cmd);
+				break;
+			case ZVOL_OPCODE_SNAP_CREATE:
+			case ZVOL_OPCODE_SNAP_DESTROY:
+				handle_snap_opcode(rargs, zio_cmd);
 				break;
 			case ZVOL_OPCODE_REPLICA_STATUS:
 				handle_replica_status(rargs, zio_cmd);
@@ -1101,7 +1171,6 @@ rebuild_test(void *arg)
 exit:
 	return NULL;
 }
-
 
 int
 main(int argc, char **argv)
