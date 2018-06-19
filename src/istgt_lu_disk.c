@@ -749,6 +749,10 @@ error_return:
 static int
 istgt_lu_disk_allocate_raw(ISTGT_LU_DISK *spec)
 {
+#ifdef	REPLICATION
+	return 0;
+#endif
+
 	uint8_t *data;
 	uint64_t fsize;
 	uint64_t size;
