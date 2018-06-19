@@ -23,6 +23,9 @@ vboxinc="/usr/local/src/virtualbox/*/include"
 vboxlib="/usr/local/lib/virtualbox"
 AC_SUBST([rctemplate], [""])
 AC_SUBST([rcdir], ['${prefix}/etc/rc.d'])
+AC_SUBST([target_source_files], ['${istgt_source}'])
+AC_SUBST([target_header_files], ['${istgt_header}'])
+
 AC_CANONICAL_HOST
 case "$host_os" in
 *linux*)
@@ -179,8 +182,14 @@ AC_MSG_CHECKING([whether to enable replication mode])
 AC_ARG_ENABLE([replication],
   AS_HELP_STRING([--enable-replication], [enable replication feature]),
   AC_MSG_RESULT(yes); AC_DEFINE([REPLICATION], 1, [Define if enable replication])
-  LIBS="$LIBS -lm",
-  AC_MSG_RESULT(no))
+  LIBS="$LIBS -lm"
+  AC_SUBST([target_source_files], ['${istgt_source} ${replication_source}'])
+  AC_SUBST([target_header_files], ['${istgt_header} ${replication_header}'])
+  AC_MSG_NOTICE([fetching zrepl_prot.h file...])
+  AC_SUBST([replication_bin], ['istgt_integration replication_test mempool_test'])
+  AS_IF([$( wget -O src/zrepl_prot.h https://raw.githubusercontent.com/openebs/zfs/zfs-0.7-release/include/zrepl_prot.h >> /dev/null 2>&1 )], , [AC_MSG_ERROR([failed to fetch zrepl_prot.h])]),
+  AC_MSG_RESULT(no)
+  AC_SUBST([replication_bin], ['']))
 AC_SUBST([REPLICATION])
 
 AC_MSG_CHECKING([whether to use symlink device])

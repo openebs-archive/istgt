@@ -72,7 +72,9 @@
 #include "istgt_iscsi.h"
 #include "istgt_lu.h"
 #include "istgt_proto.h"
+#ifdef	REPLICATION
 #include "istgt_integration.h"
+#endif
 #include "istgt_misc.h"
 
 #include <sys/time.h>
@@ -89,7 +91,9 @@
 #define PORTNUMLEN 32
 
 ISTGT g_istgt;
+#ifdef	REPLICATION
 extern int replica_timeout;
+#endif
 
 /*
  * Global - number of luworker threads per lun
@@ -2583,7 +2587,9 @@ usage(void)
 	printf(" -H         show this usage\n");
 	printf(" -V         show version\n");
 	printf(" -P         Persist Disabled\n");
+#ifdef	REPLICATION
 	printf(" -R         IO timeout in seconds at replicas in seconds\n");
+#endif
 }
 
 #if 0
@@ -2623,6 +2629,7 @@ void *timerfn(void *ptr __attribute__((__unused__)))
 	ISTGT_QUEUE backupconns;
 	istgt_queue_init(&backupconns);
 	CONN *conn;
+#ifdef	REPLICATION
 	spec_t *spec;
 	ISTGT_LU_TASK_Ptr lu_task;
 	ISTGT_LU_CMD_Ptr lu_cmd;
@@ -2630,6 +2637,7 @@ void *timerfn(void *ptr __attribute__((__unused__)))
 	struct timespec now, diff, last_check;
 	int check_interval = (replica_timeout / 4) * 1000;
 	clock_gettime(clockid, &last_check);
+#endif
 
 	while(1)
 	{
@@ -2643,6 +2651,7 @@ void *timerfn(void *ptr __attribute__((__unused__)))
 		while((conn = (CONN *)(istgt_queue_dequeue(&backupconns))) != NULL)
 			istgt_queue_enqueue(&closedconns, conn);
 
+#ifdef	REPLICATION
 		clock_gettime(clockid, &now);
 		timesdiff(clockid, last_check, now, diff);
 		ms = diff.tv_sec * 1000;
@@ -2682,6 +2691,7 @@ void *timerfn(void *ptr __attribute__((__unused__)))
 			MTX_UNLOCK(&specq_mtx);
 			clock_gettime(clockid, &last_check);
 		}
+#endif
 
 		sleep(60);
 	}
@@ -2698,19 +2708,22 @@ main(int argc, char **argv)
 	const char *logfacility = NULL;
 	const char *logpriority = NULL;
 	CONFIG *config;
-	#if 0
+#if 0
 	pthread_t sigthread;
 	struct sigaction sigact, sigoldact_pipe, sigoldact_int, sigoldact_term;
 	struct sigaction sigoldact_hup, sigoldact_info;
 	struct sigaction sigoldact_wakeup, sigoldact_io;
 	sigset_t signew, sigold;
 	int retry = 10;
-	#endif
-	pthread_t timerthread, replication_thread;
+#endif
+	pthread_t timerthread;
 	int detach = 1;
 	int swmode;
 	int ch;
 	int rc;
+#ifdef	REPLICATION
+	pthread_t replication_thread;
+#endif
 
 	send_abrt_resp = 0;
 	abort_result_queue = 0;
@@ -2742,7 +2755,11 @@ main(int argc, char **argv)
 	pthread_set_name_np(pthread_self(), tinfo);
 #endif
 
+#ifdef	REPLICATION
 	while ((ch = getopt(argc, argv, "c:p:l:m:t:N:qDHVFOPR:")) != -1) {
+#else
+	while ((ch = getopt(argc, argv, "c:p:l:m:t:N:qDHVFOP")) != -1) {
+#endif
 		switch (ch) {
 		case 'c':
 			config_file = optarg;
@@ -2830,6 +2847,7 @@ main(int argc, char **argv)
 		case 'P':
 			persist = 0;
 			break;
+#ifdef	REPLICATION
 		case 'R':
                         replica_timeout = strtol(optarg, NULL, 10);
 			if (replica_timeout <= 0) {
@@ -2838,6 +2856,7 @@ main(int argc, char **argv)
 				exit(EXIT_FAILURE);
 			}
 			break;
+#endif
 		case 'H':
 		default:
 			usage();
@@ -2914,6 +2933,7 @@ main(int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 
+#ifdef	REPLICATION
 	/* Initialize mempool needed for replication*/
 	if (initialize_replication_mempool(false)) {
 		ISTGT_ERRLOG("Failed to initialize mempool\n");
@@ -2926,12 +2946,15 @@ main(int argc, char **argv)
 		ISTGT_ERRLOG("initialize_replication() failed\n");
 		goto initialize_error;
 	}
-        rc = pthread_create(&replication_thread, &istgt->attr, &init_replication,
-                        (void *)NULL);
-        if (rc != 0) {
-                ISTGT_ERRLOG("pthread_create(replication_thread) failed\n");
+
+	rc = pthread_create(&replication_thread, &istgt->attr, &init_replication,
+	    (void *)NULL);
+	if (rc != 0) {
+		ISTGT_ERRLOG("pthread_create(replication_thread) failed\n");
 		goto initialize_error;
-        }
+	}
+#endif
+
 	rc = istgt_lu_init(istgt);
 	if (rc < 0) {
 		ISTGT_ERRLOG("istgt_lu_init() failed\n");
@@ -3156,8 +3179,10 @@ main(int argc, char **argv)
 	istgt_shutdown(istgt);
 	istgt_close_log();
 
+#ifdef	REPLICATION
 	/* Destroy mempool created for replication */
 	(void)destroy_replication_mempool();
+#endif
 
 	config = istgt->config;
 	istgt->config = NULL;
