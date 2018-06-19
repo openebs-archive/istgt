@@ -1,7 +1,9 @@
 #ifndef	_REPLICATION_ASSERT_H
 #define	_REPLICATION_ASSERT_H
 
+#ifdef	REPLICATION
 #include <replication.h>
+#endif
 #include <assert.h>
 
 /*

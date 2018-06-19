@@ -10,8 +10,16 @@ before_install:
     - sudo unlink /usr/bin/gcc && sudo ln -s /usr/bin/gcc-6 /usr/bin/gcc
     - sudo unlink /usr/bin/g++ && sudo ln -s /usr/bin/g++-6 /usr/bin/g++
 install:
+    - ./autogen.sh
+    # we are running build two times. One is without replication code and
+    # another one is with replication code. The reason behind running build
+    # without replication code is to make sure that replication feature
+    # related code doesn't break the existing target code.
+    - ./configure
+    - make
+    - make clean
     - ./configure --enable-debug --enable-replication
-    - sudo make
+    - make
 script:
     # run ztest and test supported zio backends
     - sudo bash ./print_debug_info.sh &
