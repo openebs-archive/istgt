@@ -12,6 +12,7 @@
 #include "istgt_integration.h"
 #include "istgt_scsi.h"
 #include "istgt_misc.h"
+#include "istgt_proto.h"
 #include "replication_misc.h"
 
 typedef struct cargs_s {
@@ -25,33 +26,46 @@ typedef struct cargs_s {
 
 void create_mock_client(spec_t *);
 void *reader(void *args);
+void *mgmt_thrd(void *args);
 void *writer(void *args);
 void check_settings(spec_t *spec);
-static void build_cmd(cargs_t *cargs, ISTGT_LU_CMD_Ptr lu_cmd, int opcode,
+static void build_cmd(cargs_t *cargs, ISTGT_LU_CMD_Ptr lu_cmd, SBC_OPCODE opcode,
     int len);
 
 cargs_t *all_cargs;
 pthread_t *all_cthreads;
 
 static void
-build_cmd(cargs_t *cargs, ISTGT_LU_CMD_Ptr cmd, int opcode,
+build_cmd(cargs_t *cargs, ISTGT_LU_CMD_Ptr cmd, SBC_OPCODE opcode,
     int len)
 {
 	char *buf;
 	int i;
 
 	cmd->luworkerindx = cargs->workerid;
-	if (opcode == 0) {
-		buf = xmalloc(len);
-		for (i = 0; i < len; i++)
-			buf[i] = random() % 200;
-		cmd->cdb0 = SBC_WRITE_16;
-		cmd->iobuf[0].iov_base = buf;
-		cmd->iobuf[0].iov_len = len;
-		cmd->iobufsize = len;
-	} else {
-		cmd->cdb0 = SBC_READ_16;
-		cmd->iobufsize = len;
+	switch(opcode) {
+		case SBC_WRITE_16:
+			buf = xmalloc(len);
+			for (i = 0; i < len; i++)
+				buf[i] = random() % 200;
+			cmd->cdb0 = SBC_WRITE_16;
+			cmd->iobuf[0].iov_base = buf;
+			cmd->iobuf[0].iov_len = len;
+			cmd->iobufsize = len;
+			break;
+
+		case SBC_READ_16:
+			cmd->cdb0 = SBC_READ_16;
+			cmd->iobufsize = len;
+			break;
+
+		case SBC_SYNCHRONIZE_CACHE_16:
+			cmd->cdb0 = SBC_SYNCHRONIZE_CACHE_16;
+			cmd->iobufsize = 0;
+			break;
+
+		default:
+			break;
 	}
 }
 
@@ -68,7 +82,7 @@ void check_settings(spec_t *spec)
 
 /*
  * Adds write IOs to replication module
- * Increments '*count' variable to set the completion of reader thread
+ * Increments '*count' variable to set the completion of writer thread
  */
 void *
 writer(void *args)
@@ -86,6 +100,7 @@ writer(void *args)
 	pthread_mutex_t *mtx = cargs->mtx;
 	pthread_cond_t *cv = cargs->cv;
 	int *cnt = cargs->count;
+	SBC_OPCODE opcode; 
 
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	srandom(now.tv_sec);
@@ -102,19 +117,25 @@ writer(void *args)
 	while (1) {
 		check_settings(spec);
 
+		opcode = SBC_WRITE_16; 
 		blk_offset = random() % num_blocks;
 		offset = blk_offset * blklen;
 		len_in_blocks = random() % 15;
 		len = len_in_blocks * blklen;
 
-		build_cmd(cargs, lu_cmd, 0, len);
+		if ((random() % 200) == 0) {
+			opcode = SBC_SYNCHRONIZE_CACHE_16;
+			len = 0;
+		}
+
+		build_cmd(cargs, lu_cmd, opcode, len);
 
 		rc = replicate(spec, lu_cmd, offset, len);
 		if (rc != len)
 			goto end;
 		count++;
 		clock_gettime(CLOCK_MONOTONIC, &now);
-		if (now.tv_sec - start.tv_sec > 10)
+		if (now.tv_sec - start.tv_sec > 120)
 			break;
 		if (now.tv_sec - prev.tv_sec > 1) {
 			prev = now;
@@ -152,6 +173,7 @@ reader(void *args)
 	pthread_mutex_t *mtx = cargs->mtx;
 	pthread_cond_t *cv = cargs->cv;
 	int *cnt = cargs->count;
+	SBC_OPCODE opcode = SBC_READ_16; 
 
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	srandom(now.tv_sec);
@@ -173,7 +195,7 @@ reader(void *args)
 		len_in_blocks = random() & 15;
 		len = len_in_blocks * blklen;
 
-		build_cmd(cargs, lu_cmd, 1, len);
+		build_cmd(cargs, lu_cmd, opcode, len);
 
 		rc = replicate(spec, lu_cmd, offset, len);
 		if (rc != len)
@@ -202,6 +224,57 @@ end:
 	return NULL;
 }
 
+void *
+mgmt_thrd(void *args)
+{
+	cargs_t *cargs = (cargs_t *)args;
+	spec_t *spec = (spec_t *)cargs->spec;
+	int count = 0;
+	pthread_mutex_t *mtx = cargs->mtx;
+	pthread_cond_t *cv = cargs->cv;
+	int *cnt = cargs->count;
+	struct timespec now, start, prev, p;
+	char *snapname;
+	int ret;
+
+	snprintf(tinfo, 50, "clientmgmt%d", cargs->workerid);
+	prctl(PR_SET_NAME, tinfo, 0, 0, 0);
+
+	snapname = malloc(50);
+	strcpy(snapname, "snap1");
+
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	srandom(now.tv_sec);
+
+	clock_gettime(CLOCK_MONOTONIC, &start);
+	clock_gettime(CLOCK_MONOTONIC, &prev);
+	while (1) {
+		clock_gettime(CLOCK_MONOTONIC, &p);
+		ret = istgt_lu_create_snapshot(spec, snapname, random() % 2 + 2,
+		    random() % 2 + 4);
+		clock_gettime(CLOCK_MONOTONIC, &now);
+
+		//REPLICA_LOG("snapshot response: %d time: %ld\n", ret, (now.tv_sec - p.tv_sec));
+		sleep(1);
+		count++;
+		clock_gettime(CLOCK_MONOTONIC, &now);
+		if (now.tv_sec - start.tv_sec > 120)
+			break;
+		if (now.tv_sec - prev.tv_sec > 1) {
+			prev = now;
+			REPLICA_ERRLOG("sent %d from %s\n", count, tinfo);
+		}
+	}
+	REPLICA_ERRLOG("exiting mgmt_thrd %s sent %d\n", tinfo, count);
+
+	MTX_LOCK(mtx);
+	*cnt = *cnt + 1;
+	pthread_cond_signal(cv);
+	MTX_UNLOCK(mtx);
+
+	return NULL;
+}
+
 /*
  * creates client threads that are needed to send read/write IOs to replication module.
  * cargs_t stores details that are sent to reader/writer threads
@@ -211,6 +284,7 @@ void
 create_mock_client(spec_t *spec)
 {
 	int num_threads = 6;
+	int mgmt_threads = 2;
 	int i;
 	cargs_t *cargs;
 	struct timespec now;
@@ -226,8 +300,8 @@ create_mock_client(spec_t *spec)
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	srandom(now.tv_sec);
 
-	all_cargs = (cargs_t *)malloc(sizeof (cargs_t) * num_threads);
-	all_cthreads = (pthread_t *)malloc(sizeof (pthread_t) * num_threads);
+	all_cargs = (cargs_t *)malloc(sizeof (cargs_t) * (num_threads + mgmt_threads));
+	all_cthreads = (pthread_t *)malloc(sizeof (pthread_t) * (num_threads + mgmt_threads));
 
 	for (i = 0; i < num_threads; i++) {
 		cargs = &(all_cargs[i]);
@@ -242,8 +316,18 @@ create_mock_client(spec_t *spec)
 			pthread_create(&all_cthreads[i], NULL, &reader, cargs);
 	}
 
+	for (i = 0; i < mgmt_threads; i++) {
+		cargs = &(all_cargs[num_threads + i]);
+		cargs->workerid = num_threads + i;
+		cargs->spec = spec;
+		cargs->mtx = &mtx;
+		cargs->cv = &cv;
+		cargs->count = &count;
+		pthread_create(&all_cthreads[cargs->workerid], NULL, &mgmt_thrd, cargs);
+	}
+
 	MTX_LOCK(&mtx);
-	while (count != num_threads)
+	while (count != (num_threads + mgmt_threads))
 		pthread_cond_wait(&cv, &mtx);
 	MTX_UNLOCK(&mtx);
 

@@ -1,8 +1,10 @@
 ### Building
 ```bash
 sudo apt-get install libssl-dev docker.io
-./configure --with-replication
-cd src; make clean; make
+./autogen.sh
+./configure --enable-replication
+make clean
+make
 ```
 ### Run target in a container on host network
 Copy istgt.conf file to /tmp/cstor

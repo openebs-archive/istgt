@@ -36,8 +36,10 @@
 #include "istgt.h"
 #include "istgt_queue.h"
 
+#ifdef	REPLICATION
 #include "replication.h"
 #include "ring_mempool.h"
+#endif
 
 #ifdef __linux__
 #include <x86_64-linux-gnu/sys/queue.h>
@@ -747,7 +749,9 @@ typedef struct istgt_lu_disk_t {
 	int lun;
 	int inflight;
 	int persist;
+#ifdef	REPLICATION
 	char *volname;
+#endif
 	int fd;
 	const char *file;
 	const char *disktype;
@@ -760,7 +764,12 @@ typedef struct istgt_lu_disk_t {
 	uint32_t rsize;
 	uint32_t rshift;
 	uint32_t rshiftreal;
+
+#ifdef	REPLICATION
+	/* inflight write IOs in replication layer */
 	uint64_t inflight_write_io_cnt;
+#endif
+
 	uint32_t max_unmap_sectors;
 	struct IO_types IO_size[10];	
 
@@ -904,7 +913,9 @@ typedef struct istgt_lu_disk_t {
 	uint8_t percent_val[32];
 	uint8_t percent_latency[32];
 	uint64_t io_seq;
+#ifdef	REPLICATION
 	int quiesce;
+#endif
 
 	/* entry */
 	int (*open)(struct istgt_lu_disk_t *spec, int flags, int mode);
