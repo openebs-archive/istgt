@@ -312,7 +312,6 @@ istgt_lu_disk_vbox_lun_init(ISTGT_LU_DISK *spec, ISTGT_Ptr istgt __attribute__((
 	memset(exspec, 0, sizeof *exspec);
 	spec->exspec = exspec;
 
-#ifndef	REPLICATION
 	flags = lu->readonly ? O_RDONLY : O_RDWR;
 	rc = spec->open(spec, flags, 0666);
 	if (rc < 0) {
@@ -320,7 +319,6 @@ istgt_lu_disk_vbox_lun_init(ISTGT_LU_DISK *spec, ISTGT_Ptr istgt __attribute__((
 		    spec->num, spec->lun, rc);
 		return -1;
 	}
-#endif
 
 	capacity = VDGetSize(exspec->pDisk, 0);
 	fsize = VDGetFileSize(exspec->pDisk, 0);

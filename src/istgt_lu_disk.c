@@ -404,7 +404,6 @@ istgt_lu_disk_signal_action(ISTGT_LU_Ptr lu, int i, struct timespec *now, istgt_
 	return signal_worker;
 }
 
-#ifndef	REPLICATION
 int
 istgt_lu_disk_close(ISTGT_LU_Ptr lu, int i)
 {
@@ -504,7 +503,6 @@ istgt_lu_disk_close(ISTGT_LU_Ptr lu, int i)
 			_s1.tv_sec, _s1.tv_nsec, _s2.tv_sec, _s2.tv_nsec, _s3.tv_sec, _s3.tv_nsec);
 	return 0;
 }
-#endif
 
 int
 istgt_lu_disk_post_open(ISTGT_LU_DISK *spec)
@@ -1131,14 +1129,12 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 				goto error_return;
 			}
 		} else if (strcasecmp(spec->disktype, "RAW") == 0) {
-#ifndef	REPLICATION
 			spec->open = istgt_lu_disk_open_raw;
 			spec->close = istgt_lu_disk_close_raw;
 			spec->seek = istgt_lu_disk_seek_raw;
 			spec->sync = istgt_lu_disk_sync_raw;
 			spec->allocate = istgt_lu_disk_allocate_raw;
 			spec->setcache = istgt_lu_disk_setcache_raw;
-#endif
 
 			spec->rshift = lu->rshift;
 			spec->blocklen = lu->blocklen;
@@ -1349,7 +1345,6 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 	return 0;
 }
 
-#ifndef	REPLICATION
 int
 istgt_lu_disk_shutdown(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 {
@@ -1545,7 +1540,6 @@ istgt_lu_disk_shutdown(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr
 
 	return 0;
 }
-#endif
 
 void
 istgt_scsi_dump_cdb(uint8_t *cdb)

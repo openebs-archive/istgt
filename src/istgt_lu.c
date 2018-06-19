@@ -3460,13 +3460,11 @@ istgt_lu_shutdown_unit(ISTGT_Ptr istgt, ISTGT_LU_Ptr lu)
 		break;
 
 	case ISTGT_LU_TYPE_DISK:
-#ifndef	REPLICATION
 		rc = istgt_lu_disk_shutdown(istgt, lu);
 		if (rc < 0) {
 			ISTGT_ERRLOG("LU%d: lu_disk_shutdown() failed\n", lu->num);
 			/* ignore error */
 		}
-#endif
 		break;
 
 	case ISTGT_LU_TYPE_DVD:
