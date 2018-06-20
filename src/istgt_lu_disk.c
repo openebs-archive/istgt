@@ -6126,7 +6126,6 @@ istgt_lu_disk_lbwrite_ats(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr l
 	return 0;
 }
 
-#ifndef	REPLICATION
 static int
 istgt_lu_disk_lbsync(ISTGT_LU_DISK *spec, CONN_Ptr conn __attribute__((__unused__)), ISTGT_LU_CMD_Ptr lu_cmd __attribute__((__unused__)), uint64_t lba, uint32_t len)
 {
@@ -6192,7 +6191,6 @@ istgt_lu_disk_lbsync(ISTGT_LU_DISK *spec, CONN_Ptr conn __attribute__((__unused_
 
 	return 0;
 }
-#endif
 
 void
 istgt_lu_scsi_build_sense_data(ISTGT_LU_CMD_Ptr lu_cmd, int sk, int asc, int ascq)
@@ -10247,7 +10245,6 @@ istgt_lu_disk_execute(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 			    "c#%d SYNCHRONIZE_CACHE_10(lba %"PRIu64
 			    ", len %u blocks)\n",
 			    conn->id, lba, len);
-#ifndef	REPLICATION
 			rc = istgt_lu_disk_lbsync(spec, conn, lu_cmd, lba, len);
 			if (rc < 0) {
 				ISTGT_ERRLOG("c#%d lu_disk_lbsync() failed\n", conn->id);
@@ -10257,7 +10254,6 @@ istgt_lu_disk_execute(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 					lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
 				break;
 			}
-#endif
 			lu_cmd->data_len = 0;
 			lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
 			break;
@@ -10283,7 +10279,6 @@ istgt_lu_disk_execute(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 			    "c#%d SYNCHRONIZE_CACHE_10(lba %"PRIu64
 			    ", len %u blocks)\n",
 			    conn->id, lba, len);
-#ifndef	REPLICATION
 			rc = istgt_lu_disk_lbsync(spec, conn, lu_cmd, lba, len);
 			if (rc < 0) {
 				ISTGT_ERRLOG("c#%d lu_disk_lbsync() failed\n", conn->id);
@@ -10293,7 +10288,6 @@ istgt_lu_disk_execute(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 					lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
 				break;
 			}
-#endif
 			lu_cmd->data_len = 0;
 			lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
 			break;

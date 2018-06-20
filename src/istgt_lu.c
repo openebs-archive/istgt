@@ -4226,8 +4226,8 @@ again:
 				} else if (spec->ex_state == ISTGT_LUN_OPEN_PENDING) {
 						do_open = 1;
 				}
-#ifndef	REPLICATION
 				MTX_UNLOCK(&spec->state_mutex);
+#ifndef	REPLICATION
 				if (do_close == 1)
 					rc = istgt_lu_disk_close(spec->lu, spec->lun);
 				if (do_open == 1)
