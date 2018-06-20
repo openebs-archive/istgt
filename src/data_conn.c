@@ -1,6 +1,7 @@
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 #include <sys/prctl.h>
+#include <sys/socket.h>
 #include <stdbool.h>
 #include "istgt.h"
 #include "zrepl_prot.h"
@@ -300,6 +301,7 @@ handle_data_conn_error(replica_t *r)
 
 	fd = r->iofd;
 	r->iofd = -1;
+	shutdown(fd, SHUT_RDWR);
 	close(fd);
 
 	data_eventfd = r->data_eventfd;

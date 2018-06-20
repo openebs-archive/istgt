@@ -3,6 +3,7 @@
 while sleep 30; do
     echo "=====[ $SECONDS seconds still running ]=====";
     ps -auxwww;
-    netstat -nap;
+    netstat -napt;
+    tail /var/log/syslog
     echo "============================================";
 done
