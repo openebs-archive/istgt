@@ -1907,7 +1907,11 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 				file = istgt_get_nmval(sp, buf, j, 1);
 				size = istgt_get_nmval(sp, buf, j, 2);
 				rsz  = istgt_get_nmval(sp, buf, j, 3);
+#ifdef	REPLICATION
+				if (size == NULL) {
+#else
 				if (file == NULL || size == NULL) {
+#endif
 					ISTGT_ERRLOG("LU%d: LUN%d: format error\n", lu->num, i);
 					goto error_return;
 				}
@@ -1936,18 +1940,26 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 					else
 						lu->lun[i].u.storage.rsize = (uint32_t)vall;
 				}
+#ifdef	REPLICATION
+				lu->lun[i].u.storage.size = istgt_lu_parse_size(size);
+#else
 				if ((strcasecmp(size, "Auto") == 0
 				    || strcasecmp(size, "Size") == 0) && istgt->OperationalMode == 0) {
 					lu->lun[i].u.storage.size = istgt_lu_get_filesize(file);
 				} else {
 					lu->lun[i].u.storage.size = istgt_lu_parse_size(size);
 				}
+#endif
 				if (lu->lun[i].u.storage.size == 0) {
 					ISTGT_ERRLOG("LU%d: LUN%d: Auto size error (%s)\n", lu->num, i, file);
 					goto error_return;
 				}
 				lu->lun[i].u.storage.fd = -1;
+#ifdef	REPLICATION
+				lu->lun[i].u.storage.file = NULL;
+#else
 				lu->lun[i].u.storage.file = xstrdup(file);
+#endif
 				gotstorage = 1;
 			} else if (strcasecmp(val, "Removable") == 0) {
 				if (lu->lun[i].type != ISTGT_LU_LUN_TYPE_NONE) {
@@ -2236,7 +2248,8 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 			xfree(lu->lun[i].u.device.file);
 			break;
 		case ISTGT_LU_LUN_TYPE_STORAGE:
-			xfree(lu->lun[i].u.storage.file);
+			if (lu->lun[i].u.storage.file)
+				xfree(lu->lun[i].u.storage.file);
 			break;
 		case ISTGT_LU_LUN_TYPE_REMOVABLE:
 			xfree(lu->lun[i].u.removable.file);
@@ -2526,13 +2539,17 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 				}
 				old_rsize = lu->lun[i].u.storage.rsize;
 				old_size = lu->lun[i].u.storage.size;
+#ifndef	REPLICATION
 				if ((strcasecmp(size, "Auto") == 0
 				    || strcasecmp(size, "Size") == 0)
 				    && lu->istgt->OperationalMode == 0) {
-					new_size = istgt_lu_get_filesize(file);
+				        new_size = istgt_lu_get_filesize(file);
 				} else {
-					new_size = istgt_lu_parse_size(size);
+				        new_size = istgt_lu_parse_size(size);
 				}
+#else
+				new_size = istgt_lu_parse_size(size);
+#endif
 				new_rsize = 0;
 				if (rsz != NULL) {
 					uint64_t vall;
@@ -2569,9 +2586,11 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 					ISTGT_ERRLOG("LU%d: LUN%d: Auto size error (%s)\n", lu->num, i, file);
 					goto error_return;
 				}
+#ifndef	REPLICATION
 				if (lu->lun[i].u.storage.file)
 					xfree(lu->lun[i].u.storage.file);
 				lu->lun[i].u.storage.file = xstrdup(file);
+#endif
 				++storagechange;
 			} else  if (strncasecmp(val, "Option", 6) == 0) {
 				key = istgt_get_nmval(sp, buf, j, 1);
@@ -2770,6 +2789,7 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 					lu->lun[i].dpofua ? " DPOFUA" : "",
 					lu->lun[i].wzero ? " WZERO" : ""
 					);
+
 			if(lu->istgt->OperationalMode) {
 				clock_gettime(clockid, &spec->close_started);
 				rc = istgt_lu_disk_close(lu, i);
@@ -2782,6 +2802,7 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 				lu->lun[i].u.storage.size = old_size;
 				lu->lun[i].u.storage.rsize = old_rsize;
 				flags = lu->readonly ? O_RDONLY : O_RDWR;
+
 				rc = spec->open(spec, flags, 0666);
 				if (rc < 0) {
 					ISTGT_ERRLOG("LU%d: LUN%d: open error(errno=%d)\n",
@@ -4223,6 +4244,7 @@ again:
 						do_open = 1;
 				}
 				MTX_UNLOCK(&spec->state_mutex);
+
 				if (do_close == 1)
 					rc = istgt_lu_disk_close(spec->lu, spec->lun);
 				if (do_open == 1)
