@@ -16,8 +16,6 @@
 #include <syslog.h>
 #include <stdbool.h>
 #include "zrepl_prot.h"
-#include "istgt_integration.h"
-#include "istgt_lu.h"
 
 #define MAXREPLICA 10
 #define MAXEVENTS 64
@@ -26,6 +24,8 @@
 #define MAXNAMELEN 256
 
 #define RCOMMON_CMD_MEMPOOL_ENTRIES     100000
+
+#include "istgt_lu.h"
 
 /*
  * NOTE : RCMD_MEMPOOL_ENTRIES depends on number of replicas ISGT can support

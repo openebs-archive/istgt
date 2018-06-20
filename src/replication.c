@@ -1473,7 +1473,7 @@ accept_mgmt_conns(int epfd, int sfd)
 {
 	struct epoll_event event;
 	int rc, rcount=0;
-	spec_t *spec;
+	spec_t *spec = NULL;
 	int mgmt_fd;
 	mgmt_event_t *mevent1, *mevent2;
 
@@ -1518,6 +1518,13 @@ accept_mgmt_conns(int epfd, int sfd)
                 }
                 MTX_UNLOCK(&specq_mtx);
 
+		if (!spec) {
+			REPLICA_ERRLOG("Spec is not configured\n");
+			shutdown(mgmt_fd, SHUT_RDWR);
+			close(mgmt_fd);
+			continue;
+		}
+
 		/*
 		 * As of now, we are supporting single spec_t per target
 		 * So, we can assign spec to replica here.
@@ -1529,6 +1536,7 @@ accept_mgmt_conns(int epfd, int sfd)
 		if (!replica) {
 			REPLICA_ERRLOG("Failed to create replica for fd(%d) "
 			    "closing it..", mgmt_fd);
+			shutdown(mgmt_fd, SHUT_RDWR);
 			close(mgmt_fd);
 			continue;
 		}
@@ -1580,6 +1588,7 @@ cleanup:
 				TAILQ_REMOVE(&spec->rwaitq, replica, r_waitnext);
 				MTX_UNLOCK(&spec->rq_mtx);
 			}
+			shutdown(mgmt_fd, SHUT_RDWR);
 			close(mgmt_fd);
 			continue;
 		}

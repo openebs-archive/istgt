@@ -9,7 +9,6 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include "replication.h"
-#include "istgt_integration.h"
 #include "replication_misc.h"
 
 #define POLLWAIT 5000
@@ -145,15 +144,21 @@ replication_listen(const char *ip, int port, int que, int non_blocking)
 retry:
 		sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
 		if (sock < 0) {
+			REPLICA_ERRLOG("failed to create socket .. err(%d)\n",
+			    errno);
 			continue;
 		}
 
 		rc = setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &val, sizeof val);
 		if (rc != 0) {
+			REPLICA_ERRLOG("failed to set SO_REUSEADDR for "
+			    "sock(%d).. err(%d)\n", sock, errno);
 			continue;
 		}
 		rc = setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &val, sizeof val);
 		if (rc != 0) {
+			REPLICA_ERRLOG("failed to set TCP_NODELAY for "
+			    "sock(%d).. err(%d)\n", sock, errno);
 			continue;
 		}
 		rc = bind(sock, res->ai_addr, res->ai_addrlen);
