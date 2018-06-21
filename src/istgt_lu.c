@@ -1904,9 +1904,8 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 				}
 				lu->lun[i].type = ISTGT_LU_LUN_TYPE_STORAGE;
 
-				file = istgt_get_nmval(sp, buf, j, 1);
-				size = istgt_get_nmval(sp, buf, j, 2);
-				rsz  = istgt_get_nmval(sp, buf, j, 3);
+				size = istgt_get_nmval(sp, buf, j, 1);
+				rsz  = istgt_get_nmval(sp, buf, j, 2);
 #ifdef	REPLICATION
 				if (size == NULL) {
 #else
