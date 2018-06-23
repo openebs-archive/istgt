@@ -529,10 +529,7 @@ handle_write(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 static void
 handle_sync(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 {
-	int rc;
-	uint64_t nbytes = 0;
 	zvol_io_hdr_t *hdr = &(zio_cmd->hdr);
-	uint8_t *data = zio_cmd->buf;
 
 	hdr->status = ZVOL_OP_STATUS_OK;
 	if (zio_cmd->buf)
@@ -768,6 +765,11 @@ end:
 
 pthread_mutexattr_t mutex_attr;
 extern void create_mock_client(spec_t *);
+extern int start_errored_replica(int replica_count);
+extern void trigger_data_conn_error(void);
+extern void shutdown_errored_replica(void);
+extern void wait_for_mock_clients(void);
+extern void wait_for_spec_ready(void);
 uint64_t blocklen;
 uint64_t volsize;
 char *vol_name;
@@ -1191,12 +1193,13 @@ exit:
 	return NULL;
 }
 
+int replication_factor = 3, consistency_factor = 2;
+
 int
 main(int argc, char **argv)
 {
 	int rc;
 	spec_t *spec = (spec_t *)malloc(sizeof (spec_t));
-	int replication_factor = 3, consistency_factor = 2;
 	pthread_t replica_thread;
 	struct stat sbuf;
 	pthread_t rebuild_test_thread;
@@ -1208,6 +1211,8 @@ main(int argc, char **argv)
 
 	replica_poll_time = 5;
 	replica_timeout = 10;
+
+	signal(SIGPIPE, SIG_IGN);
 
 	test_args = (rebuild_test_t *)malloc(sizeof (rebuild_test_t));
 	rc = pthread_cond_init(&test_args->test_state_cv, NULL);
@@ -1263,6 +1268,30 @@ main(int argc, char **argv)
 	pthread_create(&replica_thread, NULL, &init_replication, (void *)NULL);
 
 	spec->ready = false;
+
+	if (start_errored_replica(3)) {
+		REPLICA_ERRLOG("error in creating errored replica\n");
+		return 1;
+	}
+
+	/* Let errored replica runs for 60 seconds with mgmt error injection enabled */
+	sleep(60);
+
+	/* Enable error injection in data connection */
+	trigger_data_conn_error();
+
+	/* Wait for the spec to be ready for IOs */
+	wait_for_spec_ready();
+
+	create_mock_client(spec);
+
+	/* Let errored replica runs for 60 seconds with data conn error injection enabled */
+	sleep(60);
+
+	shutdown_errored_replica();
+
+	/* This can be avoided by cancelling mock client threads */
+	wait_for_mock_clients();
 
 	create_mock_replicas(spec->replication_factor, spec->volname);
 	pthread_create(&rebuild_test_thread, NULL, &rebuild_test, (void *)test_args);

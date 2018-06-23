@@ -75,6 +75,9 @@ typedef struct replica_s {
 	void *mgmt_io_resp_data;	// data recieved on management connection
 	TAILQ_HEAD(, mgmt_cmd_s) mgmt_cmd_queue;	// command queue for management connection
 	uint64_t initial_checkpointed_io_seq;
+#ifdef	DEBUG
+	int replica_mgmt_dport;		// port from which replica has made mgmt conn.
+#endif
 } replica_t;
 
 typedef struct cstor_conn_ops {

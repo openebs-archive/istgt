@@ -6918,6 +6918,8 @@ istgt_lu_disk_status(ISTGT_LU_Ptr lu, int lun)
 	if (spec->state == ISTGT_LUN_BUSY) {
 #endif
 		status = ISTGT_LUN_BUSY;
+	} else {
+		status = ISTGT_LUN_ONLINE;
 	}
 #ifdef	REPLICATION
 	MTX_UNLOCK(&spec->rq_mtx);
