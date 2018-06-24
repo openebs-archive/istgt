@@ -914,7 +914,7 @@ typedef struct istgt_lu_disk_t {
 	uint8_t percent_latency[32];
 	uint64_t io_seq;
 #ifdef	REPLICATION
-	int quiesce;
+	volatile int quiesce;
 #endif
 
 	/* entry */

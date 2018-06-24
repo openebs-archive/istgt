@@ -535,7 +535,6 @@ istgt_uctl_cmd_snap(UCTL_Ptr uctl)
 	char *volname, *snapname;
 	int rc = 0, ret = UCTL_CMD_ERR, io_wait_time, wait_time;
 	char *arg;
-	bool r;
 	arg = uctl->arg;
 
 	CHECK_ARG_AND_GOTO_ERROR;
@@ -557,10 +556,10 @@ istgt_uctl_cmd_snap(UCTL_Ptr uctl)
 	}
 	spec = lu->lun[0].spec;
 	if (strcmp(uctl->cmd, "SNAPCREATE") == 0)
-		r = istgt_lu_create_snapshot(spec, snapname, io_wait_time, wait_time);
+		rc = istgt_lu_create_snapshot(spec, snapname, io_wait_time, wait_time);
 	else
-		r = istgt_lu_destroy_snapshot(spec, snapname);
-	if (r == true) {
+		rc = istgt_lu_destroy_snapshot(spec, snapname);
+	if (!rc) {
 		istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
 		ret = UCTL_CMD_OK;
 	}

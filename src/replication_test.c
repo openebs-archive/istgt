@@ -285,6 +285,11 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 		iovec[3].iov_base = &stats;
 		iovec[3].iov_len = sizeof (zvol_op_stat_t);
 		iovec_count = 4;
+	} else if (opcode == ZVOL_OPCODE_RESIZE) {
+		mgmt_ack_hdr->len = sizeof (uint64_t);
+		iovec[3].iov_base = buf;
+		iovec[3].iov_len = mgmt_ack_hdr->len;
+		iovec_count = 4;
 	} else {
 		build_mgmt_ack_data;
 

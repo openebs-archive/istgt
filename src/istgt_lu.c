@@ -1898,14 +1898,19 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 				ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "Device file=%s\n",
 							   lu->lun[i].u.device.file);
 			} else if (strcasecmp(val, "Storage") == 0) {
+				int idx2 = 1;
 				if (lu->lun[i].type != ISTGT_LU_LUN_TYPE_NONE) {
 					ISTGT_ERRLOG("LU%d: duplicate LUN%d\n", lu->num, i);
 					goto error_return;
 				}
 				lu->lun[i].type = ISTGT_LU_LUN_TYPE_STORAGE;
 
-				size = istgt_get_nmval(sp, buf, j, 1);
-				rsz  = istgt_get_nmval(sp, buf, j, 2);
+#ifndef	REPLICATION
+				file = istgt_get_nmval(sp, buf, j, idx2++);
+#endif
+				size = istgt_get_nmval(sp, buf, j, idx2++);
+				rsz  = istgt_get_nmval(sp, buf, j, idx2++);
+
 #ifdef	REPLICATION
 				if (size == NULL) {
 #else
@@ -1914,6 +1919,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 					ISTGT_ERRLOG("LU%d: LUN%d: format error\n", lu->num, i);
 					goto error_return;
 				}
+
 				if (rsz == NULL) {
 					lu->lun[i].u.storage.rsize = 0;
 				} else {
@@ -2388,6 +2394,7 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
                                ISTGT_NOTICELOG("LU%d: InitiatoGroup%d not found\n",
 					lu->num,lu->map[i].ig_tag );
 			}
+
 			ISTGT_NOTICELOG("initiator grp updated with new value %d\n", igp_new->tag);
 			rc = istgt_lu_close_connection(lu, igp_new);
 			MTX_UNLOCK(&lu->istgt->mutex);
@@ -2396,10 +2403,19 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 				ISTGT_ERRLOG("Unable to close Unauthorised connections for LU%d\n",lu->num);
 				goto error_out;
 			}
+
+			/*
+			 * If the client is logged in then we will skip
+			 * decrementing ig reference.
+			 */
+			MTX_LOCK(&lu->mutex);
+			if (lu->maxtsih < 1 && igp_old) {
+				igp_old->ref--;
+			}
+			MTX_UNLOCK(&lu->mutex);
+
 			lu->map[i].ig_tag = ig_tag_i_new;
 			lu->maxmap = i + 1;
-			
-
 		}
 	}
 	if (lu->maxmap == 0) {
@@ -2456,7 +2472,7 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 	if (val == NULL) {
 		lu->auth_group = 0;
 	} else {
-			ag_tag = val;
+		ag_tag = val;
 		if (strcasecmp(ag_tag, "None") == 0) {
 			ag_tag_i = 0;
 		} else {
@@ -2529,10 +2545,19 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 				ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "Device file=%s\n",
 							   lu->lun[i].u.device.file);
 			} else if (strcasecmp(val, "Storage") == 0) {
-				file = istgt_get_nmval(sp, buf, j, 1);
-				size = istgt_get_nmval(sp, buf, j, 2);
-				rsz  = istgt_get_nmval(sp, buf, j, 3);
-				if (file == NULL || size == NULL) {
+				int idx2 = 1;
+#ifndef	REPLICATION
+				file = istgt_get_nmval(sp, buf, j, idx2++);
+#endif
+				size = istgt_get_nmval(sp, buf, j, idx2++);
+				rsz  = istgt_get_nmval(sp, buf, j, idx2++);
+
+#ifdef	REPLICATION
+				if (size == NULL)
+#else
+				if (file == NULL || size == NULL)
+#endif
+				{
 					ISTGT_ERRLOG("LU%d: LUN%d: format error\n", lu->num, i);
 					goto error_return;
 				}
@@ -2574,17 +2599,33 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 						new_rsize = (uint32_t)vall;
 				}
 
-				if (old_size == new_size && new_rsize == old_rsize
-					&& spec != NULL &&  strcasecmp(file, spec->file) == 0)
+				if (old_size == new_size
+				    && new_rsize == old_rsize
+				    && spec != NULL
+#ifndef	REPLICATION
+				    && strcasecmp(file, spec->file) == 0
+#endif
+				    )
 					continue;
-
-				lu->lun[i].u.storage.size = new_size;
-				lu->lun[i].u.storage.rsize = new_rsize;
 
 				if (lu->lun[i].u.storage.size == 0) {
 					ISTGT_ERRLOG("LU%d: LUN%d: Auto size error (%s)\n", lu->num, i, file);
 					goto error_return;
 				}
+
+#ifdef	REPLICATION
+				if (istgt_lu_resize(spec, new_size,
+				    lu->lun[i].u.storage.size)) {
+					ISTGT_ERRLOG("LU%d: LUN%d: Failed to resize\n", lu->num, i);
+					goto error_return;
+				}
+
+				spec->size = new_size;
+				spec->rsize = new_rsize;
+#endif
+
+				lu->lun[i].u.storage.size = new_size;
+				lu->lun[i].u.storage.rsize = new_rsize;
 #ifndef	REPLICATION
 				if (lu->lun[i].u.storage.file)
 					xfree(lu->lun[i].u.storage.file);
@@ -3236,24 +3277,31 @@ istgt_lu_reload_update(ISTGT_Ptr istgt)
 					}
 					MTX_LOCK(&lu->mutex);
 					if (lu->maxtsih > 1) {
-					/*	ISTGT_ERRLOG("update active LU%d: Name=%s, "
+						ISTGT_ERRLOG("update active LU%d: Name=%s, "
 						    "# of TSIH=%d\n",
-						    lu->num, lu->name, lu->maxtsih - 1);*/
+						    lu->num, lu->name, lu->maxtsih - 1);
+#ifdef	REPLICATION
+					} else {
+						ISTGT_ERRLOG("update LU%d: Name=%s\n", lu->num, lu->name);
+					}
+#endif
 						//rc = istgt_lu_copy_sp(sp, istgt->config_old);
-					//	if (rc < 0) {
+						//if (rc < 0) {
 							/* ignore error */
 						//}
 						MTX_UNLOCK(&lu->mutex);
 						MTX_UNLOCK(&istgt->mutex);
 						rc = istgt_lu_update_unit(lu, sp);
 						if (rc < 0) {
-							/* erro in updating the lu */
+							ISTGT_ERRLOG("Failed to update LUN\n");
+							return -1;
 						}
 						spec = (ISTGT_LU_DISK *)(lu->lun[0].spec);
 						MTX_LOCK(&spec->complete_queue_mutex);
 						rc = pthread_cond_signal(&spec->maint_cmd_queue_cond);
 						MTX_UNLOCK(&spec->complete_queue_mutex);
 						goto skip_lu;
+#ifndef	REPLICATION
 					} else {
 						istgt->logical_unit[sp->num] = NULL;
 						MTX_UNLOCK(&lu->mutex);
@@ -3315,6 +3363,7 @@ istgt_lu_reload_update(ISTGT_Ptr istgt)
 						ISTGT_NOTICELOG("update LU%d: Name=%s\n",
 						    lu->num, lu->name);
 					}
+#endif
 					MTX_UNLOCK(&istgt->mutex);
 				}
 			}

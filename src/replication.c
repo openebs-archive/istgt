@@ -44,8 +44,11 @@ static void respond_with_error_for_all_outstanding_mgmt_ios(replica_t *r);
 static void inform_data_conn(replica_t *r);
 static void free_replica(replica_t *r);
 static int handle_mgmt_event_fd(replica_t *replica);
+static int send_io_blocking_mgmt_cmd(spec_t *spec, rcommon_mgmt_cmd_t *cmd,
+    zvol_op_code_t op, int io_wait_time, int wait_time);
+static void handle_resize_resp(replica_t *replica, mgmt_cmd_t *cmd);
 
-#define build_rcomm_cmd(rcomm_cmd, cmd, offset, nbytes) 						\
+#define build_rcomm_cmd(rcomm_cmd, cmd, offset, nbytes) 		\
 	do {								\
 		rcomm_cmd = get_from_mempool(&rcommon_cmd_mempool);	\
 		rcomm_cmd->copies_sent = 0;				\
@@ -216,6 +219,14 @@ check_header_sanity(zvol_io_hdr_t *resp_hdr)
 			if(resp_hdr->len != 0) {
 				REPLICA_ERRLOG("hdr->len length(%lu) is non "
 				    "zero, should be zero..\n",
+				    resp_hdr->len);
+				return -1;
+			}
+			break;
+		case ZVOL_OPCODE_RESIZE:
+			if (resp_hdr->len != sizeof (uint64_t)) {
+				REPLICA_ERRLOG("hdr->len length(%lu) is not "
+				    "matching with expected len..\n",
 				    resp_hdr->len);
 				return -1;
 			}
@@ -961,62 +972,22 @@ handle_snap_create_resp(replica_t *replica, mgmt_cmd_t *mgmt_cmd)
 	zvol_io_hdr_t *hdr = replica->mgmt_io_resp_hdr;
 	rcommon_mgmt_cmd_t *rcomm_mgmt = mgmt_cmd->rcomm_mgmt;
 	bool delete = false;
+
 	MTX_LOCK(&rcomm_mgmt->mtx);
+
 	if (hdr->status != ZVOL_OP_STATUS_OK)
 		rcomm_mgmt->cmds_failed++;
 	else
 		rcomm_mgmt->cmds_succeeded++;
+
 	if ((rcomm_mgmt->caller_gone == 1) &&
 	    (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_failed + rcomm_mgmt->cmds_succeeded)))
 		delete = true;
+
 	MTX_UNLOCK(&rcomm_mgmt->mtx);
+
 	if (delete == true)
-		free(rcomm_mgmt);
-}
-
-static int
-send_replica_snapshot(spec_t *spec, replica_t *replica, uint64_t io_seq,
-    char *snapname, zvol_op_code_t opcode, rcommon_mgmt_cmd_t *rcomm_mgmt)
-{
-	zvol_io_hdr_t *rmgmtio = NULL;
-	size_t data_len;
-	char *data;
-	zvol_op_code_t mgmt_opcode = opcode;
-	mgmt_cmd_t *mgmt_cmd;
-	uint64_t num = 1;
-	int ret = 0;
-
-	mgmt_cmd = malloc(sizeof(mgmt_cmd_t));
-	mgmt_cmd->rcomm_mgmt = rcomm_mgmt;
-	data_len = strlen(spec->volname) + strlen(snapname) + 2;
-
-	BUILD_REPLICA_MGMT_HDR(rmgmtio, mgmt_opcode, data_len);
-
-	data = (char *)malloc(data_len);
-	snprintf(data, data_len, "%s@%s", spec->volname, snapname);
-
-	rmgmtio->io_seq = io_seq;
-
-	mgmt_cmd->io_hdr = rmgmtio;
-	mgmt_cmd->io_bytes = 0;
-	mgmt_cmd->data = data;
-	mgmt_cmd->mgmt_cmd_state = WRITE_IO_SEND_HDR;
-
-	MTX_LOCK(&replica->r_mtx);
-	//TODO: Add it as the second IO, rather than tailing
-	TAILQ_INSERT_TAIL(&replica->mgmt_cmd_queue, mgmt_cmd, mgmt_cmd_next);
-	MTX_UNLOCK(&replica->r_mtx);
-
-	if (rcomm_mgmt != NULL)
-		rcomm_mgmt->cmds_sent++;
-
-	if (write(replica->mgmt_eventfd1, &num, sizeof (num)) != sizeof (num)) {
-		REPLICA_ERRLOG("Failed to inform to mgmt_eventfd for "
-		    "replica(%lu)\n", replica->zvol_guid);
-		ret = -1;
-	}
-
-	return ret;
+		free_rcommon_mgmt_cmd(rcomm_mgmt);
 }
 
 /*
@@ -1105,9 +1076,36 @@ pause_and_timed_wait_for_ongoing_ios(spec_t *spec, int sec)
 int istgt_lu_destroy_snapshot(spec_t *spec, char *snapname)
 {
 	replica_t *replica;
-	TAILQ_FOREACH(replica, &spec->rq, r_next)
-		send_replica_snapshot(spec, replica, 0, snapname, ZVOL_OPCODE_SNAP_DESTROY, NULL);
-	return true;
+	zvol_io_hdr_t *rmgmtio = NULL;
+	size_t data_len;
+	char *data;
+	mgmt_cmd_t *mgmt_cmd;
+	uint64_t num = 1;
+
+	TAILQ_FOREACH(replica, &spec->rq, r_next) {
+		mgmt_cmd = malloc(sizeof(mgmt_cmd_t));
+		mgmt_cmd->rcomm_mgmt = NULL;
+		data_len = strlen(spec->volname) + strlen(snapname) + 2;
+
+		BUILD_REPLICA_MGMT_HDR(rmgmtio, ZVOL_OPCODE_SNAP_DESTROY, data_len);
+
+		data = (char *)malloc(data_len);
+		snprintf(data, data_len, "%s@%s", spec->volname, snapname);
+
+		mgmt_cmd->io_hdr = rmgmtio;
+		mgmt_cmd->io_bytes = 0;
+		mgmt_cmd->data = data;
+		mgmt_cmd->mgmt_cmd_state = WRITE_IO_SEND_HDR;
+
+		MTX_LOCK(&replica->r_mtx);
+		//TODO: Add it as the second IO, rather than tailing
+		TAILQ_INSERT_TAIL(&replica->mgmt_cmd_queue, mgmt_cmd, mgmt_cmd_next);
+		MTX_UNLOCK(&replica->r_mtx);
+
+		(void) write(replica->mgmt_eventfd1, &num, sizeof (num));
+	}
+
+	return 0;
 }
 
 /*
@@ -1119,91 +1117,26 @@ int istgt_lu_destroy_snapshot(spec_t *spec, char *snapname)
  */
 int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int wait_time)
 {
-	bool r;
-	replica_t *replica;
-	int free_rcomm_mgmt = 0;
-	struct timespec last, now, diff;
-	rcommon_mgmt_cmd_t *rcomm_mgmt;
+	rcommon_mgmt_cmd_t *rcomm_mgmt_cmd;
 	int rc;
-	uint64_t io_seq;
+	uint8_t *data;
+	int64_t data_len;
 
-	clock_gettime(CLOCK_MONOTONIC, &last);
-	MTX_LOCK(&spec->rq_mtx);
+	data_len = strlen(spec->volname) + strlen(snapname) + 2;
 
-	/* Wait for any ongoing snapshot commands */
-	while (spec->quiesce == 1) {
-		MTX_UNLOCK(&spec->rq_mtx);
-		sleep(1);
-		MTX_LOCK(&spec->rq_mtx);
+	rcomm_mgmt_cmd = allocate_rcommon_mgmt_cmd(data_len);
+	snprintf((char *)rcomm_mgmt_cmd->buf, data_len, "%s@%s", spec->volname, snapname);
+	rcomm_mgmt_cmd->buf_size = data_len;
+
+	rc = send_io_blocking_mgmt_cmd(spec, rcomm_mgmt_cmd,
+	    ZVOL_OPCODE_SNAP_CREATE, io_wait_time, wait_time);
+	if (rc != 0) {
+		REPLICA_ERRLOG("Failed to send snapcreate cmd for vol(%s) "
+		    "snapname(%s)\n", spec->volname, snapname);
+		istgt_lu_destroy_snapshot(spec, snapname);
 	}
 
-	if (is_volume_healthy(spec) == false) {
-		MTX_UNLOCK(&spec->rq_mtx);
-		REPLICA_ERRLOG("volume is not healthy..\n");
-		return false;
-	}
-
-	r = pause_and_timed_wait_for_ongoing_ios(spec, io_wait_time);
-	if (r == false) {
-		MTX_UNLOCK(&spec->rq_mtx);
-		REPLICA_ERRLOG("pausing failed..\n");
-		return false;
-	}
-
-	rcomm_mgmt = allocate_rcommon_mgmt_cmd(0);
-	free_rcomm_mgmt = 0;
-
-	r = false;
-	io_seq = ++spec->io_seq;
-	TAILQ_FOREACH(replica, &spec->rq, r_next) {
-		rc = send_replica_snapshot(spec, replica, io_seq, snapname, ZVOL_OPCODE_SNAP_CREATE, rcomm_mgmt);
-		if (rc < 0) {
-			rcomm_mgmt->caller_gone = 1;
-			REPLICA_ERRLOG("caller gone..\n");
-			goto done;
-		}
-	}
-
-	timesdiff(CLOCK_MONOTONIC, last, now, diff);
-	MTX_LOCK(&rcomm_mgmt->mtx);
-
-	if (rcomm_mgmt->cmds_sent != spec->replication_factor) {
-		rcomm_mgmt->caller_gone = 1;
-		MTX_UNLOCK(&rcomm_mgmt->mtx);
-		REPLICA_ERRLOG("cmds sent %d not eq repl factor %d..\n",
-		    rcomm_mgmt->cmds_sent, spec->replication_factor);
-		goto done;
-	}
-
-	while (diff.tv_sec < wait_time) {
-		if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed))
-			break;
-		MTX_UNLOCK(&rcomm_mgmt->mtx);
-		MTX_UNLOCK(&spec->rq_mtx);
-		sleep(1);
-		MTX_LOCK(&spec->rq_mtx);
-		MTX_LOCK(&rcomm_mgmt->mtx);
-		timesdiff(CLOCK_MONOTONIC, last, now, diff);
-	}
-	rcomm_mgmt->caller_gone = 1;
-	if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed)) {
-		free_rcomm_mgmt = 1;
-		if ((rcomm_mgmt->cmds_succeeded == spec->replication_factor) && (rcomm_mgmt->cmds_failed == 0)) {
-			r = true;
-		}
-	}
-	MTX_UNLOCK(&rcomm_mgmt->mtx);
-done:
-	spec->quiesce = 0;
-	if (r == false)
-		TAILQ_FOREACH(replica, &spec->rq, r_next)
-			send_replica_snapshot(spec, replica, io_seq, snapname, ZVOL_OPCODE_SNAP_DESTROY, NULL);
-	MTX_UNLOCK(&spec->rq_mtx);
-	if (r == false)
-		REPLICA_ERRLOG("snap create ioseq: %lu resp: %d\n", io_seq, r);
-	if (free_rcomm_mgmt == 1)
-		free(rcomm_mgmt);
-	return r;
+	return rc;
 }
 
 /*
@@ -1762,6 +1695,11 @@ read_io_resp_hdr:
 					break;
 
 				case ZVOL_OPCODE_SNAP_DESTROY:
+					break;
+
+				case ZVOL_OPCODE_RESIZE:
+					ASSERT(fd != replica->iofd);
+					handle_resize_resp(replica, mgmt_cmd);
 					break;
 
 				default:
@@ -2753,6 +2691,200 @@ cleanup_deadlist(void *arg)
 		sleep(1);	//add predefined time here
 	}
 	return (NULL);
+}
+
+static int
+enqueue_mgmt_command_to_replica(replica_t *replica, uint64_t io_seq, uint8_t *data,
+    uint64_t data_len, zvol_op_code_t opcode, rcommon_mgmt_cmd_t *rcomm_mgmt)
+{
+	zvol_io_hdr_t *rmgmtio = NULL;
+	mgmt_cmd_t *mgmt_cmd;
+	uint8_t *cmd_data;
+	uint64_t num = 1;
+	int ret = 0;
+
+	mgmt_cmd = malloc(sizeof(mgmt_cmd_t));
+	mgmt_cmd->rcomm_mgmt = rcomm_mgmt;
+
+	BUILD_REPLICA_MGMT_HDR(rmgmtio, opcode, data_len);
+
+	cmd_data = (char *)malloc(data_len);
+	memcpy(cmd_data, data, data_len);
+
+	rmgmtio->io_seq = io_seq;
+	mgmt_cmd->io_hdr = rmgmtio;
+	mgmt_cmd->io_bytes = 0;
+	mgmt_cmd->data = cmd_data;
+	mgmt_cmd->mgmt_cmd_state = WRITE_IO_SEND_HDR;
+
+	MTX_LOCK(&replica->r_mtx);
+	//TODO: Add it as the second IO, rather than tailing
+	TAILQ_INSERT_TAIL(&replica->mgmt_cmd_queue, mgmt_cmd, mgmt_cmd_next);
+	MTX_UNLOCK(&replica->r_mtx);
+
+	if (rcomm_mgmt != NULL)
+		rcomm_mgmt->cmds_sent++;
+
+	if (write(replica->mgmt_eventfd1, &num, sizeof (num)) != sizeof (num)) {
+		REPLICA_ERRLOG("Failed to inform to mgmt_eventfd for "
+		    "replica(%lu)\n", replica->zvol_guid);
+		ret = -1;
+	}
+
+	return ret;
+}
+
+static int
+send_io_blocking_mgmt_cmd(spec_t *spec, rcommon_mgmt_cmd_t *rcomm_mgmt_cmd,
+    zvol_op_code_t opcode, int io_wait_time, int wait_time)
+{
+	replica_t *replica;
+	struct timespec last, now, diff;
+	int ret = -1, rc = -1;
+	uint64_t io_seq;
+
+	ASSERT(spec);
+	ASSERT(rcomm_mgmt_cmd);
+
+	clock_gettime(CLOCK_MONOTONIC, &last);
+	MTX_LOCK(&spec->rq_mtx);
+
+	/* Wait for any ongoing mgmt commands which could block IOs. */
+	while (spec->quiesce == 1) {
+		MTX_UNLOCK(&spec->rq_mtx);
+		sleep(1);
+		MTX_LOCK(&spec->rq_mtx);
+	}
+
+	if (is_volume_healthy(spec) == false) {
+		REPLICA_ERRLOG("volume is not healthy..\n");
+		goto out;
+	}
+
+	if (!pause_and_timed_wait_for_ongoing_ios(spec, io_wait_time)) {
+		REPLICA_ERRLOG("pausing failed..\n");
+		goto out;
+	}
+
+	io_seq = ++spec->io_seq;
+
+	MTX_LOCK(&rcomm_mgmt_cmd->mtx);
+
+	TAILQ_FOREACH(replica, &spec->rq, r_next) {
+		rc = enqueue_mgmt_command_to_replica(replica, io_seq,
+		    rcomm_mgmt_cmd->buf, rcomm_mgmt_cmd->buf_size, opcode,
+		    rcomm_mgmt_cmd);
+		if (rc < 0) {
+			rcomm_mgmt_cmd->caller_gone = 1;
+			MTX_UNLOCK(&rcomm_mgmt_cmd->mtx);
+			REPLICA_ERRLOG("caller gone..\n");
+			goto out;
+		}
+	}
+
+	timesdiff(CLOCK_MONOTONIC, last, now, diff);
+
+	if (rcomm_mgmt_cmd->cmds_sent != spec->replication_factor) {
+		rcomm_mgmt_cmd->caller_gone = 1;
+		MTX_UNLOCK(&rcomm_mgmt_cmd->mtx);
+		REPLICA_ERRLOG("cmds sent %d not eq repl factor %d..\n",
+		    rcomm_mgmt_cmd->cmds_sent, spec->replication_factor);
+		goto out;
+	}
+
+	while (diff.tv_sec < wait_time) {
+		if (rcomm_mgmt_cmd->cmds_sent ==
+		    (rcomm_mgmt_cmd->cmds_succeeded +
+		    rcomm_mgmt_cmd->cmds_failed))
+			break;
+		MTX_UNLOCK(&rcomm_mgmt_cmd->mtx);
+		MTX_UNLOCK(&spec->rq_mtx);
+		sleep(1);
+		MTX_LOCK(&spec->rq_mtx);
+		MTX_LOCK(&rcomm_mgmt_cmd->mtx);
+		timesdiff(CLOCK_MONOTONIC, last, now, diff);
+	}
+
+	rcomm_mgmt_cmd->caller_gone = 1;
+	if (rcomm_mgmt_cmd->cmds_sent ==
+	    (rcomm_mgmt_cmd->cmds_succeeded + rcomm_mgmt_cmd->cmds_failed)) {
+		if ((rcomm_mgmt_cmd->cmds_succeeded ==
+		    spec->replication_factor) &&
+		    (rcomm_mgmt_cmd->cmds_failed == 0)) {
+			ret = 0;
+		} else {
+			ret = -1;
+		}
+
+		MTX_UNLOCK(&rcomm_mgmt_cmd->mtx);
+		free_rcommon_mgmt_cmd(rcomm_mgmt_cmd);
+		goto out;
+	}
+
+	MTX_UNLOCK(&rcomm_mgmt_cmd->mtx);
+
+out:
+	spec->quiesce = 0;
+	MTX_UNLOCK(&spec->rq_mtx);
+	return ret;
+}
+
+int
+istgt_lu_resize(spec_t *spec, uint64_t new_size, uint64_t old_size)
+{
+	rcommon_mgmt_cmd_t *rcomm_mgmt;
+	int rc = 0;
+
+	rcomm_mgmt = allocate_rcommon_mgmt_cmd(sizeof (new_size));
+	*(uint64_t *)rcomm_mgmt->buf = new_size;
+	rcomm_mgmt->buf_size = sizeof (new_size);
+
+	rc = send_io_blocking_mgmt_cmd(spec, rcomm_mgmt,
+	    ZVOL_OPCODE_RESIZE, 30, 10);
+	if (rc != 0) {
+		REPLICA_ERRLOG("Failed to send resize cmd for vol(%s) "
+		    "size(%lu)\n", spec->volname, new_size);
+
+		rcomm_mgmt = allocate_rcommon_mgmt_cmd(sizeof (old_size));
+		*(uint64_t *)rcomm_mgmt->buf = old_size;
+		rcomm_mgmt->buf_size = sizeof (old_size);
+
+		if (!send_io_blocking_mgmt_cmd(spec, rcomm_mgmt,
+		    ZVOL_OPCODE_RESIZE, 60, 20)) {
+			REPLICA_ERRLOG("An Error occurred while reverting resize "
+			    "changes for vol(%s) new_size(%lu) old_size(%lu)\n",
+			    spec->volname, new_size, old_size);
+		}
+	}
+
+	return rc;
+}
+
+static void
+handle_resize_resp(replica_t *replica, mgmt_cmd_t *mgmt_cmd)
+{
+	zvol_io_hdr_t *hdr = replica->mgmt_io_resp_hdr;
+	rcommon_mgmt_cmd_t *rcomm_mgmt = mgmt_cmd->rcomm_mgmt;
+	bool delete = false;
+
+	ASSERT(rcomm_mgmt);
+
+	MTX_LOCK(&rcomm_mgmt->mtx);
+
+	if (hdr->status != ZVOL_OP_STATUS_OK)
+		rcomm_mgmt->cmds_failed++;
+	else
+		rcomm_mgmt->cmds_succeeded++;
+
+	if ((rcomm_mgmt->caller_gone == 1) &&
+	    (rcomm_mgmt->cmds_sent ==
+	    (rcomm_mgmt->cmds_failed + rcomm_mgmt->cmds_succeeded)))
+                delete = true;
+
+        MTX_UNLOCK(&rcomm_mgmt->mtx);
+
+        if (delete == true)
+                free_rcommon_mgmt_cmd(rcomm_mgmt);
 }
 
 /*

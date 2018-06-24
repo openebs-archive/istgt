@@ -165,6 +165,86 @@ list_descendants ()
 	echo "$children"
 }
 
+wait_for_healthy_volume() {
+	local logfile logpid
+
+	logfile=`mktemp`
+
+	tail -f /var/log/syslog >> $logfile &
+	logpid=$!
+
+	while [ 1 ]; do
+		truncate -s0 $logfile
+		istgtcontrol snapcreate vol1 snap1 10
+		cat $logfile | grep "volume is not healthy"
+		if [ $? -ne 0 ]; then
+			break
+		fi
+		sleep 5
+		echo "Volume is still in rebuild mode."
+	done
+
+	kill -9 $logpid
+
+	echo "Volume is healthy now."
+}
+
+verify_resize_command() {
+	CONF_FILE="/usr/local/etc/istgt/istgt.conf"
+	local old_size new_size disk_size
+
+	wait_for_healthy_volume
+
+	logout_of_volume
+	login_to_volume "$CONTROLLER_IP:3260"
+
+	get_scsi_disk
+
+	old_size=$(lsblk |grep sdb |awk -F ' ' '{print $4+0}')
+	new_size=$(( $old_size - 2 ))
+	sed -i "s|LUN0 Storage.*|LUN0 Storage ${new_size}G 32k|g" $CONF_FILE
+
+	$ISTGTCONTROL refresh
+	if [ $? -ne 0 ]; then
+		echo "Failed to send refresh cmd to target."
+		exit 1
+	fi
+
+	sleep 2
+
+	# Perform rescan for target
+	$ISCSIADM -m node -R
+	disk_size=$(lsblk |grep sdb |awk -F ' ' '{print $4+0}')
+	if [ $disk_size -ne $new_size ]; then
+		echo "Lun resize failed"
+		exit 1
+	fi
+	logout_of_volume
+
+	old_size=$new_size
+	new_size=$(( $old_size + 1 ))
+	sed -i "s|LUN0 Storage.*|LUN0 Storage ${new_size}G 32k|g" $CONF_FILE
+
+	$ISTGTCONTROL refresh
+	if [ $? -ne 0 ]; then
+		echo "Failed to send refresh cmd to target."
+		exit 1
+	fi
+
+	sleep 2
+
+	login_to_volume "$CONTROLLER_IP:3260"
+
+	sleep 2
+	disk_size=$(lsblk |grep sdb |awk -F ' ' '{print $4+0}')
+	if [ $disk_size -ne $new_size ]; then
+		echo "Lun resize failed"
+		exit 1
+	fi
+
+	logout_of_volume
+}
+
 run_data_integrity_test() {
 	local replica1_port="6161"
 	local replica2_port="6162"
@@ -234,6 +314,8 @@ run_data_integrity_test() {
 	else
 		echo "Replica timeout passed"
 	fi
+
+	verify_resize_command
 
 	pkill -9 -P $replica1_pid1
 	pkill -9 -P $replica2_pid

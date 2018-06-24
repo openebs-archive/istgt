@@ -260,7 +260,7 @@ retry:
 		usleep(10000);
 	}
 #else
-#error	Debug mode is disabled
+#warning Debug mode is disabled
 #endif
 
 error:
@@ -288,10 +288,9 @@ error:
 	return rc;
 }
 
-static inline int
+static int
 check_for_error(int err_type)
 {
-	
 	int rc = 0;
 	static int num = 1;
 
@@ -528,7 +527,7 @@ errored_replica(void *arg)
 	int replica_mgmt_sport = 0;
 	zvol_op_open_data_t *open_ptr;
 	int sfd, rc, epfd, event_count, i;
-	int mgmtfd = -1, iofd = -1;
+	volatile int mgmtfd = -1, iofd = -1;
 	int64_t count;
 	struct epoll_event event, *events;
 	uint8_t *data;
@@ -888,7 +887,6 @@ int
 start_errored_replica(int replica_count)
 {
 	int i, rc = 0;
-	int replica_port;
 
 	ASSERT(replica_count > 0);
 
@@ -910,7 +908,7 @@ start_errored_replica(int replica_count)
 		replica_port_list[i] = 6061 + i;
 		rc = pthread_create(&errored_rthread[i], NULL, &errored_replica, (void *)&replica_port_list[i]);
 		if (rc != 0) {
-			REPLICA_ERRLOG("Failed to create errored replica(%d) err(%d)\n", replica_port, rc);
+			REPLICA_ERRLOG("Failed to create errored replica(%d) err(%d)\n", replica_port_list[i], rc);
 			goto error;
 		}
         }
