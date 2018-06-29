@@ -42,7 +42,6 @@
 #endif
 #include <unistd.h>
 #include <sys/param.h>
-#include <json-c/json_object.h>
 
 #include "istgt.h"
 #include "istgt_ver.h"
@@ -53,6 +52,11 @@
 #include "istgt_lu.h"
 #include "istgt_iscsi.h"
 #include "istgt_proto.h"
+
+#ifdef	REPLICATION
+#include <json-c/json_object.h>
+#include "istgt_integration.h"
+#endif
 
 #if !defined(__GNUC__)
 #undef __attribute__
@@ -2909,6 +2913,7 @@ _verb_istat ISCSIstat_last[ISCSI_ARYSZ] = { {0,0,0} };
 _verb_istat ISCSIstat_now[ISCSI_ARYSZ] = { {0,0,0} };
 _verb_istat ISCSIstat_rslt[ISCSI_ARYSZ] = { {0,0,0} };
 
+#ifdef REPLICATION
 /* istgt_uctl_cmd_iostats collects the iostats from the spec structure
 ** and marshal them into json format using json-c library.The returned
 ** string memory is managed by the json_object and will be freed when
@@ -2960,26 +2965,33 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 		json_object *jtotalwritebytes = json_object_new_string(totalwritebytes);
 		json_object *jsize = json_object_new_string(size);
 
-		json_object_object_add(jobj, "writes", jwrites);	/* add values to object field */
-		json_object_object_add(jobj, "reads", jreads);
-		json_object_object_add(jobj, "totalwritebytes", jtotalwritebytes);
-		json_object_object_add(jobj, "totalreadbytes", jtotalreadbytes);
-		json_object_object_add(jobj, "size", jsize);
+		json_object_object_add(jobj, "WriteIOPS", jwrites);	/* add values to object field */
+		json_object_object_add(jobj, "ReadIOPS", jreads);
+		json_object_object_add(jobj, "TotalWriteBytes", jtotalwritebytes);
+		json_object_object_add(jobj, "TotalReadBytes", jtotalreadbytes);
+		json_object_object_add(jobj, "Size", jsize);
 
 		istgt_uctl_snprintf(uctl, "%s  %s\n", uctl->cmd, json_object_to_json_string(jobj));
 		rc = istgt_uctl_writeline(uctl);
-		if (rc != UCTL_CMD_OK)
+		if (rc != UCTL_CMD_OK){
+			// free the pointers
+			free(reads);
+			free(writes);
+			free(totalreadbytes);
+			free(totalwritebytes);
+			free(size);
+			/* freeing root json_object will free all the allocated memory
+			** associated with the json_object.
+			*/
+			json_object_put(jobj);
 			return rc;
-
-		// free the pointers
+		}
+		
 		free(reads);
 		free(writes);
 		free(totalreadbytes);
 		free(totalwritebytes);
 		free(size);
-		/* freeing root json_object will free all the allocated memory
-		** associated with the json_object.
-		*/
 		json_object_put(jobj);
 	}
 	MTX_UNLOCK(&specq_mtx);
@@ -2990,6 +3002,7 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 	}
    return UCTL_CMD_OK;
 }
+#endif
 
 static int
 istgt_uctl_cmd_stats(UCTL_Ptr uctl)
@@ -3202,7 +3215,9 @@ static ISTGT_UCTL_CMD_TABLE istgt_uctl_cmd_table[] =
 	{ "RSV", istgt_uctl_cmd_rsv},
 	{ "QUE", istgt_uctl_cmd_que},
 	{ "STATS", istgt_uctl_cmd_stats},
+#ifdef REPLICATION
 	{ "IOSTATS", istgt_uctl_cmd_iostats},
+#endif
 	{ "SET", istgt_uctl_cmd_set},
 	{ "MAXTIME", istgt_uctl_cmd_maxtime},
 #ifdef	REPLICATION

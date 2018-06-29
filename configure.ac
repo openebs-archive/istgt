@@ -182,7 +182,7 @@ AC_MSG_CHECKING([whether to enable replication mode])
 AC_ARG_ENABLE([replication],
   AS_HELP_STRING([--enable-replication], [enable replication feature]),
   AC_MSG_RESULT(yes); AC_DEFINE([REPLICATION], 1, [Define if enable replication])
-  LIBS="$LIBS -lm"
+  LIBS="$LIBS -lm -ljson-c"
   AC_SUBST([target_source_files], ['${istgt_source} ${replication_source}'])
   AC_SUBST([target_header_files], ['${istgt_header} ${replication_header}'])
   AC_MSG_NOTICE([fetching zrepl_prot.h file...])

@@ -1065,7 +1065,7 @@ exec_dump(UCTL_Ptr uctl)
 	}
 	return UCTL_CMD_OK;
 }
-
+#ifdef REPLICATION
 // exec_iostats writes IOSTATS over the wire and gets the
 // iostats from istgt
 static int
@@ -1101,6 +1101,8 @@ exec_iostats(UCTL_Ptr uctl)
 	}
 	return UCTL_CMD_OK;
 }
+#endif
+
 static int
 exec_stats(UCTL_Ptr uctl)
 {
@@ -1435,7 +1437,9 @@ static EXEC_TABLE exec_table[] =
 	{"RSV", exec_rsv, 0, 0 },
 	{"QUE", exec_que, 0, 0 },
 	{"STATS", exec_stats, 0, 0 },
+#ifdef REPLICATION
 	{"IOSTATS", exec_iostats, 0, 0 },
+#endif
 	{"SET", exec_set, 0, 1},
 	{"MAXTIME", exec_maxtime, 0, 0},
 	{"SNAPCREATE", exec_snap, 2, 0},

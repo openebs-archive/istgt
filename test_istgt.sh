@@ -79,7 +79,6 @@ run_istgt_integration()
 
 run_and_verify_iostats() {
 	login_to_volume "$CONTROLLER_IP:3260"
-	sleep 5
 	get_scsi_disk
 	if [ "$device_name"!="" ]; then
 		sudo mkfs.ext2 -F /dev/$device_name
@@ -90,14 +89,14 @@ run_and_verify_iostats() {
 
 		sudo dd if=/dev/urandom of=/mnt/store/file1 bs=4k count=10000 oflag=direct
 		sudo istgtcontrol iostats
-		var1="$(sudo istgtcontrol iostats | grep -oP "(?<=totalwritebytes\": \")[^ ]+" | cut -d '"' -f 1)"
+		var1="$(sudo istgtcontrol iostats | grep -oP "(?<=TotalWriteBytes\": \")[^ ]+" | cut -d '"' -f 1)"
 		if [ $var1 -eq 0 ]; then
 			echo "iostats command failed" && exit 1
 		fi
 
 		sudo dd if=/dev/urandom of=/mnt/store/file1 bs=4k count=10000 oflag=direct
 		sudo istgtcontrol iostats
-		var2="$(sudo istgtcontrol iostats | grep -oP "(?<=totalwritebytes\": \")[^ ]+" | cut -d '"' -f 1)"
+		var2="$(sudo istgtcontrol iostats | grep -oP "(?<=TotalWriteBytes\": \")[^ ]+" | cut -d '"' -f 1)"
 		if [ $var2 -eq 0 ]; then
 			echo "iostats command failed" && exit 1
 		fi
