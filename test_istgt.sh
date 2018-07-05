@@ -267,7 +267,6 @@ run_data_integrity_test() {
 	sleep 5
 
 	run_and_verify_iostats
-	sleep 15
 
 	wait $replica1_pid1
 	if [ $? == 0 ]; then
