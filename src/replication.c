@@ -133,6 +133,17 @@ static int handle_mgmt_event_fd(replica_t *replica);
 		_donecount = -1;					\
 		break;							\
 	}								\
+	if (_donecount == 1 && _count) {				\
+		/*							\
+		 * Target or replica can only send one command/response.\
+		 * If _donecount is 1 then target/replica has already	\
+		 * processed one mgmt command.				\
+		 */							\
+		REPLICA_ERRLOG("protocol error occurred for "		\
+		    "replica(%lu)\n", replica->zvol_guid);		\
+		_donecount = -1;					\
+		break;							\
+	}								\
 	if ((uint64_t) _count != _reqlen) {				\
 		(_io_read) += _count;					\
 		break;							\
@@ -1478,10 +1489,6 @@ accept_mgmt_conns(int epfd, int sfd)
 	int mgmt_fd;
 	mgmt_event_t *mevent1, *mevent2;
 
-/*
- * TODO :  Instead of while (1), there should be a limit on max connection
- *	   to be accepted
- */
 	while (1) {
 		struct sockaddr saddr;
 		socklen_t slen;
@@ -2259,8 +2266,10 @@ handle_mgmt_conn_error(replica_t *r, int sfd, struct epoll_event *events, int ev
 				if (r_ev == r) {
 					TAILQ_REMOVE(&r->spec->rwaitq, r, r_waitnext);
 					r->conn_closed++;
-					if (r->io_resp_hdr)
+					if (r->io_resp_hdr) {
 						free(r->io_resp_hdr);
+						r->io_resp_hdr = NULL;
+					}
 				}
 			}
 		}

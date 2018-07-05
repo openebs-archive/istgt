@@ -79,16 +79,27 @@ do {														\
 #define	HEADER_BUF_ERROR(iohdr, _err_freq, _err_type)								\
 do {														\
 	errored_replica_data_t *_repl_data;									\
-														\
+	int _count;												\
 	if (!check_for_error(_err_type))									\
 		break;												\
 														\
+	_count = random() % 5;											\
 	iohdr->version = REPLICA_VERSION;									\
-/*	iohdr->opcode = -1;										*/	\
-/*	iohdr->status = ZVOL_OP_STATUS_VERSION_MISMATCH; ZVOL_OP_STATUS_FAILED;				*/	\
-/*	iohdr->io_seq = -1 or NONE									*/	\
-/*	iohdr->offset = ULONG_MAX;									*/	\
-/*	iohdr->len = ULONG_MAX;										*/	\
+	if (_count == 0) {											\
+		iohdr->status = ZVOL_OP_STATUS_OK;								\
+	} else if (_count == 1) {										\
+		iohdr->status = ZVOL_OP_STATUS_FAILED;								\
+	} else if (_count == 2) {										\
+		iohdr->status = ZVOL_OP_STATUS_VERSION_MISMATCH;						\
+	}													\
+														\
+	if (_count == 3)											\
+		iohdr->io_seq = -1;										\
+	if (_count == 4)											\
+		iohdr->offset = ULONG_MAX;									\
+	if (_count == 5)											\
+		iohdr->len = ULONG_MAX;										\
+														\
 	_repl_data = (errored_replica_data_t *)pthread_getspecific(err_repl_key);				\
 														\
 	if (_err_type & ERROR_TYPE_MGMT)									\
@@ -260,7 +271,7 @@ retry:
 		usleep(10000);
 	}
 #else
-#error	Debug mode is disabled
+#warning Debug mode is disabled
 #endif
 
 error:
@@ -288,12 +299,13 @@ error:
 	return rc;
 }
 
-static inline int
+static int
 check_for_error(int err_type)
 {
 	
 	int rc = 0;
 	static int num = 1;
+	static int old_num = 1;
 
 	MTX_LOCK(&err_replica_mtx);
 	if (!(err_type & error_type)) {
@@ -316,7 +328,8 @@ check_for_error(int err_type)
 			MTX_UNLOCK(&err_replica_mtx);
 		}
 		rc = 1;
-		num = (int) random() % 9;
+		num = (int) random() % 30;
+		old_num++;
 	}
 
 out:
@@ -329,7 +342,7 @@ send_mgmt_ack(int fd, zvol_io_hdr_t *mgmt_ack_hdr, void *buf, int *zrepl_status_
 {
 	int i, nbytes = 0;
 	int rc = 0, start;
-	struct iovec iovec[6];
+	struct iovec iovec[12];
 	int iovec_count;
 	zrepl_status_ack_t zrepl_status;
 	mgmt_ack_t mgmt_ack_data;
@@ -433,6 +446,14 @@ send_mgmt_ack(int fd, zvol_io_hdr_t *mgmt_ack_hdr, void *buf, int *zrepl_status_
 			break;
 	}
 
+	if(check_for_error(ERROR_TYPE_MGMT)) {
+		for (i = 0; i < iovec_count; i++) {
+			iovec[iovec_count + i].iov_base = iovec[i].iov_base;
+			iovec[iovec_count + i].iov_len = iovec[i].iov_len;
+		}
+		iovec_count = 2 * iovec_count;
+	}
+
 	for (start = 0; start < iovec_count; start += 1) {
 		nbytes = iovec[start].iov_len;
 		while (nbytes) {
@@ -528,7 +549,7 @@ errored_replica(void *arg)
 	int replica_mgmt_sport = 0;
 	zvol_op_open_data_t *open_ptr;
 	int sfd, rc, epfd, event_count, i;
-	int mgmtfd = -1, iofd = -1;
+	volatile int mgmtfd = -1, iofd = -1;
 	int64_t count;
 	struct epoll_event event, *events;
 	uint8_t *data;
@@ -647,7 +668,7 @@ try_again:
 					data = malloc(mgmtio->len);
 					count = perform_read_write_on_fd(events[i].data.fd, (uint8_t *)data, mgmtio->len, READ_IO_RESP_DATA);
 					if (count < 0) {
-						rc = REPL_TEST_ERROR;
+						rc = REPL_TEST_RESTART;
 						goto error;
 					}
 					ASSERT(count == mgmtio->len);
@@ -704,7 +725,7 @@ try_again:
 						CONNECTION_CLOSE_ERROR_EPOLL(iofd, epfd, rc, error, err_freq, ERROR_TYPE_DATA);
 						CONNECTION_CLOSE_ERROR_EPOLL(mgmtfd, epfd, rc, error, err_freq, ERROR_TYPE_MGMT);
 						if (count < 0) {
-							rc = REPL_TEST_ERROR;
+							rc = REPL_TEST_RESTART;
 							goto error;
 						} else if ((uint64_t)count < (total_len - recv_len)) {
 							read_rem_data = true;
@@ -723,7 +744,7 @@ try_again:
 						count = perform_read_write_on_fd(events[i].data.fd, (uint8_t *)io_hdr + recv_len,
 						    total_len - recv_len, READ_IO_RESP_HDR);
 						if (count < 0) {
-							rc = REPL_TEST_ERROR;
+							rc = REPL_TEST_RESTART;
 							goto error;
 						} else if ((uint64_t)count < (total_len - recv_len)) {
 							read_rem_hdr = true;
@@ -740,7 +761,7 @@ try_again:
 						CONNECTION_CLOSE_ERROR_EPOLL(mgmtfd, epfd, rc, error, err_freq, ERROR_TYPE_MGMT);
 						CONNECTION_CLOSE_ERROR_EPOLL(iofd, epfd, rc, error, err_freq, ERROR_TYPE_DATA);
 						if (count < 0) {
-							rc = REPL_TEST_ERROR;
+							rc = REPL_TEST_RESTART;
 							goto error;
 						} else if ((uint64_t)count < sizeof (zvol_io_hdr_t)) {
 							read_rem_hdr = true;
@@ -768,7 +789,7 @@ try_again:
 							count = perform_read_write_on_fd(events[i].data.fd, (uint8_t *)data,
 							    io_hdr->len, READ_IO_RESP_DATA);
 							if (count < 0) {
-								rc = REPL_TEST_ERROR;
+								rc = REPL_TEST_RESTART;
 								goto error;
 							} else if ((uint64_t)count < io_hdr->len) {
 								read_rem_data = true;
@@ -888,7 +909,6 @@ int
 start_errored_replica(int replica_count)
 {
 	int i, rc = 0;
-	int replica_port;
 
 	ASSERT(replica_count > 0);
 
@@ -910,7 +930,7 @@ start_errored_replica(int replica_count)
 		replica_port_list[i] = 6061 + i;
 		rc = pthread_create(&errored_rthread[i], NULL, &errored_replica, (void *)&replica_port_list[i]);
 		if (rc != 0) {
-			REPLICA_ERRLOG("Failed to create errored replica(%d) err(%d)\n", replica_port, rc);
+			REPLICA_ERRLOG("Failed to create errored replica(%d) err(%d)\n", replica_port_list[i], rc);
 			goto error;
 		}
         }
