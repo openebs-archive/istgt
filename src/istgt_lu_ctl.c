@@ -3170,7 +3170,7 @@ istgt_uctl_cmd_execute(UCTL_Ptr uctl)
 		if (rc != UCTL_CMD_OK) {
 			return UCTL_CMD_DISCON;
 		}
-		return UCTL_CMD_ERR;
+		return UCTL_CMD_QUIT;
 	}
 #endif
 

@@ -335,7 +335,7 @@ out:
 }
 
 
-int
+static int
 send_io_resp(int fd, zvol_io_hdr_t *io_hdr, void *buf)
 {
 	struct iovec iovec[2];

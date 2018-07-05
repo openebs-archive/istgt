@@ -162,7 +162,6 @@ int make_socket_non_blocking(int);
 int send_mgmtack(int, zvol_op_code_t, void *, char *, int);
 int zvol_handshake(spec_t *, replica_t *);
 void accept_mgmt_conns(int, int);
-int send_io_resp(int fd, zvol_io_hdr_t *, void *);
 int initialize_replication_mempool(bool should_fail);
 int destroy_replication_mempool(void);
 void clear_rcomm_cmd(rcommon_cmd_t *);

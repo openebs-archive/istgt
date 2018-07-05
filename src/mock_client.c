@@ -23,17 +23,19 @@ typedef struct cargs_s {
 	int *count;
 } cargs_t;
 
+extern int ignore_io_error;
 
 void create_mock_client(spec_t *);
 void *reader(void *args);
 void *mgmt_thrd(void *args);
 void *writer(void *args);
 void check_settings(spec_t *spec);
+void wait_for_mock_clients(void);
 static void build_cmd(cargs_t *cargs, ISTGT_LU_CMD_Ptr lu_cmd, SBC_OPCODE opcode,
     int len);
 
-cargs_t *all_cargs;
-pthread_t *all_cthreads;
+cargs_t *all_cargs = NULL;
+pthread_t *all_cthreads = NULL;
 
 static void
 build_cmd(cargs_t *cargs, ISTGT_LU_CMD_Ptr cmd, SBC_OPCODE opcode,
@@ -131,7 +133,8 @@ writer(void *args)
 		build_cmd(cargs, lu_cmd, opcode, len);
 
 		rc = replicate(spec, lu_cmd, offset, len);
-		if (rc != len)
+
+		if (rc != len && !ignore_io_error)
 			goto end;
 		count++;
 		clock_gettime(CLOCK_MONOTONIC, &now);
@@ -198,10 +201,13 @@ reader(void *args)
 		build_cmd(cargs, lu_cmd, opcode, len);
 
 		rc = replicate(spec, lu_cmd, offset, len);
-		if (rc != len)
+
+		if (rc != len && !ignore_io_error)
 			goto end;
 
-		free(lu_cmd->data);
+		if (rc == len)
+			xfree(lu_cmd->data);
+
 		lu_cmd->data = NULL;
 
 		count++;
@@ -333,7 +339,24 @@ create_mock_client(spec_t *spec)
 
 	free(all_cargs);
 	free(all_cthreads);
+	all_cthreads = NULL;
+	all_cargs = NULL;
 
 	return;
 }
 
+void
+wait_for_mock_clients()
+{
+	int count = 10;
+	while (count) {
+		__sync_synchronize();
+		usleep(100000);
+		if (!all_cthreads)
+                        return;
+		count--;
+	}
+
+	REPLICA_ERRLOG("mock client is still running\n");
+	abort();
+}
