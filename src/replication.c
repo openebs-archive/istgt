@@ -136,6 +136,17 @@ static void handle_resize_resp(replica_t *replica, mgmt_cmd_t *cmd);
 		_donecount = -1;					\
 		break;							\
 	}								\
+	if (_donecount == 1 && _count) {				\
+		/*							\
+		 * Target or replica can only send one command/response.\
+		 * If _donecount is 1 then target/replica has already	\
+		 * processed one mgmt command.				\
+		 */							\
+		REPLICA_ERRLOG("protocol error occurred for "		\
+		    "replica(%lu)\n", replica->zvol_guid);		\
+		_donecount = -1;					\
+		break;							\
+	}								\
 	if ((uint64_t) _count != _reqlen) {				\
 		(_io_read) += _count;					\
 		break;							\
@@ -2197,8 +2208,10 @@ handle_mgmt_conn_error(replica_t *r, int sfd, struct epoll_event *events, int ev
 				if (r_ev == r) {
 					TAILQ_REMOVE(&r->spec->rwaitq, r, r_waitnext);
 					r->conn_closed++;
-					if (r->io_resp_hdr)
+					if (r->io_resp_hdr) {
 						free(r->io_resp_hdr);
+						r->io_resp_hdr = NULL;
+					}
 				}
 			}
 		}
