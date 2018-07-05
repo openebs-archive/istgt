@@ -137,6 +137,17 @@ static int handle_mgmt_event_fd(replica_t *replica);
 		_donecount = -1;					\
 		break;							\
 	}								\
+	if (_donecount == 1 && _count) {				\
+		/*							\
+		 * Target or replica can only send one command/response.\
+		 * If _donecount is 1 then target/replica has already	\
+		 * processed one mgmt command.				\
+		 */							\
+		REPLICA_ERRLOG("protocol error occurred for "		\
+		    "replica(%lu)\n", replica->zvol_guid);		\
+		_donecount = -1;					\
+		break;							\
+	}								\
 	if ((uint64_t) _count != _reqlen) {				\
 		(_io_read) += _count;					\
 		break;							\
@@ -419,16 +430,16 @@ trigger_rebuild(spec_t *spec)
 	replica_t *target_replica = NULL;
 	replica_t *healthy_replica = NULL;
 
+	if (spec->ready != true) {
+		REPLICA_NOTICELOG("Volume(%s) is not ready to accept IOs\n",
+		    spec->volname);
+		return;
+	}
+
 	if (spec->rebuild_in_progress == true) {
 		assert(spec->ready == true);
 		REPLICA_NOTICELOG("Rebuild is already in progress "
 		    "on volume(%s)\n", spec->volname);
-		return;
-	}
-
-	if (spec->ready != true) {
-		REPLICA_NOTICELOG("Volume(%s) is not ready to accept IOs\n",
-		    spec->volname);
 		return;
 	}
 
@@ -879,6 +890,7 @@ replica_error:
 	free(rio_hdr);
 	free(rio_payload);
 
+	MTX_LOCK(&spec->rq_mtx);
 	MTX_LOCK(&replica->r_mtx);
 	for (i = 0; (i < 10) && (replica->mgmt_eventfd2 == -1); i++) {
 		MTX_UNLOCK(&replica->r_mtx);
@@ -897,8 +909,6 @@ replica_error:
 		return -1;
 	}
 	MTX_UNLOCK(&replica->r_mtx);
-
-	MTX_LOCK(&spec->rq_mtx);
 
 	spec->degraded_rcount++;
 	TAILQ_REMOVE(&spec->rwaitq, replica, r_waitnext);
@@ -1339,25 +1349,25 @@ handle_prepare_for_rebuild_resp(spec_t *spec, zvol_io_hdr_t *hdr,
 			    "state:%d\n", spec->target_replica->zvol_guid,
 			    spec->target_replica->state);
 		} else {
+			REPLICA_LOG("Unable to trigger rebuild on Replica(%lu)"
+			    " state:%d\n", spec->target_replica->zvol_guid,
+			    spec->target_replica->state);
 			MTX_LOCK(&spec->rq_mtx);
 			spec->target_replica = NULL;
 			spec->rebuild_in_progress = false;
 			MTX_UNLOCK(&spec->rq_mtx);
-			REPLICA_LOG("Unable to trigger rebuild on Replica(%lu)"
-			    " state:%d\n", spec->target_replica->zvol_guid,
-			    spec->target_replica->state);
 		}	
 		free_rcommon_mgmt_cmd(rcomm_mgmt);
 	} else if (rcomm_mgmt->cmds_sent ==
 	    (rcomm_mgmt->cmds_failed + rcomm_mgmt->cmds_succeeded)) {
 		free_rcommon_mgmt_cmd(rcomm_mgmt);
+		REPLICA_LOG("Unable to trigger rebuild on Replica(%lu) "
+		    "state:%d\n", spec->target_replica->zvol_guid,
+		    spec->target_replica->state);
 		MTX_LOCK(&spec->rq_mtx);
 		spec->target_replica = NULL;
 		spec->rebuild_in_progress = false;
 		MTX_UNLOCK(&spec->rq_mtx);
-		REPLICA_LOG("Unable to trigger rebuild on Replica(%lu) "
-		    "state:%d\n", spec->target_replica->zvol_guid,
-		    spec->target_replica->state);
 	}
 }
 
@@ -1575,6 +1585,9 @@ accept_mgmt_conns(int epfd, int sfd)
 		event.data.ptr = mevent2;
 		event.events = EPOLLIN | EPOLLHUP | EPOLLERR | EPOLLET | EPOLLOUT | EPOLLRDHUP;
 
+#ifdef	DEBUG
+		replica->replica_mgmt_dport = atoi(sbuf);
+#endif
 		rc = epoll_ctl(epfd, EPOLL_CTL_ADD, mgmt_fd, &event);
 		if(rc == -1) {
 			REPLICA_ERRLOG("epoll_ctl() failed on fd(%d), "
@@ -1582,7 +1595,7 @@ accept_mgmt_conns(int epfd, int sfd)
 			    mgmt_fd, errno, replica->ip, replica->port);
 cleanup:
 			if (replica->mgmt_eventfd1 != -1) {
-				epoll_ctl(epfd, EPOLL_CTL_DEL, replica->mgmt_eventfd1, NULL);
+				(void) epoll_ctl(epfd, EPOLL_CTL_DEL, replica->mgmt_eventfd1, NULL);
 				close(replica->mgmt_eventfd1);
 				free(mevent2);
 				free(mevent1);
@@ -2124,7 +2137,7 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 again:
 	MTX_LOCK(&spec->rq_mtx);
 	if(spec->ready == false) {
-		REPLICA_LOG("SPEC(%s) is not ready\n", spec->lu->name);
+		REPLICA_LOG("SPEC(%s) is not ready\n", spec->volname);
 		MTX_UNLOCK(&spec->rq_mtx);
 		return -1;
 	}
@@ -2257,6 +2270,10 @@ handle_mgmt_conn_error(replica_t *r, int sfd, struct epoll_event *events, int ev
 				if (r_ev == r) {
 					TAILQ_REMOVE(&r->spec->rwaitq, r, r_waitnext);
 					r->conn_closed++;
+					if (r->io_resp_hdr) {
+						free(r->io_resp_hdr);
+						r->io_resp_hdr = NULL;
+					}
 				}
 			}
 		}
@@ -2407,7 +2424,7 @@ init_replication(void *arg __attribute__((__unused__)))
 {
 	struct epoll_event event, *events;
 	int rc, sfd, event_count, i;
-	int64_t epfd;
+	int epfd;
 	replica_t *r;
 	int timeout;
 	struct timespec last, now, diff;

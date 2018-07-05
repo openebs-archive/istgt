@@ -60,7 +60,7 @@ ctl_header = istgt_ver.h istgt_conf.h istgt_log.h istgt_sock.h istgt_misc.h \
 	istgt_md5.h
 
 istgt_integration_source  = istgt_integration_test.c mock_client.c replication.c replication_misc.c rte_ring.c \
-	ring_mempool.c data_conn.c istgt_misc.c
+	ring_mempool.c data_conn.c istgt_misc.c mock_errored_replica.c
 
 replication_test_source   = replication_test.c replication_misc.c
 replication_test_header   = replication.h istgt_integration.h

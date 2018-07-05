@@ -308,12 +308,16 @@ handle_data_conn_error(replica_t *r)
 	r->data_eventfd = -1;
 	close_fd(epollfd, data_eventfd);
 
-	MTX_UNLOCK(&r->r_mtx);
-
-	if (r->io_resp_hdr)
+	if (r->io_resp_hdr) {
 		free(r->io_resp_hdr);
-	if (r->ongoing_io_buf)
+		r->io_resp_hdr = NULL;
+	}
+	if (r->ongoing_io_buf) {
 		free(r->ongoing_io_buf);
+		r->ongoing_io_buf = NULL;
+	}
+
+	MTX_UNLOCK(&r->r_mtx);
 
 	respond_with_error_for_all_outstanding_ios(r);
 
