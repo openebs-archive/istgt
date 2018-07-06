@@ -260,7 +260,7 @@ mgmt_thrd(void *args)
 		    random() % 2 + 4);
 		clock_gettime(CLOCK_MONOTONIC, &now);
 
-		//REPLICA_LOG("snapshot response: %d time: %ld\n", ret, (now.tv_sec - p.tv_sec));
+		REPLICA_LOG("snapshot response: %d time: %ld\n", ret, (now.tv_sec - p.tv_sec));
 		sleep(1);
 		count++;
 		clock_gettime(CLOCK_MONOTONIC, &now);

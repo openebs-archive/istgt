@@ -558,7 +558,7 @@ istgt_uctl_cmd_snap(UCTL_Ptr uctl)
 	if (strcmp(uctl->cmd, "SNAPCREATE") == 0)
 		rc = istgt_lu_create_snapshot(spec, snapname, io_wait_time, wait_time);
 	else
-		rc = istgt_lu_destroy_snapshot(spec, snapname);
+		rc = istgt_lu_destroy_snapshot(spec, snapname, 0);
 	if (!rc) {
 		istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
 		ret = UCTL_CMD_OK;

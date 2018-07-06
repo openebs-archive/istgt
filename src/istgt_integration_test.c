@@ -218,19 +218,19 @@ handle_snap_opcode(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 
 	if (strchr(zio_cmd->buf, '@') == NULL) {
 		REPLICA_ERRLOG("no @ in buf %s\n", (char *)zio_cmd->buf);
-		exit(1);
+		abort();
 	}
 
 	if (strncmp(zio_cmd->buf, rargs->volname, strlen(rargs->volname)) != 0) {
 		REPLICA_ERRLOG("name mismatch %s %s\n", (char *)zio_cmd->buf, rargs->volname);
-		exit(1);
+		abort();
 	}
 
 	if (hdr->opcode == ZVOL_OPCODE_SNAP_DESTROY) {
 		if (rargs->destroy_snap_ioseq != 0) {
 			if (hdr->io_seq != rargs->destroy_snap_ioseq) {
 				REPLICA_ERRLOG("writes happened during snapshot..\n");
-				exit(1);
+				abort();
 			}
 			rargs->destroy_snap_ioseq = 0;
 		}
@@ -239,11 +239,11 @@ handle_snap_opcode(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 	/* expectation of snap destroy due to prev failue, but, snap create opcode */
 	if (rargs->destroy_snap_ioseq != 0) {
 		REPLICA_ERRLOG("destroy_snap_ioseq should have been emtpy\n");
-		exit(1);
+		abort();
 	}
 	if (rargs->zrepl_status != ZVOL_STATUS_HEALTHY) {
 		REPLICA_ERRLOG("replica not healthy %d\n", rargs->zrepl_status);
-		exit(1);
+		abort();
 	}
 
 	write_cnt1 = rargs->write_cnt;
@@ -530,6 +530,8 @@ static void
 handle_sync(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 {
 	zvol_io_hdr_t *hdr = &(zio_cmd->hdr);
+
+	(void) rargs;
 
 	hdr->status = ZVOL_OP_STATUS_OK;
 	if (zio_cmd->buf)

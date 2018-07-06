@@ -45,7 +45,7 @@ static void inform_data_conn(replica_t *r);
 static void free_replica(replica_t *r);
 static int handle_mgmt_event_fd(replica_t *replica);
 static int send_io_blocking_mgmt_cmd(spec_t *spec, rcommon_mgmt_cmd_t *cmd,
-    zvol_op_code_t op, int io_wait_time, int wait_time);
+    zvol_op_code_t op, int io_wait_time, int wait_time, int *seq_number);
 static void handle_resize_resp(replica_t *replica, mgmt_cmd_t *cmd);
 
 #define build_rcomm_cmd(rcomm_cmd, cmd, offset, nbytes) 		\
@@ -1084,7 +1084,7 @@ pause_and_timed_wait_for_ongoing_ios(spec_t *spec, int sec)
 	return ret;
 }
 
-int istgt_lu_destroy_snapshot(spec_t *spec, char *snapname)
+int istgt_lu_destroy_snapshot(spec_t *spec, char *snapname, int io_seq)
 {
 	replica_t *replica;
 	zvol_io_hdr_t *rmgmtio = NULL;
@@ -1103,6 +1103,7 @@ int istgt_lu_destroy_snapshot(spec_t *spec, char *snapname)
 		data = (char *)malloc(data_len);
 		snprintf(data, data_len, "%s@%s", spec->volname, snapname);
 
+		rmgmtio->io_seq = io_seq;
 		mgmt_cmd->io_hdr = rmgmtio;
 		mgmt_cmd->io_bytes = 0;
 		mgmt_cmd->data = data;
@@ -1129,8 +1130,7 @@ int istgt_lu_destroy_snapshot(spec_t *spec, char *snapname)
 int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int wait_time)
 {
 	rcommon_mgmt_cmd_t *rcomm_mgmt_cmd;
-	int rc;
-	uint8_t *data;
+	int rc, seq_num = 0;
 	int64_t data_len;
 
 	data_len = strlen(spec->volname) + strlen(snapname) + 2;
@@ -1140,11 +1140,11 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	rcomm_mgmt_cmd->buf_size = data_len;
 
 	rc = send_io_blocking_mgmt_cmd(spec, rcomm_mgmt_cmd,
-	    ZVOL_OPCODE_SNAP_CREATE, io_wait_time, wait_time);
+	    ZVOL_OPCODE_SNAP_CREATE, io_wait_time, wait_time, &seq_num);
 	if (rc != 0) {
 		REPLICA_ERRLOG("Failed to send snapcreate cmd for vol(%s) "
 		    "snapname(%s)\n", spec->volname, snapname);
-		istgt_lu_destroy_snapshot(spec, snapname);
+		istgt_lu_destroy_snapshot(spec, snapname, seq_num);
 	}
 
 	return rc;
@@ -1847,6 +1847,8 @@ empty_mgmt_q_of_replica(replica_t *r)
 				update_spec_stats(r->spec, mgmt_cmd->io_hdr,
 				    NULL);
 				break;
+			case ZVOL_OPCODE_RESIZE:
+				handle_resize_resp(r, mgmt_cmd);
 			default:
 				break;
 		}
@@ -2059,7 +2061,10 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	int iovcnt = cmd->iobufindx + 1;
 	bool cmd_sent = false;
 	struct timespec abstime, now;
-	int nsec, err_num = 0;
+	int nsec;
+#ifdef	DEBUG
+	int err_num = 0;
+#endif
 
 	switch (cmd->cdb0) {
 		case SBC_WRITE_6:
@@ -2172,7 +2177,9 @@ again:
 		MTX_LOCK(rcomm_cmd->mutex);
 		rc = pthread_cond_timedwait(rcomm_cmd->cond_var,
 		    rcomm_cmd->mutex, &abstime);
+#ifdef	DEBUG
 		err_num = errno;
+#endif
 		MTX_UNLOCK(rcomm_cmd->mutex);
 	}
 
@@ -2721,7 +2728,7 @@ enqueue_mgmt_command_to_replica(replica_t *replica, uint64_t io_seq, uint8_t *da
 
 	BUILD_REPLICA_MGMT_HDR(rmgmtio, opcode, data_len);
 
-	cmd_data = (char *)malloc(data_len);
+	cmd_data = (uint8_t *)malloc(data_len);
 	memcpy(cmd_data, data, data_len);
 
 	rmgmtio->io_seq = io_seq;
@@ -2749,12 +2756,12 @@ enqueue_mgmt_command_to_replica(replica_t *replica, uint64_t io_seq, uint8_t *da
 
 static int
 send_io_blocking_mgmt_cmd(spec_t *spec, rcommon_mgmt_cmd_t *rcomm_mgmt_cmd,
-    zvol_op_code_t opcode, int io_wait_time, int wait_time)
+    zvol_op_code_t opcode, int io_wait_time, int wait_time, int *mgmt_io_seq)
 {
 	replica_t *replica;
 	struct timespec last, now, diff;
 	int ret = -1, rc = -1;
-	uint64_t io_seq;
+	uint64_t io_seq = 0;
 
 	ASSERT(spec);
 	ASSERT(rcomm_mgmt_cmd);
@@ -2779,7 +2786,19 @@ send_io_blocking_mgmt_cmd(spec_t *spec, rcommon_mgmt_cmd_t *rcomm_mgmt_cmd,
 		goto out;
 	}
 
-	io_seq = ++spec->io_seq;
+	/*
+	 * If snap destroy is called due to error occurred in snap create
+	 * then io_seq number should be same as in snap create mgmt command
+	 * otherwise it should be 0.
+	 */
+	if (opcode != ZVOL_OPCODE_SNAP_DESTROY)
+		io_seq = ++spec->io_seq;
+	else if (mgmt_io_seq && *mgmt_io_seq != 0 &&
+	    opcode == ZVOL_OPCODE_SNAP_DESTROY)
+		io_seq = *mgmt_io_seq;
+
+	if (mgmt_io_seq)
+		*mgmt_io_seq = io_seq;
 
 	MTX_LOCK(&rcomm_mgmt_cmd->mtx);
 
@@ -2852,8 +2871,11 @@ istgt_lu_resize(spec_t *spec, uint64_t new_size, uint64_t old_size)
 	*(uint64_t *)rcomm_mgmt->buf = new_size;
 	rcomm_mgmt->buf_size = sizeof (new_size);
 
+	/*
+	 * Default io_wait_time is 30 second and response wait time is 10 sec.
+	 */
 	rc = send_io_blocking_mgmt_cmd(spec, rcomm_mgmt,
-	    ZVOL_OPCODE_RESIZE, 30, 10);
+	    ZVOL_OPCODE_RESIZE, 30, 10, NULL);
 	if (rc != 0) {
 		REPLICA_ERRLOG("Failed to send resize cmd for vol(%s) "
 		    "size(%lu)\n", spec->volname, new_size);
@@ -2863,7 +2885,7 @@ istgt_lu_resize(spec_t *spec, uint64_t new_size, uint64_t old_size)
 		rcomm_mgmt->buf_size = sizeof (old_size);
 
 		if (!send_io_blocking_mgmt_cmd(spec, rcomm_mgmt,
-		    ZVOL_OPCODE_RESIZE, 60, 20)) {
+		    ZVOL_OPCODE_RESIZE, 30, 10, NULL)) {
 			REPLICA_ERRLOG("An Error occurred while reverting resize "
 			    "changes for vol(%s) new_size(%lu) old_size(%lu)\n",
 			    spec->volname, new_size, old_size);

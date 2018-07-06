@@ -91,7 +91,7 @@ ISTGT_LU_Ptr istgt_lu_find_target(ISTGT_Ptr istgt, const char *target_name);
 ISTGT_LU_Ptr istgt_lu_find_target_by_volname(ISTGT_Ptr istgt, const char *target_name);
 #ifdef	REPLICATION
 int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int, int);
-int istgt_lu_destroy_snapshot(spec_t *spec, char *snapname);
+int istgt_lu_destroy_snapshot(spec_t *spec, char *snapname, int);
 int istgt_lu_resize(spec_t *spec, uint64_t new_size, uint64_t old_size);
 #endif
 int istgt_lu_add_nexus(ISTGT_LU_Ptr lu, char *initiator_port);
