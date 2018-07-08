@@ -489,6 +489,57 @@ trigger_rebuild(spec_t *spec)
 }
 
 static bool
+is_replica_familiar(spec_t *spec, replica_t *new_replica)
+{
+	known_replica_t *kr = NULL;
+	int connected_replica = 0;
+	bool ret = false, found = false;
+	replica_t *old_replica = NULL;
+
+	ASSERT(MTX_LOCKED(&spec->rq_mtx));
+
+	TAILQ_FOREACH(kr, &spec->identified_replica, next) {
+		connected_replica++;
+		if (kr->zvol_guid == new_replica->zvol_guid) {
+			found = true;
+			if (!kr->is_connected) {
+				ret = true;
+			}
+			break;
+		}
+	}
+
+	if (!found && connected_replica < spec->replication_factor) {
+		kr = malloc(sizeof (known_replica_t));
+		kr->zvol_guid = new_replica->zvol_guid;
+		kr->is_connected = true;
+		ret = true;
+		TAILQ_INSERT_TAIL(&spec->identified_replica, kr, next);
+	}
+
+	/*
+	 * If the target has already an active session with this replica
+	 * then the target will disconnect from the previous session and
+	 * allow a new session
+	 */
+	if (found && !ret) {
+		TAILQ_FOREACH(old_replica, &spec->rq, r_next) {
+			if (old_replica->zvol_guid == new_replica->zvol_guid) {
+				MTX_UNLOCK(&spec->rq_mtx);
+				REPLICA_LOG("Disconnecting replica(%lu)'s old "
+				    "session\n", old_replica->zvol_guid);
+				handle_mgmt_conn_error(old_replica, 0, NULL, 0);
+				MTX_LOCK(&spec->rq_mtx);
+				ret = true;
+				break;
+			}
+		}
+	}
+
+	return ret;
+}
+
+static bool
 is_rf_replicas_connected(spec_t *spec, replica_t *replica)
 {
 	int replica_count;
@@ -861,10 +912,18 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	}
 
 	MTX_LOCK(&spec->rq_mtx);
-	if(is_rf_replicas_connected(spec, replica)) {
+	if (is_rf_replicas_connected(spec, replica)) {
 		MTX_UNLOCK(&spec->rq_mtx);
 		ISTGT_ERRLOG("failed to verify replica(ip:%s port:%d "
 		    "guid:%lu)\n", replica->ip, replica->port,
+		    replica->zvol_guid);
+		goto replica_error;
+	}
+
+	if (!is_replica_familiar(spec, replica)) {
+		MTX_UNLOCK(&spec->rq_mtx);
+		ISTGT_ERRLOG("replica(ip:%s port:%d "
+		    "guid:%lu) is not permitted to connect\n", replica->ip, replica->port,
 		    replica->zvol_guid);
 		goto replica_error;
 	}
@@ -2249,6 +2308,7 @@ handle_mgmt_conn_error(replica_t *r, int sfd, struct epoll_event *events, int ev
 	int i;
 	mgmt_event_t *mevent;
 	replica_t *r_ev;
+	known_replica_t *kr = NULL;
 
 	MTX_LOCK(&r->spec->rq_mtx);
 	MTX_LOCK(&r->r_mtx);
@@ -2333,6 +2393,13 @@ handle_mgmt_conn_error(replica_t *r, int sfd, struct epoll_event *events, int ev
 		    r->zvol_guid);
 		r->spec->target_replica = NULL;
 		r->spec->rebuild_in_progress = false;
+	}
+
+	TAILQ_FOREACH(kr, &r->spec->identified_replica, next) {
+		if (kr->zvol_guid == r->zvol_guid) {
+			kr->is_connected = false;
+			break;
+		}
 	}
 	MTX_UNLOCK(&r->spec->rq_mtx);
 
@@ -2586,6 +2653,7 @@ initialize_volume(spec_t *spec, int replication_factor, int consistency_factor)
 	TAILQ_INIT(&spec->rcommon_waitq);
 	TAILQ_INIT(&spec->rq);
 	TAILQ_INIT(&spec->rwaitq);
+	TAILQ_INIT(&spec->identified_replica);
 
 	VERIFY(replication_factor > 0);
 	VERIFY(consistency_factor > 0);
