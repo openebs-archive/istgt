@@ -146,6 +146,7 @@ writer(void *args)
 		}
 	}
 end:
+	free(lu_cmd);
 	REPLICA_ERRLOG("exiting wrote %d from %s\n", count, tinfo);
 
 	MTX_LOCK(mtx);
@@ -220,6 +221,7 @@ reader(void *args)
 		}
 	}
 end:
+	free(lu_cmd);
 	REPLICA_ERRLOG("exiting read %d from %s\n", count, tinfo);
 
 	MTX_LOCK(mtx);
@@ -273,6 +275,7 @@ mgmt_thrd(void *args)
 	}
 	REPLICA_ERRLOG("exiting mgmt_thrd %s sent %d\n", tinfo, count);
 
+	free(snapname);
 	MTX_LOCK(mtx);
 	*cnt = *cnt + 1;
 	pthread_cond_signal(cv);
