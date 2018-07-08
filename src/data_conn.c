@@ -293,6 +293,8 @@ handle_data_conn_error(replica_t *r)
 
 	MTX_LOCK(&r->r_mtx);
 	if (epoll_ctl(r->epollfd, EPOLL_CTL_DEL, r->iofd, NULL) == -1) {
+		shutdown(r->iofd, SHUT_RDWR);
+		r->iofd = -1;
 		MTX_UNLOCK(&r->r_mtx);
 		REPLICA_ERRLOG("epoll error for replica(%s:%d) iofd:%d "
 		    "err(%d)\n", r->ip, r->port, r->iofd, errno);

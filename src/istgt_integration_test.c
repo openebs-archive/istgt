@@ -345,7 +345,7 @@ handle_handshake(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 	mgmt_ack_t *mgmt_ack = malloc(sizeof (mgmt_ack_t));
 	memset(mgmt_ack, 0, sizeof (mgmt_ack_t));
 	mgmt_ack->pool_guid = 5000;
-	mgmt_ack->zvol_guid = 1000;
+	mgmt_ack->zvol_guid = rargs->replica_port;
 	mgmt_ack->port = rargs->replica_port;
 	strncpy(mgmt_ack->ip, rargs->replica_ip, sizeof (mgmt_ack->ip));
 	strncpy(mgmt_ack->volname, rargs->volname, sizeof (mgmt_ack->volname));
@@ -825,13 +825,13 @@ mock_repl(void *args)
 	rargs->file_fd = file_fd = open(rargs->file_path, O_RDWR, 0666);
 	if (file_fd < 0) {
 		REPLICA_ERRLOG("file %s open failed, errorno:%d", rargs->file_path, errno);
-		exit(EXIT_FAILURE);
+		abort();
 	}
 
 	//Create listener for io connections from controller and add to epoll
 	if((sfd = cstor_ops.conn_listen(rargs->replica_ip, rargs->replica_port, 32, 0)) < 0) {
 		REPLICA_ERRLOG("conn_listen() failed, errorno:%d", errno);
-		exit(EXIT_FAILURE);
+		abort();
         }
 
 	//Connect to controller to start handshake and connect to epoll
@@ -888,6 +888,7 @@ mock_repl(void *args)
 			close(rargs->mgmtfd);
 			close(rargs->iofd);
 			close(rargs->file_fd);
+			close(sfd);
 			sleep(5);
 
 			while (!TAILQ_EMPTY(&(rargs->mgmt_recv_list))) {
@@ -962,7 +963,7 @@ create_mock_replicas(int replication_factor, char *volname)
 	for (i = 0; i < replication_factor; i++) {
 		rargs = &(all_rargs[i]);
 		strncpy(rargs->replica_ip, "127.0.0.1", MAX_IP_LEN);
-		rargs->replica_port = 6161 + i;
+		rargs->replica_port = 6061 + i;
 		rargs->kill_replica = false;
 		rargs->kill_is_over = false;	
 
@@ -1146,7 +1147,7 @@ rebuild_test(void *arg)
 
         		case UNIT_TEST_STATE_REREGISTER_REPLICA:
 				if (rargs->kill_is_over == true) {
-					reregister_replica(spec, rargs, 6165);
+					reregister_replica(spec, rargs, rargs->replica_port);
 					test_args->state++;
 				}
 				break;
@@ -1172,7 +1173,7 @@ rebuild_test(void *arg)
 				    (spec->healthy_rcount == 0)) {
 					spec->replication_factor = 1;
 					spec->consistency_factor = 1;
-					reregister_replica(spec, rargs, 6166);
+					reregister_replica(spec, rargs, 6061);
 					test_args->state++;
 				}
 				break;
