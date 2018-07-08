@@ -317,16 +317,16 @@ check_for_error(int err_type)
 	num--;
 
 	if (num <= 0) {
+		MTX_LOCK(&err_replica_mtx);
 		if (err_type == ERROR_TYPE_DATA) {
-			MTX_LOCK(&err_replica_mtx);
 			if (active_replica <= consistency_factor) {
 				MTX_UNLOCK(&err_replica_mtx);
 				goto out;
 			} else {
 				active_replica--;
 			}
-			MTX_UNLOCK(&err_replica_mtx);
 		}
+		MTX_UNLOCK(&err_replica_mtx);
 		rc = 1;
 		num = (int) random() % 30;
 		old_num++;
@@ -537,6 +537,12 @@ send_io_resp(int fd, zvol_io_hdr_t *io_hdr, void *buf)
 			}
 		}
 	}
+
+	MTX_LOCK(&err_replica_mtx);
+	if (io_hdr->opcode == ZVOL_OPCODE_OPEN)
+		active_replica++;
+	MTX_UNLOCK(&err_replica_mtx);
+
 	return 0;
 }
 
@@ -805,10 +811,6 @@ try_again:
 						open_ptr = (zvol_op_open_data_t *)data;
 						io_hdr->status = ZVOL_OP_STATUS_OK;
 
-						MTX_LOCK(&err_replica_mtx);
-						active_replica++;
-						MTX_UNLOCK(&err_replica_mtx);
-
 						REPLICA_LOG("Got volname(%s) blocksize(%d) timeout(%d) for replica(%d)\n",
 						    open_ptr->volname, open_ptr->tgt_block_size, open_ptr->timeout, replica_port);
 					}
@@ -882,6 +884,8 @@ error:
 		goto try_again;
 	}
 
+	free(io_hdr);
+	free(mgmtio);
 	free(events);
 	REPLICA_ERRLOG("shutting down replica(%d)... \n", replica_port);
 	pthread_cleanup_pop(0);
@@ -977,7 +981,7 @@ wait_for_spec_ready(void)
 	MTX_UNLOCK(&specq_mtx);
 
 	while (count && spec) {
-		usleep(100000);
+		sleep(5);
 		MTX_LOCK(&spec->rq_mtx);
 		if (spec->ready) {
 			MTX_UNLOCK(&spec->rq_mtx);
