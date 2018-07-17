@@ -745,14 +745,25 @@ create_replica_entry(spec_t *spec, int epfd, int mgmt_fd)
 	if (rc != 0) {
 		REPLICA_ERRLOG("pthread_mutex_init() failed err(%d) for "
 		    "replica(%s:%d)\n", rc, replica->ip, replica->port);
-		return NULL;
+		goto error;
 	}
+
 	rc = pthread_cond_init(&replica->r_cond, NULL);
 	if (rc != 0) {
 		REPLICA_ERRLOG("pthread_cond_init() failed err(%d) for "
 		    "replica(%s:%d)\n", rc, replica->ip, replica->port);
+error:
+		(void) pthread_mutex_destroy(&replica->r_mtx);
+
+		MTX_LOCK(&spec->rq_mtx);
+		TAILQ_REMOVE(&spec->rwaitq, replica, r_waitnext);
+		MTX_UNLOCK(&spec->rq_mtx);
+
+		free(replica->mgmt_io_resp_hdr);
+		free(replica);
 		return NULL;
 	}
+
 	return replica;
 }
 
@@ -876,6 +887,7 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 		REPLICA_ERRLOG("pthread_create(r_thread) failed for "
 		    "replica(%lu)\n", replica->zvol_guid);
 replica_error:
+		destroy_mempool(&replica->cmdq);
 		replica->iofd = -1;
 		close(iofd);
 		free(rio_hdr);
@@ -1584,24 +1596,35 @@ accept_mgmt_conns(int epfd, int sfd)
 #ifdef	DEBUG
 		replica->replica_mgmt_dport = atoi(sbuf);
 #endif
+
 		rc = epoll_ctl(epfd, EPOLL_CTL_ADD, mgmt_fd, &event);
 		if(rc == -1) {
 			REPLICA_ERRLOG("epoll_ctl() failed on fd(%d), "
 			    "err(%d).. closing it.. for replica(%s:%d)\n",
 			    mgmt_fd, errno, replica->ip, replica->port);
 cleanup:
+			if (mevent1) {
+				free(mevent1);
+				mevent1 = NULL;
+			}
+
+			if (mevent2) {
+				free(mevent2);
+				mevent2 = NULL;
+			}
+
 			if (replica->mgmt_eventfd1 != -1) {
 				(void) epoll_ctl(epfd, EPOLL_CTL_DEL, replica->mgmt_eventfd1, NULL);
 				close(replica->mgmt_eventfd1);
-				free(mevent2);
-				free(mevent1);
 			}
+
 			if (replica) {
 				pthread_mutex_destroy(&replica->r_mtx);
 				pthread_cond_destroy(&replica->r_cond);
 				MTX_LOCK(&spec->rq_mtx);
 				TAILQ_REMOVE(&spec->rwaitq, replica, r_waitnext);
 				MTX_UNLOCK(&spec->rq_mtx);
+				free(replica);
 			}
 			shutdown(mgmt_fd, SHUT_RDWR);
 			close(mgmt_fd);
@@ -1609,7 +1632,11 @@ cleanup:
 		}
 		replica->m_event1 = mevent1;
 		replica->m_event2 = mevent2;
+
 		send_replica_handshake_query(replica, spec);
+
+		mevent1 = NULL;
+		mevent2 = NULL;
 	}
 }
 
@@ -2576,6 +2603,26 @@ initialize_replication()
 	return 0;
 }
 
+void
+destroy_volume(spec_t *spec)
+{
+	ASSERT0(get_num_entries_from_mempool(&spec->rcommon_deadlist));
+	destroy_mempool(&spec->rcommon_deadlist);
+
+	ASSERT(TAILQ_EMPTY(&spec->rcommon_waitq));
+	ASSERT(TAILQ_EMPTY(&spec->rq));
+	ASSERT(TAILQ_EMPTY(&spec->rwaitq));
+
+	pthread_mutex_destroy(&spec->rcommonq_mtx);
+	pthread_mutex_destroy(&spec->rq_mtx);
+
+	MTX_LOCK(&specq_mtx);
+	TAILQ_REMOVE(&spec_q, spec, spec_next);
+	MTX_UNLOCK(&specq_mtx);
+
+	return;
+}
+
 int
 initialize_volume(spec_t *spec, int replication_factor, int consistency_factor)
 {
@@ -2590,10 +2637,8 @@ initialize_volume(spec_t *spec, int replication_factor, int consistency_factor)
 	VERIFY(replication_factor > 0);
 	VERIFY(consistency_factor > 0);
 
-        if(init_mempool(&spec->rcommon_deadlist, rcmd_mempool_count, 0, 0,
-            "rcmd_mempool", NULL, NULL, NULL, false)) {
-		return -1;
-	}
+        init_mempool(&spec->rcommon_deadlist, rcmd_mempool_count, 0, 0,
+            "rcmd_mempool", NULL, NULL, NULL, false);
 
 	spec->replication_factor = replication_factor;
 	spec->consistency_factor = consistency_factor;

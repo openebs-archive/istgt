@@ -76,6 +76,9 @@ destroy_mempool(rte_smempool_t *obj)
 	void *entry;
 	int rc;
 
+	if (!obj->ring)
+		return 0;
+
 	if (rte_ring_count(obj->ring) != obj->length) {
 		REPLICA_ERRLOG("there are still orphan entries(%d) for "
 		    "mempool(%s)\n",

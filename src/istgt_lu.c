@@ -225,6 +225,7 @@ istgt_connection_status(CONN_Ptr conn, const char *status)
 	MTX_UNLOCK(&conn->istgt->mutex);
 	fp = fopen (logfile, "a");
 	if (fp == NULL) {
+		xfree(logfile);
 		fprintf(stderr, "Cannot open the file %s \n", logfile);
 		return;
 	}
@@ -4136,7 +4137,7 @@ maintenance_io_worker(void *arg)
 	ISTGT_LU_DISK *spec = NULL;
 	ISTGT_LU_TASK_Ptr lu_task;
 	int qcnt;
-	int lun;
+	volatile int lun;
 	int rc = 0, i, j;
 	int retry_runningstate_count = 0;
 	int tind = 0;
@@ -4179,6 +4180,8 @@ maintenance_io_worker(void *arg)
 	qcnt = 0;
 	pthread_cleanup_push(luw_cleanup, (void *)spec);
 
+	retry_runningstate_count = 0;
+
 	while (1) {
 		if (lu->type != ISTGT_LU_TYPE_DISK)
 			break;
@@ -4199,7 +4202,7 @@ maintenance_io_worker(void *arg)
 			spec = (ISTGT_LU_DISK *) lu->lun[lun].spec;
 			MTX_LOCK(&spec->complete_queue_mutex);
 again:
-			do{
+			do {
 				if (istgt_lu_get_state(lu) != ISTGT_STATE_RUNNING)
 				{
 					MTX_UNLOCK(&spec->complete_queue_mutex);
@@ -4244,13 +4247,14 @@ again:
 				}
 				MTX_UNLOCK(&spec->state_mutex);
 
+				rc = 0;
 				if (do_close == 1)
 					rc = istgt_lu_disk_close(spec->lu, spec->lun);
-				if (do_open == 1)
+				else if (do_open == 1)
 					rc = istgt_lu_disk_open(spec->lu, spec->lun);
 
 				MTX_LOCK(&spec->complete_queue_mutex);
-				if(rc == 0) 
+				if (rc == 0)
 					spec->disk_modify_work_pending = 0;
 				else {
 					lu_task = istgt_queue_dequeue(&spec->maint_cmd_queue);
@@ -4271,7 +4275,7 @@ again:
 			if(unlikely(spec->rsv_pending & ISTGT_RSV_READ)) {
 				MTX_UNLOCK(&spec->pr_rsv_mutex);
 				rc = istgt_lu_disk_post_open(spec);
-				if(rc != 0) {
+				if (rc != 0) {
 					MTX_LOCK(&spec->complete_queue_mutex);
 					lu_task = istgt_queue_dequeue(&spec->maint_cmd_queue);
 					if(lu_task != NULL) {
@@ -4311,7 +4315,7 @@ execute_task:
 			lun++;
 		}
 	}
- loop_exit:
+loop_exit:
 	;
 	pthread_cleanup_pop(0);
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "LU%d loop ended\n", lu->num);
@@ -4431,12 +4435,12 @@ luworker(void *arg)
 				retry_runningstate_count++;
 			}
 
-			if (istgt_lu_get_state(lu) != ISTGT_STATE_RUNNING)
+			if ((istgt_lu_get_state(lu) != ISTGT_STATE_RUNNING))
 				goto loop_exit;
 
-				id = 14;
-				clock_gettime(clockid, &second2);
-				tdiff(first, second2, r);
+			id = 14;
+			clock_gettime(clockid, &second2);
+			tdiff(first, second2, r);
 			if (lun >= lu->maxlun) {
 				lun = 0;
 			}

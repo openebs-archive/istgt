@@ -653,15 +653,15 @@ istgt_uctl_cmd_set(UCTL_Ptr uctl)
 		if(!strcmp(iqn, "ALL")) {
 			for (i = 1; i <= istgt->nlogical_unit; i++) {
 				spec = (ISTGT_LU_DISK *)istgt->logical_unit[i]->lun[0].spec;
+				if (!spec)
+					goto spec_error;
 				spec->max_unmap_sectors = setval;
 			}
 			ISTGT_LOG("ALL->max_unmap_sectors ->%d\n", setval);
 			break;
 		}
-		if(spec==NULL) {
-			istgt_uctl_snprintf(uctl, "ERR invalid parameter ALL\n");
-			goto error_return;
-		}
+		if (!spec)
+			goto spec_error;
 		ISTGT_LOG("%s->max_unmap_sectors %d->%d\n", iqn, spec->max_unmap_sectors, setval);
 		spec->max_unmap_sectors = setval;
 		break;
@@ -681,15 +681,15 @@ istgt_uctl_cmd_set(UCTL_Ptr uctl)
 		if(!strcmp(iqn, "ALL")) {
 			for (i = 1; i <= istgt->nlogical_unit; i++) {
 				spec = (ISTGT_LU_DISK *)istgt->logical_unit[i]->lun[0].spec;
+				if (!spec)
+					goto spec_error;
 				spec->ats = setval;
 			}
 			ISTGT_LOG("ALL->ats ->%d\n", setval);
 			break;
 		}
-		if(spec==NULL) {
-			istgt_uctl_snprintf(uctl, "ERR invalid parameter ALL\n");
-			goto error_return;
-		}
+		if (!spec)
+			goto spec_error;
 		ISTGT_LOG("%s->ats %d->%d\n", iqn, spec->ats, setval);
 		spec->ats = setval;
 		break;
@@ -701,23 +701,19 @@ istgt_uctl_cmd_set(UCTL_Ptr uctl)
 		if(!strcmp(iqn, "ALL")) {
 			for (i = 1; i <= istgt->nlogical_unit; i++) {
 				spec = (ISTGT_LU_DISK *)istgt->logical_unit[i]->lun[0].spec;
+				if (!spec)
+					goto spec_error;
 				spec->xcopy = setval;
 			}
 			ISTGT_LOG("ALL->xcopy ->%d\n", setval);
 			break;
 		}
-		if(spec==NULL) {
-			istgt_uctl_snprintf(uctl, "ERR invalid parameter ALL\n");
-			goto error_return;
-		}
+		if (!spec)
+			goto spec_error;
 		ISTGT_LOG("%s->xcopy %d->%d\n", iqn, spec->xcopy, setval);
 		spec->xcopy = setval;
 		break;
 	case 8:
-		if(setval < 0) {
-			istgt_uctl_snprintf(uctl, "ERR invalid parameter value %d\n", setval);
-			goto error_return;
-		}	
 		if(!strcmp(iqn, "ALL")) {
 			for (i = 1; i <= istgt->nlogical_unit; i++) {
 				istgt->logical_unit[i]->limit_q_size = setval;
@@ -730,42 +726,34 @@ istgt_uctl_cmd_set(UCTL_Ptr uctl)
 		}
 		break;
 	case 9:
-		if(setval < 0) {
-			istgt_uctl_snprintf(uctl, "ERR invalid parameter value %d for 9\n", setval);
-			goto error_return;
-		}
 		if(!strcmp(iqn, "ALL")) {
 			for (i = 1; i <= istgt->nlogical_unit; i++) {
 				spec = (ISTGT_LU_DISK *)istgt->logical_unit[i]->lun[0].spec;
+				if (!spec)
+					goto spec_error;
 				spec->delay_reserve = setval;
 			}
 			ISTGT_LOG("ALL->delay_reserve ->%d\n", setval);
 			break;
 		}
-		if(spec==NULL) {
-			istgt_uctl_snprintf(uctl, "ERR invalid parameter ALL\n");
-			goto error_return;
-		}
+		if (!spec)
+			goto spec_error;
 		ISTGT_LOG("%s->delay_reserve %d->%d\n", iqn, spec->delay_reserve, setval);
 		spec->delay_reserve = setval;
 		break;
 	case 10:
-		if(setval < 0) {
-			istgt_uctl_snprintf(uctl, "ERR invalid parameter value %d for 9\n", setval);
-			goto error_return;
-		}
 		if(!strcmp(iqn, "ALL")) {
 			for (i = 1; i <= istgt->nlogical_unit; i++) {
 				spec = (ISTGT_LU_DISK *)istgt->logical_unit[i]->lun[0].spec;
+				if (!spec)
+					goto spec_error;
 				spec->delay_release = setval;
 			}
 			ISTGT_LOG("ALL->delay_release ->%d\n", setval);
 			break;
 		}
-		if(spec==NULL) {
-			istgt_uctl_snprintf(uctl, "ERR invalid parameter ALL\n");
-			goto error_return;
-		}
+		if (!spec)
+			goto spec_error;
 		ISTGT_LOG("%s->delay_release %d->%d\n", iqn, spec->delay_release, setval);
 		spec->delay_release = setval;
 		break;
@@ -781,15 +769,15 @@ istgt_uctl_cmd_set(UCTL_Ptr uctl)
 		if(!strcmp(iqn, "ALL")) {
 			for (i = 1; i <= istgt->nlogical_unit; i++) {
 				spec = (ISTGT_LU_DISK *)istgt->logical_unit[i]->lun[0].spec;
+				if (!spec)
+					goto spec_error;
 				spec->error_inject = setval;
 			}
 			ISTGT_LOG("ALL->error_inject->0x%x\n", setval);
 			break;
 		}
-		if(spec==NULL) {
-			istgt_uctl_snprintf(uctl, "ERR invalid parameter ALL\n");
-			goto error_return;
-		}
+		if (!spec)
+			goto spec_error;
 		ISTGT_LOG("%s->error_inject 0x%x->0x%x\n", iqn, spec->error_inject, setval);
 		spec->error_inject = setval;
 		break;
@@ -797,15 +785,15 @@ istgt_uctl_cmd_set(UCTL_Ptr uctl)
 		if(!strcmp(iqn, "ALL")) {
 			for (i = 1; i <= istgt->nlogical_unit; i++) {
 				spec = (ISTGT_LU_DISK *)istgt->logical_unit[i]->lun[0].spec;
+				if (!spec)
+					goto spec_error;
 				spec->inject_cnt = setval;
 			}
 			ISTGT_LOG("ALL->inject_cnt->%d\n", setval);
 			break;
 		}
-		if(spec==NULL) {
-			istgt_uctl_snprintf(uctl, "ERR invalid parameter ALL\n");
-			goto error_return;
-		}
+		if (!spec)
+			goto spec_error;
 		ISTGT_LOG("%s->inject_cnt %d->%d\n", iqn, spec->inject_cnt, setval);
 		spec->inject_cnt = setval;
 		break;
@@ -818,15 +806,15 @@ istgt_uctl_cmd_set(UCTL_Ptr uctl)
 		if(!strcmp(iqn, "ALL")) {
 			for (i = 1; i <= istgt->nlogical_unit; i++) {
 				spec = (ISTGT_LU_DISK *)istgt->logical_unit[i]->lun[0].spec;
+				if (!spec)
+					goto spec_error;
 				spec->exit_lu_worker = setval;
 			}
 			ISTGT_LOG("ALL->exit_lu_worker->%d\n", setval);
 			break;
 		}
-		if(spec==NULL) {
-			istgt_uctl_snprintf(uctl, "ERR invalid parameter ALL\n");
-			goto error_return;
-		}
+		if (!spec)
+			goto spec_error;
 		ISTGT_LOG("%s->exit_lu_worker %d->%d\n", iqn, spec->exit_lu_worker, setval);
 		spec->exit_lu_worker = setval;
 		break;
@@ -836,11 +824,14 @@ istgt_uctl_cmd_set(UCTL_Ptr uctl)
 			istgt_uctl_snprintf(uctl, "ERR invalid parameter value %d\n", setval);
 			goto error_return;
 		}
+		if (!spec)
+			goto spec_error;
 		spec->percent_count = 0;
 		sleep(1);
 		if(!strcmp(iqn, "ALL")) {
 			spec = (ISTGT_LU_DISK *)istgt->logical_unit[1]->lun[0].spec;
-
+			if (!spec)
+				goto spec_error;
 			tot = 0;
 			for(j=0;j<setval;j+=2) {
 				val1 = atoi(strsepq(&arg, delim));
@@ -867,10 +858,6 @@ istgt_uctl_cmd_set(UCTL_Ptr uctl)
 				spec1->percent_count = (j>>1);
 			}
 			break;
-		}
-		if(spec==NULL) {
-			istgt_uctl_snprintf(uctl, "ERR invalid parameter ALL\n");
-			goto error_return;
 		}
 		tot = 0;
 		for(j=0;j<setval;j+=2) {
@@ -901,6 +888,10 @@ istgt_uctl_cmd_set(UCTL_Ptr uctl)
 		return rc;
 	}
 	return UCTL_CMD_OK;
+
+spec_error:
+	istgt_uctl_snprintf(uctl, "ERR spec is NULL\n");
+
 error_return:
 	rc = istgt_uctl_writeline(uctl);
 	if (rc != UCTL_CMD_OK) {
@@ -2487,16 +2478,19 @@ istgt_uctl_cmd_dump(UCTL_Ptr uctl)
 
 		istgt_lock_gconns();
 		MTX_LOCK(&lu->mutex);
-		for (j = 0; j < lu->maxmap; j++) {
+		/* limit host string to 2048 characters */
+		for (j = 0; j < lu->maxmap && rem > 256; j++) {
 			pgp = istgt_lu_find_portalgroup(uctl->istgt, lu->map[j].pg_tag);
 			if(pgp != NULL) {
-				for( x = 0; x < pgp->nportals; x++) {
+				for( x = 0; x < pgp->nportals && rem > 256; x++) {
 					ln = snprintf(bp, 256, " IP%d:%s  ", x+1, pgp->portals[x]->host);
-					if(ln <0)
+					if(ln < 0)
 						ln = 0;
-					else if(ln > rem)
-						ln = rem;
-					rem -= ln;
+					else if(ln > 0) {
+						if (ln > 256)
+							ln = 256;
+						rem -= ln;
+					}
 					bp += ln;
 					*bp = '\0';
 				}

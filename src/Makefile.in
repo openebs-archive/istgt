@@ -33,6 +33,7 @@ CFLAGS  += -Wcast-qual -Wchar-subscripts -Winline
 CFLAGS  += -Wmissing-prototypes -Wnested-externs -Wpointer-arith
 CFLAGS  += -Wredundant-decls -Wshadow -Wstrict-prototypes -Wwrite-strings
 CFLAGS  += -Wno-error=cast-align
+CFLAGS  += --param max-inline-insns-single=1000
 
 istgt_source = istgt.c istgt_iscsi.c istgt_iscsi_param.c istgt_lu.c 	\
 		istgt_cmd_table.c istgt_ser_table.c istgt_lu_disk.c 	\
