@@ -501,24 +501,25 @@ static bool
 is_replica_familiar(spec_t *spec, replica_t *new_replica)
 {
 	known_replica_t *kr = NULL;
-	int connected_replica = 0;
+	int familiar_replicas = 0;
 	bool ret = false, found = false;
 	replica_t *old_replica = NULL;
 
 	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 
 	TAILQ_FOREACH(kr, &spec->identified_replica, next) {
-		connected_replica++;
+		familiar_replicas++;
 		if (kr->zvol_guid == new_replica->zvol_guid) {
 			found = true;
 			if (!kr->is_connected) {
 				ret = true;
+				kr->is_connected = true;
 			}
 			break;
 		}
 	}
 
-	if (!found && connected_replica < spec->replication_factor) {
+	if (!found && familiar_replicas < spec->replication_factor) {
 		kr = malloc(sizeof (known_replica_t));
 		kr->zvol_guid = new_replica->zvol_guid;
 		kr->is_connected = true;
@@ -539,6 +540,7 @@ is_replica_familiar(spec_t *spec, replica_t *new_replica)
 				    "session\n", old_replica->zvol_guid);
 				handle_mgmt_conn_error(old_replica, 0, NULL, 0);
 				MTX_LOCK(&spec->rq_mtx);
+				kr->is_connected = true;
 				ret = true;
 				break;
 			}
@@ -1449,7 +1451,7 @@ handle_prepare_for_rebuild_resp(spec_t *spec, zvol_io_hdr_t *hdr,
  * Handler for stats opcode response from replica
  */
 static void
-update_spec_stats(spec_t *spec, zvol_io_hdr_t *hdr, void *resp)
+handle_update_spec_stats(spec_t *spec, zvol_io_hdr_t *hdr, void *resp)
 {
 	zvol_op_stat_t *stats = (zvol_op_stat_t *)resp;
 	if (hdr->status != ZVOL_OP_STATUS_OK)
@@ -1822,7 +1824,7 @@ read_io_resp_hdr:
 					break;
 
 				case ZVOL_OPCODE_STATS:
-					update_spec_stats(spec, resp_hdr, *resp_data);
+					handle_update_spec_stats(spec, resp_hdr, *resp_data);
 					free(*resp_data);
 					break;
 
@@ -1988,7 +1990,7 @@ empty_mgmt_q_of_replica(replica_t *r)
 					    mgmt_cmd->io_hdr, NULL, mgmt_cmd);
 					break;
 				case ZVOL_OPCODE_STATS:
-					update_spec_stats(r->spec, mgmt_cmd->io_hdr,
+					handle_update_spec_stats(r->spec, mgmt_cmd->io_hdr,
 					    NULL);
 					break;
 				default:
