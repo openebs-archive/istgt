@@ -79,9 +79,6 @@ int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 			    RECEIVED_ERR;				\
 			pthread_cond_signal(_cond);			\
 		} else {						\
-			REPLICA_DEBUGLOG("error set for command(%lu)"	\
-			    " for replica(%lu)\n",			\
-			    rcomm_cmd->io_seq, r->zvol_guid);		\
 			rcomm_cmd->resp_list[idx].status |= 		\
 			    RECEIVED_ERR;				\
 		}							\
