@@ -173,6 +173,8 @@ int64_t perform_read_write_on_fd(int fd, uint8_t *data, uint64_t len,
     int state);
 int initialize_volume(spec_t *spec, int, int);
 void destroy_volume(spec_t *spec);
+void free_replica(replica_t *replica);
+void respond_with_error_for_all_outstanding_ios(replica_t *r);
 
 /* Replica default timeout is 200 seconds */
 #define	REPLICA_DEFAULT_TIMEOUT	200

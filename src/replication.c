@@ -42,7 +42,6 @@ static void handle_mgmt_conn_error(replica_t *r, int sfd, struct epoll_event *ev
 static int read_io_resp(spec_t *spec, replica_t *replica, io_event_t *revent, mgmt_cmd_t *mgmt_cmd);
 static void respond_with_error_for_all_outstanding_mgmt_ios(replica_t *r);
 static void inform_data_conn(replica_t *r);
-static void free_replica(replica_t *r);
 static int handle_mgmt_event_fd(replica_t *replica);
 
 #define build_rcomm_cmd(rcomm_cmd, cmd, offset, nbytes) 						\
@@ -738,6 +737,8 @@ create_replica_entry(spec_t *spec, int epfd, int mgmt_fd)
 	MTX_UNLOCK(&spec->rq_mtx);
 
 	replica->mgmt_eventfd2 = -1;
+	replica->data_eventfd = -1;
+	replica->epollfd = -1;
 	replica->iofd = -1;
 	replica->spec = spec;
 
@@ -909,6 +910,10 @@ replica_error:
 	if (replica->mgmt_eventfd2 == -1) {
 		REPLICA_ERRLOG("unable to set mgmteventfd2 for more than 10 "
 		    "seconfs for replica(%lu)\n", replica->zvol_guid);
+		/*
+		 * set dont_free to 1 to avoid destroying replica
+		 * in mgmt thread.
+		 */
 		replica->dont_free = 1;
 		replica->iofd = -1;
 		MTX_UNLOCK(&replica->r_mtx);
@@ -1755,6 +1760,7 @@ read_io_resp_hdr:
 
 					memset(resp_hdr, 0, sizeof(zvol_io_hdr_t));
 					free(*resp_data);
+					*resp_data = NULL;
 
 					if (rc == -1)
 						return (rc);
@@ -1766,7 +1772,6 @@ read_io_resp_hdr:
 					ASSERT(fd != replica->iofd);
 
 					update_replica_status(spec, replica);
-					free(*resp_data);
 					break;
 
 				case ZVOL_OPCODE_STATS:
@@ -1778,7 +1783,6 @@ read_io_resp_hdr:
 					/* replica status must come from mgmt connection */
 					assert(fd != replica->iofd);
 					handle_prepare_for_rebuild_resp(spec, resp_hdr, *resp_data, mgmt_cmd);
-					free(*resp_data);
 					break;
 
 				case ZVOL_OPCODE_SNAP_CREATE:
@@ -1805,7 +1809,10 @@ read_io_resp_hdr:
 					    replica->zvol_guid);
 					break;
 			}
-			*resp_data = NULL;
+			if (*resp_data) {
+				free(*resp_data);
+				*resp_data = NULL;
+			}
 			*read_count = 0;
 			donecount++;
 			*state = READ_IO_RESP_HDR;
@@ -1878,15 +1885,15 @@ inform_data_conn(replica_t *r)
 /*
  * This function will cleanup replica structure
  */
-static void
+void
 free_replica(replica_t *r)
 {
 	pthread_mutex_destroy(&r->r_mtx);
 	pthread_cond_destroy(&r->r_cond);
 
-	free(r->mgmt_io_resp_hdr);
-	free(r->m_event1);
-	free(r->m_event2);
+	if (r->cmdq.ring)
+		respond_with_error_for_all_outstanding_ios(r);
+	destroy_mempool(&r->cmdq);
 
 	if (r->ip)
 		free(r->ip);
@@ -2363,8 +2370,29 @@ handle_mgmt_conn_error(replica_t *r, int sfd, struct epoll_event *events, int ev
 	}
 	MTX_UNLOCK(&r->spec->rq_mtx);
 
-	if (r->dont_free != 1)
+	if (r->mgmt_io_resp_hdr)
+		free(r->mgmt_io_resp_hdr);
+	if (r->mgmt_io_resp_data)
+		free(r->mgmt_io_resp_data);
+
+	free(r->m_event1);
+	free(r->m_event2);
+
+	if (r->dont_free != 1) {
+		/*
+		 * If dont_free is not 1 then we will destroy replica
+		 */
 		free_replica(r);
+	} else {
+		/*
+		 * If dont_free is set to 1 then we will not destroy replica.
+		 * replica thread will take care of destroying it.
+		 */
+		MTX_LOCK(&r->r_mtx);
+		r->conn_closed++;
+		pthread_cond_signal(&r->r_cond);
+		MTX_UNLOCK(&r->r_mtx);
+	}
 }
 
 /*
@@ -2794,7 +2822,7 @@ cleanup_deadlist(void *arg)
 			if (count == rcomm_cmd->copies_sent) {
 				destroy_resp_list(rcomm_cmd);
 
-				for (i=1; i<rcomm_cmd->iovcnt + 1; i++)
+				for (i=1; i < rcomm_cmd->iovcnt + 1; i++)
 					xfree(rcomm_cmd->iov[i].iov_base);
 
 				memset(rcomm_cmd, 0, sizeof(rcommon_cmd_t));
