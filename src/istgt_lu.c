@@ -2620,8 +2620,12 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 					goto error_return;
 				}
 
+				MTX_LOCK(&spec->rq_mtx);
 				spec->size = new_size;
 				spec->rsize = new_rsize;
+				spec->blockcnt = spec->size / spec->blocklen;
+				MTX_UNLOCK(&spec->rq_mtx);
+
 #endif
 
 				lu->lun[i].u.storage.size = new_size;

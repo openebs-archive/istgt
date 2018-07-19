@@ -1141,10 +1141,12 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 
 	rc = send_io_blocking_mgmt_cmd(spec, rcomm_mgmt_cmd,
 	    ZVOL_OPCODE_SNAP_CREATE, io_wait_time, wait_time, &seq_num);
-	if (rc != 0) {
+	if (rc < 0) {
 		REPLICA_ERRLOG("Failed to send snapcreate cmd for vol(%s) "
 		    "snapname(%s)\n", spec->volname, snapname);
 		istgt_lu_destroy_snapshot(spec, snapname, seq_num);
+	} else if (rc > 0) {
+		free_rcommon_mgmt_cmd(rcomm_mgmt_cmd);
 	}
 
 	return rc;
@@ -2754,6 +2756,15 @@ enqueue_mgmt_command_to_replica(replica_t *replica, uint64_t io_seq, uint8_t *da
 	return ret;
 }
 
+/*
+ * send_io_blocking_mgmt_cmd will send mgmt command (for which IOs should be stopped)
+ * to all replica.
+ * Return values :
+ *  0        : If the response from all replica for a mgmt command is a success
+ * -1 or < 0 : If failed to send the command to a few replica or error received
+ *             from any replica
+ *  1 or > 0 : If failed to send a command to all replica
+ */
 static int
 send_io_blocking_mgmt_cmd(spec_t *spec, rcommon_mgmt_cmd_t *rcomm_mgmt_cmd,
     zvol_op_code_t opcode, int io_wait_time, int wait_time, int *mgmt_io_seq)
@@ -2778,11 +2789,13 @@ send_io_blocking_mgmt_cmd(spec_t *spec, rcommon_mgmt_cmd_t *rcomm_mgmt_cmd,
 
 	if (is_volume_healthy(spec) == false) {
 		REPLICA_ERRLOG("volume is not healthy..\n");
+		ret = 1;
 		goto out;
 	}
 
 	if (!pause_and_timed_wait_for_ongoing_ios(spec, io_wait_time)) {
 		REPLICA_ERRLOG("pausing failed..\n");
+		ret = 1;
 		goto out;
 	}
 
@@ -2810,6 +2823,7 @@ send_io_blocking_mgmt_cmd(spec_t *spec, rcommon_mgmt_cmd_t *rcomm_mgmt_cmd,
 			rcomm_mgmt_cmd->caller_gone = 1;
 			MTX_UNLOCK(&rcomm_mgmt_cmd->mtx);
 			REPLICA_ERRLOG("caller gone..\n");
+			ret = -1;
 			goto out;
 		}
 	}
@@ -2821,6 +2835,7 @@ send_io_blocking_mgmt_cmd(spec_t *spec, rcommon_mgmt_cmd_t *rcomm_mgmt_cmd,
 		MTX_UNLOCK(&rcomm_mgmt_cmd->mtx);
 		REPLICA_ERRLOG("cmds sent %d not eq repl factor %d..\n",
 		    rcomm_mgmt_cmd->cmds_sent, spec->replication_factor);
+		ret = -1;
 		goto out;
 	}
 
@@ -2865,7 +2880,7 @@ int
 istgt_lu_resize(spec_t *spec, uint64_t new_size, uint64_t old_size)
 {
 	rcommon_mgmt_cmd_t *rcomm_mgmt;
-	int rc = 0;
+	int rc = 0, rc1 = 0;
 
 	rcomm_mgmt = allocate_rcommon_mgmt_cmd(sizeof (new_size));
 	*(uint64_t *)rcomm_mgmt->buf = new_size;
@@ -2876,19 +2891,24 @@ istgt_lu_resize(spec_t *spec, uint64_t new_size, uint64_t old_size)
 	 */
 	rc = send_io_blocking_mgmt_cmd(spec, rcomm_mgmt,
 	    ZVOL_OPCODE_RESIZE, 30, 10, NULL);
-	if (rc != 0) {
+	if (rc < 0) {
 		REPLICA_ERRLOG("Failed to send resize cmd for vol(%s) "
 		    "size(%lu)\n", spec->volname, new_size);
 
 		rcomm_mgmt = allocate_rcommon_mgmt_cmd(sizeof (old_size));
 		*(uint64_t *)rcomm_mgmt->buf = old_size;
 
-		if (!send_io_blocking_mgmt_cmd(spec, rcomm_mgmt,
-		    ZVOL_OPCODE_RESIZE, 30, 10, NULL)) {
+		rc1 = send_io_blocking_mgmt_cmd(spec, rcomm_mgmt,
+		    ZVOL_OPCODE_RESIZE, 30, 10, NULL);
+		if (rc1) {
 			REPLICA_ERRLOG("An Error occurred while reverting resize "
 			    "changes for vol(%s) new_size(%lu) old_size(%lu)\n",
 			    spec->volname, new_size, old_size);
+			if (rc1 > 0)
+				free_rcommon_mgmt_cmd(rcomm_mgmt);
 		}
+	} else if (rc > 0) {
+		free_rcommon_mgmt_cmd(rcomm_mgmt);
 	}
 
 	return rc;

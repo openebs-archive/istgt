@@ -5673,12 +5673,18 @@ istgt_lu_disk_lbwrite(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cm
 		return 0;
 	}
 
+#ifdef	REPLICATION
+	while (spec->quiesce) {
+		ISTGT_ERRLOG("c#%d LU%d: quiescing write IOs\n", conn->id, spec->lu->num);
+		sleep(1);
+	}
+#endif
+
 	maxlba = spec->blockcnt;
 	llen = (uint64_t) len;
 	blen = spec->blocklen;
 	offset = lba * blen;
 	nbytes = llen * blen;
-
 
 	if (lba >= maxlba || llen > maxlba || lba > (maxlba - llen)) {
 		ISTGT_ERRLOG("c#%d end of media, max:%lu write lba:%lu+%u\n", conn->id, maxlba, lba, len);
@@ -5697,13 +5703,6 @@ istgt_lu_disk_lbwrite(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cm
 		iov[i].iov_base = lu_cmd->iobuf[i].iov_base;
 		iov[i].iov_len = lu_cmd->iobuf[i].iov_len;
 	}
-
-#ifdef	REPLICATION
-	while (spec->quiesce) {
-		ISTGT_ERRLOG("c#%d LU%d: quiescing write IOs\n", conn->id, spec->lu->num);
-		sleep(1);
-	}
-#endif
 
 	if (nbytes != lu_cmd->iobufsize) { //aj-the below call doesn't read anything
 		ISTGT_ERRLOG("c#%d nbytes(%zu) != iobufsize(%zu) (write lba:%lu+%u)\n",
