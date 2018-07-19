@@ -320,13 +320,14 @@ istgt_pg_match_all(PORTAL_GROUP *pgp, CF_SECTION *sp)
 	char *label = NULL, *portal = NULL, *host = NULL, *port = NULL;
 	int que;
 	int rc;
+	int ret = 0;
 	int i;
 
 	for (i = 0; i < pgp->nportals; i++) {
 		label = istgt_get_nmval(sp, "Portal", i, 0);
 		portal = istgt_get_nmval(sp, "Portal", i, 1);
 		if (label == NULL || portal == NULL)
-			return 0;
+			goto no_match;
 		rc = istgt_parse_portal(portal, &host, &port, &que);
 		if (rc < 0)
 			goto no_match;
@@ -339,18 +340,19 @@ istgt_pg_match_all(PORTAL_GROUP *pgp, CF_SECTION *sp)
 		if (pgp->portals[i]->que != que)
 			goto no_match;
 	}
+
 	label = istgt_get_nmval(sp, "Portal", i, 0);
 	portal = istgt_get_nmval(sp, "Portal", i, 1);
 	if (label != NULL || portal != NULL)
-		return 0;
-	return 1;
+		goto no_match;
+	ret = 1;
 
 no_match:
 	if (port)
 		xfree(port);
 	if (host)
 		xfree(host);
-	return 0;
+	return ret;
 }
 
 static int
