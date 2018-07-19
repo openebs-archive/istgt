@@ -2405,8 +2405,8 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 			}
 
 			/*
-			 * If the client is logged in then we will skip
-			 * decrementing ig reference.
+			 * If the client is logged in (maxtsih > 0) then we
+			 * will skip decrementing ig reference.
 			 */
 			MTX_LOCK(&lu->mutex);
 			if (lu->maxtsih < 1 && igp_old) {

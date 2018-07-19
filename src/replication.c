@@ -2882,7 +2882,6 @@ istgt_lu_resize(spec_t *spec, uint64_t new_size, uint64_t old_size)
 
 		rcomm_mgmt = allocate_rcommon_mgmt_cmd(sizeof (old_size));
 		*(uint64_t *)rcomm_mgmt->buf = old_size;
-		rcomm_mgmt->buf_size = sizeof (old_size);
 
 		if (!send_io_blocking_mgmt_cmd(spec, rcomm_mgmt,
 		    ZVOL_OPCODE_RESIZE, 30, 10, NULL)) {
