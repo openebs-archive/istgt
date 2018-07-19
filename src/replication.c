@@ -254,7 +254,6 @@ enqueue_prepare_for_rebuild(spec_t *spec, replica_t *replica,
 	BUILD_REPLICA_MGMT_HDR(rmgmtio, opcode, data_len);
 
 	mgmt_cmd->io_hdr = rmgmtio;
-	mgmt_cmd->io_bytes = 0;
 	mgmt_cmd->data = (char *)malloc(data_len);
 	snprintf((char *)mgmt_cmd->data, data_len, "%s", spec->volname);
 	mgmt_cmd->mgmt_cmd_state = WRITE_IO_SEND_HDR;
@@ -391,10 +390,8 @@ start_rebuild(void *buf, replica_t *replica, uint64_t data_len)
 	BUILD_REPLICA_MGMT_HDR(rmgmtio, mgmt_opcode, data_len);
 
 	mgmt_cmd->io_hdr = rmgmtio;
-	mgmt_cmd->io_bytes = 0;
 	mgmt_cmd->data = buf;
 	mgmt_cmd->mgmt_cmd_state = WRITE_IO_SEND_HDR;
-	mgmt_cmd->rcomm_mgmt = NULL;
 
 	MTX_LOCK(&replica->r_mtx);
 	TAILQ_INSERT_TAIL(&replica->mgmt_cmd_queue, mgmt_cmd, mgmt_cmd_next);
@@ -1013,10 +1010,8 @@ send_replica_handshake_query(replica_t *replica, spec_t *spec)
 	snprintf((char *)data, data_len, "%s", spec->volname);
 
 	mgmt_cmd->io_hdr = rmgmtio;
-	mgmt_cmd->io_bytes = 0;
 	mgmt_cmd->data = data;
 	mgmt_cmd->mgmt_cmd_state = WRITE_IO_SEND_HDR;
-	mgmt_cmd->rcomm_mgmt = NULL;
 
 	MTX_LOCK(&replica->r_mtx);
 	TAILQ_INSERT_TAIL(&replica->mgmt_cmd_queue, mgmt_cmd, mgmt_cmd_next);
@@ -1081,7 +1076,6 @@ send_replica_snapshot(spec_t *spec, replica_t *replica, uint64_t io_seq,
 	rmgmtio->io_seq = io_seq;
 
 	mgmt_cmd->io_hdr = rmgmtio;
-	mgmt_cmd->io_bytes = 0;
 	mgmt_cmd->data = data;
 	mgmt_cmd->mgmt_cmd_state = WRITE_IO_SEND_HDR;
 
@@ -1310,10 +1304,8 @@ send_replica_query(replica_t *replica, spec_t *spec, zvol_op_code_t opcode)
 	snprintf(data, data_len, "%s", spec->volname);
 
 	mgmt_cmd->io_hdr = rmgmtio;
-	mgmt_cmd->io_bytes = 0;
 	mgmt_cmd->data = data;
 	mgmt_cmd->mgmt_cmd_state = WRITE_IO_SEND_HDR;
-	mgmt_cmd->rcomm_mgmt = NULL;
 
 	MTX_LOCK(&replica->r_mtx);
 	TAILQ_INSERT_TAIL(&replica->mgmt_cmd_queue, mgmt_cmd, mgmt_cmd_next);
