@@ -212,7 +212,7 @@ dequeue_replica_cmdq(replica_t *replica)
 /*
  * perform cleanup for all pending IOs in replica's queue
  */
-static void
+void
 respond_with_error_for_all_outstanding_ios(replica_t *r)
 {
 	rcmd_t *rcmd, *next_rcmd;
@@ -222,8 +222,6 @@ respond_with_error_for_all_outstanding_ios(replica_t *r)
 	int wait_cnt, ready_cnt, blocked_cnt;
 	struct timespec wait_diff, ready_diff, blocked_diff;
 	uint64_t read_cnt = 0, write_cnt = 0;
-
-	ASSERT(r->data_eventfd == -1);
 
 	ASSERT(r->data_eventfd == -1);
 
@@ -248,6 +246,47 @@ respond_with_error_for_all_outstanding_ios(replica_t *r)
 }
 
 /*
+ * cleanup_dead_replica will destroy replica if mgmt thread has
+ * not freed replica in a cleanup.
+ */
+static void
+cleanup_dead_replica(replica_t *r)
+{
+	int i = 0, rc = -1;
+	int wait_cnt = 10;
+	struct timespec abstime, now;
+	int nsec;
+
+	/*
+	 * check if dont_free is set
+	 */
+	while (wait_cnt-- && r->dont_free) {
+		clock_gettime(CLOCK_REALTIME, &now);
+		nsec = 1000000000 - now.tv_nsec;
+		if (nsec > 500000000) {
+			abstime.tv_sec = now.tv_sec;
+			abstime.tv_nsec = now.tv_nsec + 500000000;
+		} else {
+			abstime.tv_sec = now.tv_sec + 1;
+			abstime.tv_nsec = 500000000 - nsec;
+		}
+		MTX_LOCK(&r->r_mtx);
+		pthread_cond_timedwait(&r->r_cond, &r->r_mtx, &abstime);
+
+		if (r->conn_closed == 3) {
+			MTX_UNLOCK(&r->r_mtx);
+			free_replica(r);
+			rc = 0;
+			break;
+		}
+		MTX_UNLOCK(&r->r_mtx);
+	}
+	if (rc)
+		REPLICA_ERRLOG("Failed to remove replica(%lu)\n", r->zvol_guid);
+}
+
+
+/*
  * handle error in replica_thread (or data_connection)
  */
 static int
@@ -259,6 +298,7 @@ handle_data_conn_error(replica_t *r)
 
 	if (r->iofd == -1) {
 		REPLICA_ERRLOG("repl %s %d %p\n", r->ip, r->port, r);
+		cleanup_dead_replica(r);
 		return -1;
 	}
 
@@ -292,12 +332,7 @@ handle_data_conn_error(replica_t *r)
 	MTX_UNLOCK(&spec->rq_mtx);
 
 	MTX_LOCK(&r->r_mtx);
-	if (epoll_ctl(r->epollfd, EPOLL_CTL_DEL, r->iofd, NULL) == -1) {
-		MTX_UNLOCK(&r->r_mtx);
-		REPLICA_ERRLOG("epoll error for replica(%s:%d) iofd:%d "
-		    "err(%d)\n", r->ip, r->port, r->iofd, errno);
-		return -1;
-	}
+	(void) epoll_ctl(r->epollfd, EPOLL_CTL_DEL, r->iofd, NULL);
 
 	fd = r->iofd;
 	r->iofd = -1;
@@ -335,6 +370,7 @@ handle_data_conn_error(replica_t *r)
 		pthread_cond_signal(&r->r_cond);
 	r->mgmt_eventfd2 = -1;
 	MTX_UNLOCK(&r->r_mtx);
+	destroy_mempool(&r->cmdq);
 
 	/* replica might have got destroyed */
 	/* shouldn't access any replica related variables */
@@ -661,9 +697,6 @@ replica_thread(void *arg)
 		REPLICA_ERRLOG("epoll error for replica(%s:%d) err(%d)\n",
 		    r->ip, r->port, errno);
 initialize_error:
-		close(r->mgmt_eventfd2);
-		r->mgmt_eventfd2 = -1;
-
 		if ((r_epollfd > 0) && (r_data_eventfd > 0)) {
 			/*
 			 * epoll_ctl may fail so we are ignoring return
@@ -672,13 +705,11 @@ initialize_error:
 			(void) epoll_ctl(r_epollfd, EPOLL_CTL_DEL,
 			    r_data_eventfd, NULL);
 			close(r_epollfd);
-			r->epollfd = -1;
 		}
 
-		if (r_data_eventfd) {
+		if (r_data_eventfd)
 			close(r_data_eventfd);
-			r->data_eventfd = -1;
-		}
+		cleanup_dead_replica(r);
 		return NULL;
 	}
 

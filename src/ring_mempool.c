@@ -29,7 +29,7 @@ init_mempool(rte_smempool_t *obj, size_t count, size_t mem_size,
 
 	if (!initialize) {
 		ASSERT0(mem_size);
-		obj->length = count;
+		obj->length = 0;
 	} else {
 		for (i = 0; i < count; i++, mem_entry = NULL) {
 			mem_entry = malloc(mem_size);
@@ -76,6 +76,9 @@ destroy_mempool(rte_smempool_t *obj)
 	void *entry;
 	int rc;
 
+	if (!obj->ring)
+		return 0;
+
 	if (rte_ring_count(obj->ring) != obj->length) {
 		REPLICA_ERRLOG("there are still orphan entries(%d) for "
 		    "mempool(%s)\n",
@@ -92,6 +95,7 @@ destroy_mempool(rte_smempool_t *obj)
 
 	ASSERT0(rte_ring_count(obj->ring));
 	rte_ring_free(obj->ring);
+	obj->ring = NULL;
 	return 0;
 }
 
