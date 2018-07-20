@@ -73,6 +73,8 @@ static int handle_mgmt_event_fd(replica_t *replica);
 				cmd_write = true;			\
 				rcomm_cmd->opcode = ZVOL_OPCODE_WRITE;	\
 				rcomm_cmd->iovcnt = cmd->iobufindx + 1;	\
+				__sync_add_and_fetch(&spec->writes, 1); \
+				__sync_add_and_fetch(&spec->writebytes, nbytes);\
 				break;					\
 									\
 			case SBC_READ_6:				\
@@ -81,6 +83,8 @@ static int handle_mgmt_event_fd(replica_t *replica);
 			case SBC_READ_16:				\
 				rcomm_cmd->opcode = ZVOL_OPCODE_READ;	\
 				rcomm_cmd->iovcnt = 0;			\
+				__sync_add_and_fetch(&spec->reads, 1);	\
+				__sync_add_and_fetch(&spec->readbytes, nbytes);\
 				break;					\
 									\
 			case SBC_SYNCHRONIZE_CACHE_10:			\
@@ -100,7 +104,7 @@ static int handle_mgmt_event_fd(replica_t *replica);
 			}						\
 			rcomm_cmd->total_len += cmd->iobufsize;		\
 		}							\
-	} while (0)
+	} while (0)							\
 
 #define BUILD_REPLICA_MGMT_HDR(_mgmtio_hdr, _mgmt_opcode, _data_len)	\
 	do {								\
