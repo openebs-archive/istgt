@@ -391,10 +391,8 @@ start_rebuild(void *buf, replica_t *replica, uint64_t data_len)
 	BUILD_REPLICA_MGMT_HDR(rmgmtio, mgmt_opcode, data_len);
 
 	mgmt_cmd->io_hdr = rmgmtio;
-	mgmt_cmd->io_bytes = 0;
 	mgmt_cmd->data = buf;
 	mgmt_cmd->mgmt_cmd_state = WRITE_IO_SEND_HDR;
-	mgmt_cmd->rcomm_mgmt = NULL;
 
 	MTX_LOCK(&replica->r_mtx);
 	TAILQ_INSERT_TAIL(&replica->mgmt_cmd_queue, mgmt_cmd, mgmt_cmd_next);
