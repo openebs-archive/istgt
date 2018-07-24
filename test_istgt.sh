@@ -81,7 +81,7 @@ run_and_verify_iostats() {
 	login_to_volume "$CONTROLLER_IP:3260"
 	get_scsi_disk
 	if [ "$device_name"!="" ]; then
-		sudo mkfs.ext2 -F /dev/$device_name
+		sudo mkfs.ext4 -F /dev/$device_name
 		[[ $? -ne 0 ]] && echo "mkfs failed for $device_name" && exit 1
 
 		sudo mount /dev/$device_name /mnt/store
@@ -119,7 +119,7 @@ write_and_verify_data(){
 	sleep 5
 	get_scsi_disk
 	if [ "$device_name"!="" ]; then
-		mkfs.ext2 -F /dev/$device_name
+		mkfs.ext4 -F /dev/$device_name
 		[[ $? -ne 0 ]] && echo "mkfs failed for $device_name" && tail -20 /var/log/syslog && exit 1
 
 		mount /dev/$device_name /mnt/store
