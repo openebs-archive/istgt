@@ -1,0 +1,10 @@
+/Makefile
+/config.h
+/istgt
+/istgtcontrol
+/replication_test
+/mempool_test
+/istgt_integration
+*.full
+*.debug
+/zrepl_prot.h

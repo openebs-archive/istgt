@@ -199,4 +199,17 @@ void istgt_yield(void);
 void poolinit(void);
 void poolfini(void);
 int poolprint(char *inbuf, int len);
+
+#define timesdiff(_clockid, _st, _now, _re)				\
+{									\
+	clock_gettime(_clockid, &_now);					\
+	if ((_now.tv_nsec - _st.tv_nsec)<0) {				\
+		_re.tv_sec  = _now.tv_sec - _st.tv_sec - 1;		\
+		_re.tv_nsec = 1000000000 + _now.tv_nsec - _st.tv_nsec;	\
+	} else {							\
+		_re.tv_sec  = _now.tv_sec - _st.tv_sec;			\
+		_re.tv_nsec = _now.tv_nsec - _st.tv_nsec;		\
+	}								\
+}
+
 #endif /* ISTGT_MISC_H */

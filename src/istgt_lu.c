@@ -542,6 +542,27 @@ istgt_lu_sendtargets(CONN_Ptr conn, const char *iiqn, const char *iaddr, const c
 }
 
 ISTGT_LU_Ptr
+istgt_lu_find_target_by_volname(ISTGT_Ptr istgt, const char *volname)
+{
+	ISTGT_LU_Ptr lu;
+	int i;
+
+	if (istgt == NULL || volname == NULL)
+		return NULL;
+	for (i = 0; i < MAX_LOGICAL_UNIT; i++) {
+		lu = istgt->logical_unit[i];
+		if (lu == NULL)
+			continue;
+		if (strcasecmp(volname, lu->volname) == 0) {
+			return lu;
+		}
+	}
+	ISTGT_WARNLOG("can't find target %s\n",
+	    volname);
+	return NULL;
+} 
+
+ISTGT_LU_Ptr
 istgt_lu_find_target(ISTGT_Ptr istgt, const char *target_name)
 {
 	ISTGT_LU_Ptr lu;
@@ -1404,10 +1425,11 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 		ISTGT_ERRLOG("LU%d: TargetName not found\n", lu->num);
 		goto error_return;
 	}
+	lu->volname = xstrdup(val);
 	if (strncasecmp(val, "iqn.", 4) != 0
 		&& strncasecmp(val, "eui.", 4) != 0
 		&& strncasecmp(val, "naa.", 4) != 0) {
-		snprintf(buf, sizeof buf, "%s:%s", istgt->nodebase, val);
+		snprintf(buf, sizeof buf,"%s:%s", istgt->nodebase, val);
 	} else {
 		snprintf(buf, sizeof buf, "%s", val);
 	}
@@ -1611,7 +1633,40 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "ReadOnly %s\n",
 	    lu->readonly ? "Yes" : "No");
+#ifdef REPLICATION
+	val = istgt_get_val(sp, "ReplicationFactor");
+	if (val == NULL) {
+		ISTGT_ERRLOG("ReplicationFactor not found in conf file\n");
+		goto error_return;
+	} else {
+		lu->replication_factor = (int) strtol(val, NULL, 10);
+		if (lu->replication_factor > MAXREPLICA) {
+			ISTGT_ERRLOG("Max replication factor is %d.. "
+			    "given %d\n", MAXREPLICA, lu->replication_factor);
+			goto error_return;
+		}
+	}
 
+	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "ReplicationFactor %d\n",
+	    lu->replication_factor);
+
+	val = istgt_get_val(sp, "ConsistencyFactor");
+	if (val == NULL) {
+		ISTGT_ERRLOG("ConsistencyFactor not found in conf file\n");
+		goto error_return;
+	} else {
+		lu->consistency_factor = (int) strtol(val, NULL, 10);
+	}
+
+	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "ConsistencyFactor %d\n",
+	    lu->consistency_factor);
+
+	if(lu->replication_factor <= 0 || lu->consistency_factor <= 0 ||
+		lu->replication_factor < lu->consistency_factor) {
+		ISTGT_ERRLOG("Invalid ReplicationFactor/ConsistencyFactor or their ratio\n");
+		goto error_return;
+	}
+#endif
 	val = istgt_get_val(sp, "UnitType");
 	if (val == NULL) {
 		ISTGT_ERRLOG("LU%d: unknown unit type\n", lu->num);
@@ -1849,10 +1904,13 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 				}
 				lu->lun[i].type = ISTGT_LU_LUN_TYPE_STORAGE;
 
-				file = istgt_get_nmval(sp, buf, j, 1);
-				size = istgt_get_nmval(sp, buf, j, 2);
-				rsz  = istgt_get_nmval(sp, buf, j, 3);
+				size = istgt_get_nmval(sp, buf, j, 1);
+				rsz  = istgt_get_nmval(sp, buf, j, 2);
+#ifdef	REPLICATION
+				if (size == NULL) {
+#else
 				if (file == NULL || size == NULL) {
+#endif
 					ISTGT_ERRLOG("LU%d: LUN%d: format error\n", lu->num, i);
 					goto error_return;
 				}
@@ -1881,18 +1939,26 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 					else
 						lu->lun[i].u.storage.rsize = (uint32_t)vall;
 				}
+#ifdef	REPLICATION
+				lu->lun[i].u.storage.size = istgt_lu_parse_size(size);
+#else
 				if ((strcasecmp(size, "Auto") == 0
 				    || strcasecmp(size, "Size") == 0) && istgt->OperationalMode == 0) {
 					lu->lun[i].u.storage.size = istgt_lu_get_filesize(file);
 				} else {
 					lu->lun[i].u.storage.size = istgt_lu_parse_size(size);
 				}
+#endif
 				if (lu->lun[i].u.storage.size == 0) {
 					ISTGT_ERRLOG("LU%d: LUN%d: Auto size error (%s)\n", lu->num, i, file);
 					goto error_return;
 				}
 				lu->lun[i].u.storage.fd = -1;
+#ifdef	REPLICATION
+				lu->lun[i].u.storage.file = NULL;
+#else
 				lu->lun[i].u.storage.file = xstrdup(file);
+#endif
 				gotstorage = 1;
 			} else if (strcasecmp(val, "Removable") == 0) {
 				if (lu->lun[i].type != ISTGT_LU_LUN_TYPE_NONE) {
@@ -2170,6 +2236,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 
  error_return:
 	xfree(lu->name);
+	xfree(lu->volname);
 	xfree(lu->alias);
 	xfree(lu->inq_vendor);
 	xfree(lu->inq_product);
@@ -2180,7 +2247,8 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 			xfree(lu->lun[i].u.device.file);
 			break;
 		case ISTGT_LU_LUN_TYPE_STORAGE:
-			xfree(lu->lun[i].u.storage.file);
+			if (lu->lun[i].u.storage.file)
+				xfree(lu->lun[i].u.storage.file);
 			break;
 		case ISTGT_LU_LUN_TYPE_REMOVABLE:
 			xfree(lu->lun[i].u.removable.file);
@@ -2431,7 +2499,6 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 	}
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "ReadOnly %s\n",
 			lu->readonly ? "Yes" : "No");
-
 	for (i = 0; i < MAX_LU_LUN; i++) {
 		snprintf(buf, sizeof buf, "LUN%d", i);
 		val = istgt_get_val(sp, buf);
@@ -2471,13 +2538,17 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 				}
 				old_rsize = lu->lun[i].u.storage.rsize;
 				old_size = lu->lun[i].u.storage.size;
+#ifndef	REPLICATION
 				if ((strcasecmp(size, "Auto") == 0
 				    || strcasecmp(size, "Size") == 0)
 				    && lu->istgt->OperationalMode == 0) {
-					new_size = istgt_lu_get_filesize(file);
+				        new_size = istgt_lu_get_filesize(file);
 				} else {
-					new_size = istgt_lu_parse_size(size);
+				        new_size = istgt_lu_parse_size(size);
 				}
+#else
+				new_size = istgt_lu_parse_size(size);
+#endif
 				new_rsize = 0;
 				if (rsz != NULL) {
 					uint64_t vall;
@@ -2514,9 +2585,11 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 					ISTGT_ERRLOG("LU%d: LUN%d: Auto size error (%s)\n", lu->num, i, file);
 					goto error_return;
 				}
+#ifndef	REPLICATION
 				if (lu->lun[i].u.storage.file)
 					xfree(lu->lun[i].u.storage.file);
 				lu->lun[i].u.storage.file = xstrdup(file);
+#endif
 				++storagechange;
 			} else  if (strncasecmp(val, "Option", 6) == 0) {
 				key = istgt_get_nmval(sp, buf, j, 1);
@@ -2715,6 +2788,7 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 					lu->lun[i].dpofua ? " DPOFUA" : "",
 					lu->lun[i].wzero ? " WZERO" : ""
 					);
+
 			if(lu->istgt->OperationalMode) {
 				clock_gettime(clockid, &spec->close_started);
 				rc = istgt_lu_disk_close(lu, i);
@@ -2727,6 +2801,7 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 				lu->lun[i].u.storage.size = old_size;
 				lu->lun[i].u.storage.rsize = old_rsize;
 				flags = lu->readonly ? O_RDONLY : O_RDWR;
+
 				rc = spec->open(spec, flags, 0666);
 				if (rc < 0) {
 					ISTGT_ERRLOG("LU%d: LUN%d: open error(errno=%d)\n",
@@ -2801,6 +2876,7 @@ istgt_lu_del_unit(ISTGT_Ptr istgt, ISTGT_LU_Ptr lu)
 	//MTX_UNLOCK(&istgt->mutex);
 
 	xfree(lu->name);
+	xfree(lu->volname);
 	xfree(lu->alias);
 	xfree(lu->inq_vendor);
 	xfree(lu->inq_product);
@@ -4167,6 +4243,7 @@ again:
 						do_open = 1;
 				}
 				MTX_UNLOCK(&spec->state_mutex);
+
 				if (do_close == 1)
 					rc = istgt_lu_disk_close(spec->lu, spec->lun);
 				if (do_open == 1)
@@ -4422,6 +4499,9 @@ luworker(void *arg)
 			clock_gettime(clockid, &third);
 			id = 16;
 			tdiff(second2, third, r);
+#ifdef REPLICATION
+			lu_task->lu_cmd.luworkerindx = tind;
+#endif
 			lu_task->lu_cmd.flags |= ISTGT_WORKER_PICKED;
 			rc = istgt_lu_disk_queue_start(lu, lun, tind);
 			if (rc < 0) {
@@ -4646,3 +4726,4 @@ next_lu_worker:
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "scheduler loop ended\n");
 	return NULL;
 }
+

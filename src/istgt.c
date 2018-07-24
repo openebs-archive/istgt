@@ -52,7 +52,11 @@
 #endif
 
 #ifdef __linux__
-#include <kqueue/sys/event.h>
+//#include <kqueue/sys/event.h>
+#include <netdb.h>
+#include <unistd.h>
+#include <sys/epoll.h>
+#include <fcntl.h>
 #endif
 
 #include <sys/socket.h>
@@ -68,8 +72,14 @@
 #include "istgt_iscsi.h"
 #include "istgt_lu.h"
 #include "istgt_proto.h"
+#ifdef	REPLICATION
+#include "istgt_integration.h"
+#endif
+#include "istgt_misc.h"
 
 #include <sys/time.h>
+
+
 
 
 #if !defined(__GNUC__)
@@ -81,6 +91,9 @@
 #define PORTNUMLEN 32
 
 ISTGT g_istgt;
+#ifdef	REPLICATION
+extern int replica_timeout;
+#endif
 
 /*
  * Global - number of luworker threads per lun
@@ -589,7 +602,7 @@ istgt_open_portal_group(PORTAL_GROUP *pgp)
 			    pgp->portals[i]->que,
 			    pgp->portals[i]->tag);
 			port = (int)strtol(pgp->portals[i]->port, NULL, 0);
-			sock = istgt_listen(pgp->portals[i]->host, port, pgp->portals[i]->que);
+			sock = istgt_listen("*", port, pgp->portals[i]->que);
 			if (sock < 0) {
 				ISTGT_ERRLOG("listen error %.64s:%d\n",
 				    pgp->portals[i]->host, port);
@@ -2208,10 +2221,14 @@ static int
 istgt_acceptor(ISTGT_Ptr istgt)
 {
 	PORTAL *pp;
-	int kq;
-	struct kevent kev;
-	struct timespec kev_timeout;
-	int kqsocks[MAX_PORTAL_GROUP + MAX_UCPORTAL];
+	int epfd;
+	//int kq;
+	int epsocks[MAX_PORTAL_GROUP + MAX_UCPORTAL];
+	//int kqsocks[MAX_PORTAL_GROUP + MAX_UCPORTAL];
+	struct epoll_event event, events;
+	//struct kevent kev;
+	struct timespec ep_timeout;
+	//struct timespec kev_timeout;
 	struct sockaddr_storage sa;
 	socklen_t salen;
 	int sock;
@@ -2229,6 +2246,15 @@ istgt_acceptor(ISTGT_Ptr istgt)
 
 reload:
 	nidx = 0;
+	epfd = epoll_create1(0);
+	if (epfd == -1) {
+		ISTGT_ERRLOG("epoll_create1() failed, errno:%d\n", errno);
+		return -1;
+	}
+	for (i = 0; i < (int)(sizeof epsocks / sizeof *epsocks); i++) {
+		epsocks[i] = -1;
+	}
+	/*
 	kq = kqueue();
 	if (kq == -1) {
 		ISTGT_ERRLOG("kqueue() failed\n");
@@ -2237,7 +2263,26 @@ reload:
 	for (i = 0; i < (int)(sizeof kqsocks / sizeof *kqsocks); i++) {
 		kqsocks[i] = -1;
 	}
+	*/
 	MTX_LOCK(&istgt->mutex);
+	for (i = 0; i < istgt->nportal_group; i++) {
+		for (j = 0; j < istgt->portal_group[i].nportals; j++) {
+			if (istgt->portal_group[i].portals[j]->sock >= 0) {
+				event.data.fd = istgt->portal_group[i].portals[j]->sock;
+				event.events = EPOLLIN;
+				rc = epoll_ctl(epfd, EPOLL_CTL_ADD, istgt->portal_group[i].portals[j]->sock, &event);
+				if (rc == -1) {
+					MTX_UNLOCK(&istgt->mutex);
+					ISTGT_ERRLOG("epoll_ctl() failed, errno:%d\n", errno);
+					close(epfd);
+					return -1;
+				}
+				epsocks[nidx] = istgt->portal_group[i].portals[j]->sock;
+				nidx++;
+			}
+		}
+	}
+	/*
 	for (i = 0; i < istgt->nportal_group; i++) {
 		for (j = 0; j < istgt->portal_group[i].nportals; j++) {
 			if (istgt->portal_group[i].portals[j]->sock >= 0) {
@@ -2255,8 +2300,23 @@ reload:
 			}
 		}
 	}
+	*/
 	MTX_UNLOCK(&istgt->mutex);
 	ucidx = nidx;
+	for (i = 0; i < istgt->nuctl_portal; i++) {
+		event.data.fd = istgt->uctl_portal[i].sock;
+		event.events = EPOLLIN;
+		rc = epoll_ctl(epfd, EPOLL_CTL_ADD, istgt->uctl_portal[i].sock, &event);
+		if (rc == -1) {
+			MTX_UNLOCK(&istgt->mutex);
+			ISTGT_ERRLOG("epoll_ctl() failed, errno:%d\n", errno);
+			close(epfd);
+			return -1;
+		}
+		epsocks[nidx] = istgt->uctl_portal[i].sock;
+		nidx++;
+	}
+	/*
 	for (i = 0; i < istgt->nuctl_portal; i++) {
 		ISTGT_EV_SET(&kev, istgt->uctl_portal[i].sock,
 		    EVFILT_READ, EV_ADD, 0, 0, NULL);
@@ -2269,6 +2329,19 @@ reload:
 		kqsocks[nidx] = istgt->uctl_portal[i].sock;
 		nidx++;
 	}
+	*/
+	event.data.fd = istgt->sig_pipe[0];
+	event.events = EPOLLIN;
+	rc = epoll_ctl(epfd, EPOLL_CTL_ADD, istgt->sig_pipe[0], &event);
+	if (rc == -1) {
+		MTX_UNLOCK(&istgt->mutex);
+		ISTGT_ERRLOG("epoll_ctl() failed, errno:%d\n", errno);
+		close(epfd);
+		return -1;
+	}
+	epsocks[nidx] = istgt->sig_pipe[0];
+	nidx++;
+	/*
 	ISTGT_EV_SET(&kev, istgt->sig_pipe[0], EVFILT_READ, EV_ADD, 0, 0, NULL);
 	rc = kevent(kq, &kev, 1, NULL, 0, NULL);
 	if (rc == -1) {
@@ -2278,11 +2351,35 @@ reload:
 	}
 	kqsocks[nidx] = istgt->sig_pipe[0];
 	nidx++;
+	*/
 
 //	signal(SIGTERM, SIG_IGN);
 //	signal(SIGINT, SIG_IGN);
 	signal(SIGPIPE, SIG_IGN);
 //	if (!istgt->daemon)
+//TODO
+/*	
+	event.data.fd = SIGINT;
+	event.events = EPOLLIN;
+	rc = epoll_ctl(epfd, EPOLL_CTL_ADD, SIGINT, &event);//TODO CHECK
+	if (rc == -1) {
+		MTX_UNLOCK(&istgt->mutex);
+		ISTGT_ERRLOG("epoll_ctl() failed, errno:%d\n", errno);
+		close(epfd);
+		return -1;
+	}
+
+	event.data.fd = SIGTERM;
+	event.events = EPOLLIN;
+	rc = epoll_ctl(epfd, EPOLL_CTL_ADD, SIGTERM, &event);//TODO CHECK
+	if (rc == -1) {
+		MTX_UNLOCK(&istgt->mutex);
+		ISTGT_ERRLOG("epoll_ctl() failed, errno:%d\n", errno);
+		close(epfd);
+		return -1;
+	}
+*/
+	/*
 	{
 		ISTGT_EV_SET(&kev, SIGINT, EVFILT_SIGNAL, EV_ADD, 0, 0, NULL);
 		rc = kevent(kq, &kev, 1, NULL, 0, NULL);
@@ -2299,15 +2396,17 @@ reload:
 			return -1;
 		}
 	}
+	*/
 
 	while (1) {
 		if (istgt_get_state(istgt) != ISTGT_STATE_RUNNING) {
 			break;
 		}
 		//ISTGT_TRACELOG(ISTGT_TRACE_NET, "kevent %d\n", nidx);
-		kev_timeout.tv_sec = 10;
-		kev_timeout.tv_nsec = 0;
-		rc = kevent(kq, NULL, 0, &kev, 1, &kev_timeout);
+		ep_timeout.tv_sec = 10;
+		ep_timeout.tv_nsec = 0;
+		rc = epoll_wait(epfd, &events, 1, ep_timeout.tv_sec*1000);
+		//rc = kevent(kq, NULL, 0, &kev, 1, &kev_timeout);
 		if (rc == -1 && errno == EINTR) {
 			continue;
 		}
@@ -2320,7 +2419,15 @@ reload:
 			//ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "kevent TIMEOUT\n");
 			continue;
 		}
-		if (kev.filter == EVFILT_SIGNAL) {
+		/*TODO
+		if (events.data.fd == SIGINT || events.data.fd == SIGTERM) {
+			ISTGT_TRACELOG(ISTGT_TRACE_DEBUG,
+					"kevent SIGNAL SIGINT/SIGTERM\n");
+			break;
+		}
+		*/
+		/*
+		if (events.events == SIGINT || events.events == SIGTERM) {
 			ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "kevent SIGNAL\n");
 			if (kev.ident == SIGINT || kev.ident == SIGTERM) {
 				ISTGT_TRACELOG(ISTGT_TRACE_DEBUG,
@@ -2329,22 +2436,25 @@ reload:
 			}
 			continue;
 		}
+		*/
 
 		n = rc;
 		for (i = 0; n != 0 && i < ucidx; i++) {
-			if (kev.ident == (uintptr_t)kqsocks[i]) {
+			if (events.data.fd == epsocks[i]) {
+				/*
 				if (kev.flags) {
 					ISTGT_TRACELOG(ISTGT_TRACE_DEBUG,
 					    "flags %x\n",
 					    kev.flags);
 				}
+				*/
 				n--;
 				memset(&sa, 0, sizeof(sa));
 				salen = sizeof(sa);
 				ISTGT_TRACELOG(ISTGT_TRACE_NET, "accept %ld\n",
-				    (unsigned long)kev.ident);
-				pp = istgt_get_sock_portal(istgt, kev.ident);
-				rc = accept(kev.ident, (struct sockaddr *) &sa, &salen);
+				    (unsigned long)events.data.fd);
+				pp = istgt_get_sock_portal(istgt, events.data.fd);
+				rc = accept(events.data.fd, (struct sockaddr *) &sa, &salen);
 				if (rc < 0) {
 					ISTGT_ERRLOG("accept error errno:%d rc:%d\n", errno, rc);
 					continue;
@@ -2362,18 +2472,20 @@ reload:
 
 		/* check for control */
 		for (i = 0; n != 0 && i < istgt->nuctl_portal; i++) {
-			if (kev.ident == (uintptr_t)istgt->uctl_portal[i].sock) {
+			if (events.data.fd == istgt->uctl_portal[i].sock) {
+				/*
 				if (kev.flags) {
 					ISTGT_TRACELOG(ISTGT_TRACE_DEBUG,
 					    "flags %x\n",
 					    kev.flags);
 				}
+				*/
 				n--;
 				memset(&sa, 0, sizeof(sa));
 				salen = sizeof(sa);
 				ISTGT_TRACELOG(ISTGT_TRACE_NET,
-				    "accept %ld\n", (unsigned long)kev.ident);
-				rc = accept(kev.ident,
+				    "accept %ld\n", (unsigned long)events.data.fd);
+				rc = accept(events.data.fd,
 				    (struct sockaddr *) &sa, &salen);
 				if (rc < 0) {
 					ISTGT_ERRLOG("accept error errno:%d rc:%d\n", errno, rc);
@@ -2392,13 +2504,15 @@ reload:
 		}
 
 		/* check for signal thread */
-		if (kev.ident == (uintptr_t)istgt->sig_pipe[0]) {
+		if (events.data.fd == istgt->sig_pipe[0]) {
+			/*
 
 			if (kev.flags & (EV_EOF|EV_ERROR)) {
 				ISTGT_TRACELOG(ISTGT_TRACE_DEBUG,
 				    "kevent EOF/ERROR\n");
 				break;
 			}
+			*/
 			char tmp[RELOAD_CMD_LENGTH];
 			//int pgp_idx;
 			int rc2;
@@ -2443,12 +2557,12 @@ reload:
 					//break;
 				}
 			}
-			close(kq);
+			close(epfd);
 			ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "reload accept loop\n");
 			goto reload;
 		}
 	}
-	close(kq);
+	close(epfd);
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "loop ended\n");
 	istgt_set_state(istgt, ISTGT_STATE_EXITING);
 	istgt_lu_set_all_state(istgt, ISTGT_STATE_EXITING);
@@ -2472,7 +2586,10 @@ usage(void)
 	printf(" -D         don't detach from tty\n");
 	printf(" -H         show this usage\n");
 	printf(" -V         show version\n");
-	printf(" -P         Persist Disabled\n");	
+	printf(" -P         Persist Disabled\n");
+#ifdef	REPLICATION
+	printf(" -R         IO timeout in seconds at replicas in seconds\n");
+#endif
 }
 
 #if 0
@@ -2512,6 +2629,16 @@ void *timerfn(void *ptr __attribute__((__unused__)))
 	ISTGT_QUEUE backupconns;
 	istgt_queue_init(&backupconns);
 	CONN *conn;
+#ifdef	REPLICATION
+	spec_t *spec;
+	ISTGT_LU_TASK_Ptr lu_task;
+	ISTGT_LU_CMD_Ptr lu_cmd;
+	int ms;
+	struct timespec now, diff, last_check;
+	int check_interval = (replica_timeout / 4) * 1000;
+	clock_gettime(clockid, &last_check);
+#endif
+
 	while(1)
 	{
 		while((conn = (CONN *)(istgt_queue_dequeue(&closedconns))) != NULL)
@@ -2523,6 +2650,49 @@ void *timerfn(void *ptr __attribute__((__unused__)))
 		}
 		while((conn = (CONN *)(istgt_queue_dequeue(&backupconns))) != NULL)
 			istgt_queue_enqueue(&closedconns, conn);
+
+#ifdef	REPLICATION
+		clock_gettime(clockid, &now);
+		timesdiff(clockid, last_check, now, diff);
+		ms = diff.tv_sec * 1000;
+		ms += diff.tv_nsec / 1000000;
+
+		/*
+		 * Here, we are checking if IOs are taking much time to
+		 * complete than expected time at an interval of (replica_timeout /4).
+		 * Expected time is set to (replica_timeout / 4) in ms.
+		 *
+		 * complete_queue holds the IOs scheduled for the target.
+		 * we will calculate the time difference of first IO from
+		 * complete_queue as first IO is the oldest one in the queue.
+		 * If the time difference is more than (replica_timeout / 4)
+		 * then we will log the IO's details.
+		 */
+
+		if (ms > check_interval) {
+			MTX_LOCK(&specq_mtx);
+			TAILQ_FOREACH(spec, &spec_q, spec_next) {
+				MTX_LOCK(&spec->complete_queue_mutex);
+				lu_task = (ISTGT_LU_TASK_Ptr)istgt_queue_first(&spec->complete_queue);
+				if (lu_task) {
+					lu_cmd = &lu_task->lu_cmd;
+					clock_gettime(clockid, &now);
+					timesdiff(clockid, lu_cmd->times[0], now, diff);
+					ms = diff.tv_sec * 1000;
+					ms += diff.tv_nsec / 1000000;
+					if (ms > check_interval) {
+						ISTGT_NOTICELOG("LU:%lu CSN:0x%x TT:%x OP:%2.2x:%x:%s(%lu+%u) not responded since %d seconds\n",
+						    lu_cmd->lun, lu_cmd->CmdSN, lu_cmd->task_tag, lu_cmd->cdb0, lu_cmd->status, lu_cmd->info, lu_cmd->lba, lu_cmd->lblen, ms / 1000);
+					}
+				}
+
+				MTX_UNLOCK(&spec->complete_queue_mutex);
+			}
+			MTX_UNLOCK(&specq_mtx);
+			clock_gettime(clockid, &last_check);
+		}
+#endif
+
 		sleep(60);
 	}
 	return (void *)NULL;
@@ -2538,19 +2708,22 @@ main(int argc, char **argv)
 	const char *logfacility = NULL;
 	const char *logpriority = NULL;
 	CONFIG *config;
-	#if 0
+#if 0
 	pthread_t sigthread;
 	struct sigaction sigact, sigoldact_pipe, sigoldact_int, sigoldact_term;
 	struct sigaction sigoldact_hup, sigoldact_info;
 	struct sigaction sigoldact_wakeup, sigoldact_io;
 	sigset_t signew, sigold;
 	int retry = 10;
-	#endif
+#endif
 	pthread_t timerthread;
 	int detach = 1;
 	int swmode;
 	int ch;
 	int rc;
+#ifdef	REPLICATION
+	pthread_t replication_thread;
+#endif
 
 	send_abrt_resp = 0;
 	abort_result_queue = 0;
@@ -2582,7 +2755,11 @@ main(int argc, char **argv)
 	pthread_set_name_np(pthread_self(), tinfo);
 #endif
 
+#ifdef	REPLICATION
+	while ((ch = getopt(argc, argv, "c:p:l:m:t:N:qDHVFOPR:")) != -1) {
+#else
 	while ((ch = getopt(argc, argv, "c:p:l:m:t:N:qDHVFOP")) != -1) {
+#endif
 		switch (ch) {
 		case 'c':
 			config_file = optarg;
@@ -2670,6 +2847,16 @@ main(int argc, char **argv)
 		case 'P':
 			persist = 0;
 			break;
+#ifdef	REPLICATION
+		case 'R':
+                        replica_timeout = strtol(optarg, NULL, 10);
+			if (replica_timeout <= 0) {
+				fprintf(stderr, "Incorrect timeout for replica\n");
+				usage();
+				exit(EXIT_FAILURE);
+			}
+			break;
+#endif
 		case 'H':
 		default:
 			usage();
@@ -2745,6 +2932,29 @@ main(int argc, char **argv)
 		poolfini();
 		exit(EXIT_FAILURE);
 	}
+
+#ifdef	REPLICATION
+	/* Initialize mempool needed for replication*/
+	if (initialize_replication_mempool(false)) {
+		ISTGT_ERRLOG("Failed to initialize mempool\n");
+		goto initialize_error;
+	}
+
+	/* Initialize replication library */
+	rc = initialize_replication();
+	if(rc != 0) {
+		ISTGT_ERRLOG("initialize_replication() failed\n");
+		goto initialize_error;
+	}
+
+	rc = pthread_create(&replication_thread, &istgt->attr, &init_replication,
+	    (void *)NULL);
+	if (rc != 0) {
+		ISTGT_ERRLOG("pthread_create(replication_thread) failed\n");
+		goto initialize_error;
+	}
+#endif
+
 	rc = istgt_lu_init(istgt);
 	if (rc < 0) {
 		ISTGT_ERRLOG("istgt_lu_init() failed\n");
@@ -2764,6 +2974,7 @@ main(int argc, char **argv)
 
 	/* detach from tty and run background */
 	fflush(stdout);
+/*
 	if (detach) {
 		istgt->daemon = 1;
 		rc = daemon(0, 0);
@@ -2772,7 +2983,7 @@ main(int argc, char **argv)
 			goto initialize_error;
 		}
 	}
-
+*/
 	/* setup signal handler thread */
 	signal(SIGPIPE, SIG_IGN);
 	#if 0
@@ -2899,7 +3110,6 @@ main(int argc, char **argv)
 		ISTGT_ERRLOG("lu_set_all_state() failed\n");
 		goto initialize_error;
 	}
-
 	/* open portals */
 	rc = istgt_open_all_portals(istgt);
 	if (rc < 0) {
@@ -2968,6 +3178,12 @@ main(int argc, char **argv)
 	istgt_lu_shutdown(istgt);
 	istgt_shutdown(istgt);
 	istgt_close_log();
+
+#ifdef	REPLICATION
+	/* Destroy mempool created for replication */
+	(void)destroy_replication_mempool();
+#endif
+
 	config = istgt->config;
 	istgt->config = NULL;
 	istgt_free_config(config);

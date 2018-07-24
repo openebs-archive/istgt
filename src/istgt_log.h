@@ -57,7 +57,7 @@
 #define ISTGT_TRACE_PROFX   0x02000000U
 #define ISTGT_TRACE_CMD		0x04000000U
 
-extern __thread char tinfo[20];
+extern __thread char tinfo[50];
 #define ISTGT_LOG(fmt, ...)  syslog(LOG_NOTICE, 	 "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
 #define ISTGT_NOTICELOG(fmt, ...) syslog(LOG_NOTICE, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
 #define ISTGT_ERRLOG(fmt, ...) syslog(LOG_ERR,  	 "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
@@ -68,7 +68,7 @@ extern __thread char tinfo[20];
 		if (g_trace_flag & FLAG)		\
 			syslog(LOG_NOTICE, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__); \
 	} while (0)
-#ifdef DEBUG
+#ifdef TRACEDUMP
 #define ISTGT_TRACEDUMP(FLAG, LABEL, BUF, LEN)				\
 	do {								\
 		if (g_trace_flag & (FLAG)) {				\
@@ -77,7 +77,7 @@ extern __thread char tinfo[20];
 	} while (0)
 #else
 #define ISTGT_TRACEDUMP(FLAG, LABEL, BUF, LEN)
-#endif /* DEBUG */
+#endif /* TRACEDUMP */
 
 int istgt_set_log_facility(const char *facility);
 int istgt_set_log_priority(const char *priority);

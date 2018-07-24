@@ -44,7 +44,8 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <stdlib.h>
-
+#include <stdbool.h>
+#include <sys/eventfd.h>
 #ifdef HAVE_UUID_H
 #include <uuid.h>
 #endif
@@ -63,6 +64,10 @@
 #include "istgt_proto.h"
 #include "istgt_scsi.h"
 #include "istgt_queue.h"
+#ifdef	REPLICATION
+#include "replication.h"
+#include "ring_mempool.h"
+#endif
 
 #ifdef __FreeBSD__
 #include <sys/disk.h>
@@ -80,33 +85,17 @@
 #endif
 
 extern clockid_t clockid;
+
 //#define ISTGT_TRACE_DISK
 
-#define timesdiffX(_st, _now, _re)                   \
-{                                                    \
-	if (_now.tv_sec == 0) {							 \
-		_now.tv_sec = _st.tv_sec; _now.tv_nsec = _st.tv_nsec; \
-	}												\
-	if ((_now.tv_nsec - _st.tv_nsec)<0) {            \
-		_re.tv_sec  = _now.tv_sec - _st.tv_sec - 1;  \
-		_re.tv_nsec = 1000000000 + _now.tv_nsec - _st.tv_nsec; \
-	} else {                                         \
-		_re.tv_sec  = _now.tv_sec - _st.tv_sec;      \
-		_re.tv_nsec = _now.tv_nsec - _st.tv_nsec;    \
-	}                                                \
-}
-
-#define timesdiff(_st, _now, _re)                    \
-{                                                    \
-	clock_gettime(clockid, &_now);                   \
-	if ((_now.tv_nsec - _st.tv_nsec)<0) {            \
-		_re.tv_sec  = _now.tv_sec - _st.tv_sec - 1;  \
-		_re.tv_nsec = 1000000000 + _now.tv_nsec - _st.tv_nsec; \
-	} else {                                         \
-		_re.tv_sec  = _now.tv_sec - _st.tv_sec;      \
-		_re.tv_nsec = _now.tv_nsec - _st.tv_nsec;    \
-	}                                                \
-}
+#ifdef	REPLICATION
+#define	IS_SPEC_READY(_spec)						\
+		(_spec->state == ISTGT_LUN_BUSY ||			\
+		    _spec->ready == false)
+#else
+#define	IS_SPEC_READY(_spec)	\
+		(_spec->state == ISTGT_LUN_BUSY)
+#endif
 
 #define MAX_DIO_WAIT 30   //loop for 30 seconds
 //#define enterblockingcall(lu_cmd, conn)
@@ -118,7 +107,7 @@ extern clockid_t clockid;
 		markedForReturn = 1;	\
 		goto macroname;	\
 	}	\
-	if (spec->state == ISTGT_LUN_BUSY) {  \
+	if (IS_SPEC_READY(spec)) {  \
 		lu_cmd->data_len  = 0;             \
 		lu_cmd->status = ISTGT_SCSI_STATUS_BUSY; \
 		if(pthread_mutex_unlock(&spec->state_mutex) != 0)	\
@@ -224,7 +213,6 @@ static int istgt_lu_disk_queue_abort_ITL(ISTGT_LU_DISK *spec, const char *initia
 istgt_get_disktype_by_ext(const char *file);
 static int istgt_lu_disk_unmap(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, uint8_t *data, int pllen);
 int istgt_lu_disk_copy_reservation(ISTGT_LU_DISK *spec_bkp, ISTGT_LU_DISK *spec);
-
 /**
  * find_first_bit - find the first set bit in a memory region
  * @addr: The address to start the search at
@@ -273,7 +261,11 @@ istgt_lu_disk_open_raw(ISTGT_LU_DISK *spec, int flags, int mode)
 {
 	int rc;
 	errno = 0;
+#ifdef	REPLICATION
+	rc = 0;
+#else
 	rc = open(spec->file, flags, mode);
+#endif
 	spec->fderr = rc;
 	spec->fderrno = errno;
 	if (rc < 0) {
@@ -289,12 +281,14 @@ istgt_lu_disk_close_raw(ISTGT_LU_DISK *spec)
 {
 	int rc;
 
+#ifndef	REPLICATION
 	if (spec->fd == -1)
 		return 0;
 	rc = close(spec->fd);
 	if (rc < 0) {
 		return -1;
 	}
+#endif
 	spec->fd = -1;
 	spec->foffset = 0;
 	return 0;
@@ -304,11 +298,12 @@ static int64_t
 istgt_lu_disk_seek_raw(ISTGT_LU_DISK *spec, uint64_t offset)
 {
 	off_t rc;
-
+#ifndef	REPLICATION
 	rc = lseek(spec->fd, (off_t) offset, SEEK_SET);
 	if (rc < 0) {
 		return -1;
 	}
+#endif
 	spec->foffset = offset;
 	return 0;
 }
@@ -318,10 +313,12 @@ istgt_lu_disk_sync_raw(ISTGT_LU_DISK *spec, uint64_t offset, uint64_t nbytes)
 {
 	int64_t rc;
 
+#ifndef	REPLICATION
 	rc = (int64_t) fsync(spec->fd);
 	if (rc < 0) {
 		return -1;
 	}
+#endif
 	spec->foffset = offset + nbytes;
 	return rc;
 }
@@ -447,21 +444,24 @@ istgt_lu_disk_close(ISTGT_LU_Ptr lu, int i)
 	MTX_UNLOCK(&spec->state_mutex);
 	disk_ref = spec->ludsk_ref;
 	
-	timesdiff(spec->close_started, _wrkx, _s1)
+	timesdiff(clockid, spec->close_started, _wrkx, _s1)
+#ifndef	REPLICATION
 	if (!spec->lu->readonly) {
 		rc = spec->sync(spec, 0, spec->size);
-		timesdiff(_wrkx, _wrk, _s2)
+		timesdiff(clockid, _wrkx, _wrk, _s2)
 		if (rc < 0) { 
 			/* Ignore error */
 			ISTGT_ERRLOG("LU%d: LUN%d: failed to sync\n", lu->num, i);
 		}
-	} else {
+	} else
+#endif
+	{
 		_wrk.tv_sec = _wrkx.tv_sec;
 		_wrk.tv_nsec = _wrkx.tv_nsec;
 		_s2.tv_sec = 0; _s2.tv_nsec = 0;
 	}
 	rc = spec->close(spec);
-	timesdiff(_wrk, _wrkx, _s3)
+	timesdiff(clockid, _wrk, _wrkx, _s3)
 	if (rc < 0) {
 		/* Ignore error */
 		ISTGT_ERRLOG("LU%d: LUN%d failed to close device\n", lu->num, i);
@@ -514,6 +514,7 @@ istgt_lu_disk_post_open(ISTGT_LU_DISK *spec)
 
 	lu = spec->lu;
 	i = spec->lun;
+#ifndef	REPLICATION
 	if (!lu->readonly) {
 		rc = spec->allocate(spec);
 		if (rc < 0) {
@@ -523,8 +524,11 @@ istgt_lu_disk_post_open(ISTGT_LU_DISK *spec)
 			goto error_return;
 		}
 	}
+#endif
+
 	if (spec->rsize == 0) {
 		//TODO
+#ifndef	REPLICATION
 		#ifdef __FreeBSD__	
 		off_t rsize = 0;
 		uint32_t lbPerRecord = 0;
@@ -545,13 +549,16 @@ istgt_lu_disk_post_open(ISTGT_LU_DISK *spec)
 			ISTGT_ERRLOG("LU%d: LUN%d: ioctl-blksize:%lu failed:%d %d\n", lu->num, i, rsize, rc, errno);
 		}
 		#endif
+#endif
 	}
+
 	rc = spec->setcache(spec);
 	if (rc < 0) {
 		ISTGT_ERRLOG("LU%d: LUN%d: setcache error\n", lu->num, i);
 		errorno = errno;
 		goto error_return;
 	}
+
 	if(spec->persist){
 		ISTGT_LOG("READING RESERVATIONS FROM ZAP");
 		MTX_LOCK(&spec->pr_rsv_mutex);
@@ -563,6 +570,7 @@ istgt_lu_disk_post_open(ISTGT_LU_DISK *spec)
 			goto error_return;
 		}
 	}
+
 	MTX_LOCK(&spec->state_mutex);
 	spec->state = ISTGT_LUN_ONLINE;
 	spec->ex_state = ISTGT_LUN_OPEN;
@@ -609,7 +617,7 @@ istgt_lu_disk_open(ISTGT_LU_Ptr lu, int i)
 	_wrk.tv_sec = spec->open_started.tv_sec;
 	_wrk.tv_nsec = spec->open_started.tv_nsec;
 
-	timesdiff(_wrk, _wrkx, _s1)
+	timesdiff(clockid, _wrk, _wrkx, _s1)
 	old_rsize = spec->rsize;
 	old_size = spec->size;
 	old_blocklen = spec->blocklen;
@@ -685,7 +693,7 @@ istgt_lu_disk_open(ISTGT_LU_Ptr lu, int i)
 
 		flags = lu->readonly ? O_RDONLY : O_RDWR;
 		rc = spec->open(spec, flags, 0666);
-		timesdiff(_wrkx, _wrk, _s2)
+		timesdiff(clockid, _wrkx, _wrk, _s2)
 		if (rc < 0) {
 			ISTGT_ERRLOG("LU%d: LUN%d: open error(errno=%d/%d)[%s]\n",
 						lu->num, i, spec->fderr, spec->fderrno, spec->file);
@@ -701,6 +709,8 @@ istgt_lu_disk_open(ISTGT_LU_Ptr lu, int i)
 				goto error_return;
 			}
 		}
+		timesdiff(clockid, _wrkx, _wrk, _s2)
+
 		MTX_LOCK(&spec->pr_rsv_mutex);
 		spec->rsv_pending |= ISTGT_RSV_READ;
 		MTX_UNLOCK(&spec->pr_rsv_mutex);
@@ -746,10 +756,13 @@ error_return:
 	return -1;
 }
 
-
 static int
 istgt_lu_disk_allocate_raw(ISTGT_LU_DISK *spec)
 {
+#ifdef	REPLICATION
+	return 0;
+#endif
+
 	uint8_t *data;
 	uint64_t fsize;
 	uint64_t size;
@@ -800,6 +813,9 @@ istgt_lu_disk_allocate_raw(ISTGT_LU_DISK *spec)
 static int
 istgt_lu_disk_setcache_raw(ISTGT_LU_DISK *spec)
 {
+#ifdef	REPLICATION
+	return 0;
+#endif
 	int flags;
 	int rc;
 	int fd;
@@ -900,12 +916,18 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 		spec = xmalloc(sizeof *spec);
 		memset(spec, 0, sizeof *spec);
 		spec->lu = lu;
+#ifdef	REPLICATION
+		spec->volname = xstrdup(spec->lu->volname);
+#endif
 		spec->num = lu->num;
 		spec->lun = i;
 		spec->do_avg = 0;
 		spec->inflight = 0;
 		spec->fd = -1;
 		spec->ludsk_ref = 0;
+#ifdef	REPLICATION
+		spec->quiesce = 0;
+#endif
 		spec->max_unmap_sectors = 4096;
 		spec->persist = is_persist_enabled();
 		spec->luworkers = lu->luworkers;
@@ -998,6 +1020,20 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 				return -1;
 			}
 
+#ifdef	REPLICATION
+			rc = pthread_mutex_init(&spec->luworker_rmutex[k], &istgt->mutex_attr);
+			if (rc != 0) {
+				ISTGT_ERRLOG("LU%d: luworker %d mutex_init() failed errno:%d\n", lu->num, k, errno);
+				return -1;
+			}
+        
+			rc = pthread_cond_init(&spec->luworker_rcond[k], NULL);
+			if (rc != 0) {
+				ISTGT_ERRLOG("LU%d: luworker %d cond_init() failed errno:%d\n", lu->num, k, errno);
+				return -1;
+			}
+#endif
+
 			rc = pthread_mutex_init(&spec->lu_tmf_mutex[k], &istgt->mutex_attr);
 			if (rc != 0) {
 				ISTGT_ERRLOG("LU%d: lu_tmf_mutex %d mutex_init() failed errno:%d\n", lu->num, k, errno);
@@ -1011,7 +1047,13 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 			}
 		}
 		istgt_queue_init(&spec->blocked_queue);
-	
+#ifdef REPLICATION
+		rc = initialize_volume(spec, spec->lu->replication_factor, spec->lu->consistency_factor);
+		if (rc != 0) {
+			ISTGT_ERRLOG("LU%d: persistent reservation mutex_init() failed errno:%d\n", lu->num, errno);
+			return -1;
+		}
+#endif
 		memset(&spec->lu_free_matrix, 0, ((ISTGT_MAX_NUM_LUWORKERS/32)+1)*4);
 		memset(&spec->luworker_waiting, 0, sizeof(spec->luworker_waiting));
 		spec->schdler_waiting = 0;
@@ -1174,8 +1216,9 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 				struct timespec  _s1, _s2, _wrk, _wrkx;
 				flags = lu->readonly ? O_RDONLY : O_RDWR;
 				clock_gettime(clockid, &_wrk);
+
 				rc = spec->open(spec, flags, 0666);
-				timesdiff(_wrk, _wrkx, _s1)
+				timesdiff(clockid, _wrk, _wrkx, _s1)
 				if (rc < 0) {
 					ISTGT_ERRLOG("LU%d: LUN%d: open error(errno=%d/%d)[%s]\n",
 						    lu->num, i, spec->fderr, spec->fderrno, spec->file);
@@ -1187,6 +1230,8 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 						goto error_return;
 					}
 				}
+
+#ifndef	REPLICATION
 				if (!lu->readonly) {
 					rc = spec->allocate(spec);
 					if (rc < 0) {
@@ -1200,6 +1245,8 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 						goto error_return;
 					}
 				}
+#endif
+				timesdiff(clockid, _wrk, _wrkx, _s1)
 				/*
 				if (spec->rsize == 0) {
 					off_t rsize = 0;
@@ -1221,6 +1268,7 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 					}
 				}
 				*/
+#ifndef	REPLICATION
 				rc = spec->setcache(spec);
 				if (rc < 0) {
 					ISTGT_ERRLOG("LU%d: LUN%d: setcache error\n", lu->num, i);
@@ -1231,6 +1279,7 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 						}
 					goto error_return;
 				}
+
                                 if(spec->persist){
                                         ISTGT_LOG("READING RESERVATION FROM ZAP");
                                         MTX_LOCK(&spec->pr_rsv_mutex);
@@ -1248,7 +1297,8 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
                                 	spec->ex_state = ISTGT_LUN_OPEN;
                                		MTX_UNLOCK(&spec->state_mutex);
 				}
-				timesdiff(_wrkx, _wrk, _s2)
+#endif
+				timesdiff(clockid, _wrkx, _wrk, _s2)
 
 				gb_size = spec->size / ISTGT_LU_1GB;
 				mb_size = (spec->size % ISTGT_LU_1GB) / ISTGT_LU_1MB;
@@ -1350,7 +1400,8 @@ istgt_lu_disk_shutdown(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr
 					sleep(1);
 			} while ((workers_signaled == 0) && (++loop  < 10));
 
-			timesdiff(_wrk, _wrkx, _s1)
+#ifndef	REPLICATION
+			timesdiff(clockid, _wrk, _wrkx, _s1)
 			if (!spec->lu->readonly) {
 				rc = spec->sync(spec, 0, spec->size);
 				if (rc < 0) {
@@ -1358,7 +1409,8 @@ istgt_lu_disk_shutdown(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr
 					/* ignore error */
 				}
 			}
-			timesdiff(_wrkx, _wrk, _s2)
+			timesdiff(clockid, _wrkx, _wrk, _s2)
+#endif
 			rc = spec->close(spec);
 			if (rc < 0) {
 				//ISTGT_ERRLOG("LU%d: lu_disk_close() failed\n", lu->num);
@@ -1367,7 +1419,7 @@ istgt_lu_disk_shutdown(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr
 			MTX_LOCK(&spec->state_mutex);
 			spec->ex_state = ISTGT_LUN_CLOSE;
 			MTX_UNLOCK(&spec->state_mutex);
-			timesdiff(_wrk, _wrkx, _s3)
+			timesdiff(clockid, _wrk, _wrkx, _s3)
 			ISTGT_LOG("LU%d: LUN%d %s: storage_offlinex %s [%s %"PRIu64" blocks, %"PRIu64" bytes/block] [%ld.%ld %ld.%ld %ld.%ld]\n",
 					lu->num, i, lu->name ? lu->name : "-", lu->readonly ? "readonly " : "",
 					spec->file, spec->blockcnt, spec->blocklen,
@@ -1453,6 +1505,10 @@ istgt_lu_disk_shutdown(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr
 		for ( i=0; i < lu->luworkers; i++ ) {
 			rc = pthread_mutex_destroy(&spec->luworker_mutex[i]);
 			rc = pthread_cond_destroy(&spec->luworker_cond[i]);
+#ifdef	REPLICATION
+			rc = pthread_mutex_destroy(&spec->luworker_rmutex[i]);
+			rc = pthread_cond_destroy(&spec->luworker_rcond[i]);
+#endif
 		}
 		rc = pthread_mutex_destroy(&spec->wait_lu_task_mutex);
 		if (rc != 0) {
@@ -2600,6 +2656,7 @@ istgt_lu_disk_scsi_mode_sense_page(ISTGT_LU_DISK *spec, CONN_Ptr conn, uint8_t *
 		}
 		BDADD8(&cp[2], 1, 2); /* WCE */
 		//BDADD8(&cp[2], 1, 0); /* RCD */
+#ifndef	REPLICATION
 		{
 			int fd;
 			fd = spec->fd;
@@ -2610,6 +2667,7 @@ istgt_lu_disk_scsi_mode_sense_page(ISTGT_LU_DISK *spec, CONN_Ptr conn, uint8_t *
 				BDADD8(&cp[2], 0, 2); /* WCE=0 */
 			}
 		}
+#endif
 		if (spec->readcache) {
 			BDADD8(&cp[2], 0, 0); /* RCD=0 */
 		} else {
@@ -2982,7 +3040,7 @@ istgt_lu_disk_scsi_mode_select_page(ISTGT_LU_DISK *spec, CONN_Ptr conn, uint8_t 
 			}
 			wce = BGET8(&data[2], 2); /* WCE */
 			rcd = BGET8(&data[2], 0); /* RCD */
-
+#ifndef	REPLICATION
 			{
 				int fd;
 				fd = spec->fd;
@@ -3003,6 +3061,7 @@ istgt_lu_disk_scsi_mode_select_page(ISTGT_LU_DISK *spec, CONN_Ptr conn, uint8_t 
 					}
 				}
 			}
+#endif
 			if (rcd) {
 				msgrcd = "RCD";
 				spec->readcache = 0;
@@ -3836,6 +3895,7 @@ istgt_lu_disk_update_reservation(ISTGT_LU_DISK *spec)
 		}
 	}
 
+#ifdef	REPLICATION
 	// TODO Write the Persistent Reservation data to the device as a ZAP attribute 
 	#ifdef __FreeBSD__
 	if (ioctl(spec->fd, DIOCGWRRSV, pr_reservation) == -1) {
@@ -3847,6 +3907,7 @@ istgt_lu_disk_update_reservation(ISTGT_LU_DISK *spec)
 		goto exit;
 	}
 	#endif
+#endif
 
 exit:
 	if (pr_reservation)
@@ -3879,6 +3940,7 @@ istgt_lu_disk_get_reservation(ISTGT_LU_DISK *spec)
 
 	spec->rsv_pending &= ~ISTGT_RSV_READ;
 
+#ifdef	REPLICATION
 	// TODO Read the Persistent Reservation data from the device
 	#ifdef __FreeBSD__
 	if (ioctl(spec->fd, DIOCGRDRSV, pr_reservation) == -1) {
@@ -3891,6 +3953,7 @@ istgt_lu_disk_get_reservation(ISTGT_LU_DISK *spec)
 		goto exit;
 	}
 	#endif
+#endif
 
 	spec->rsv_pending &= ~ISTGT_RSV_READ;
 	pr_reservation = (SCSI_PR_DATA *)pr_reservation;
@@ -5337,10 +5400,12 @@ istgt_lu_disk_unmap(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd,
 				return -1;
 			}
 
+#ifndef	REPLICATION
 			//TODO
 			#ifdef __FreeBSD__
 			ret = ioctl(spec->fd, DIOCGDELETE, unmbd);
 			#endif
+#endif
 
 			exitblockingcall(endofmacro2)
 			if (markedForFree == 1 || markedForReturn == 1) {
@@ -5484,17 +5549,19 @@ istgt_lu_disk_scsi_reserve(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr 
 	xfree(lu_cmd2.sense_data);
 	return 0;
 }
-extern void *zv;
+
 static int
 istgt_lu_disk_lbread(ISTGT_LU_DISK *spec, CONN_Ptr conn __attribute__((__unused__)), ISTGT_LU_CMD_Ptr lu_cmd, uint64_t lba, uint32_t len)
 {
-	uint8_t *data;
 	uint64_t maxlba;
 	uint64_t llen;
 	uint64_t blen;
 	uint64_t offset;
 	uint64_t nbytes;
 	int64_t rc = 0;
+#ifndef REPLICATION
+	uint8_t *data;
+#endif
 	int diskIoPendingL = 0, markedForFree = 0;
 	int markedForReturn = 0;
 
@@ -5515,9 +5582,6 @@ istgt_lu_disk_lbread(ISTGT_LU_DISK *spec, CONN_Ptr conn __attribute__((__unused_
 		ISTGT_ERRLOG("c#%d end of media max:%lu (lba:%lu+%u)\n", conn->id, maxlba, lba, len);
 		return -1;
 	}
-
-	data = xmalloc(nbytes);	
-
 	if(spec->error_inject  & READ_INFLIGHT_ISCSI)
 		if(spec->inject_cnt > 0)
 		{
@@ -5528,7 +5592,6 @@ istgt_lu_disk_lbread(ISTGT_LU_DISK *spec, CONN_Ptr conn __attribute__((__unused_
 	enterblockingcall(endofmacro1)
 	if(markedForReturn == 1)
 	{
-		xfree(data);
 		ISTGT_ERRLOG("Error in locking");
 		return -1;
 	}
@@ -5536,7 +5599,6 @@ istgt_lu_disk_lbread(ISTGT_LU_DISK *spec, CONN_Ptr conn __attribute__((__unused_
 	{
 		ISTGT_LOG("(0x%x) c#%d aborting the IO\n", lu_cmd->CmdSN, conn->id);
 		exitblockingcall(endofmacro3)
-		xfree(data);
 		return -1;
 	}
 
@@ -5548,7 +5610,13 @@ istgt_lu_disk_lbread(ISTGT_LU_DISK *spec, CONN_Ptr conn __attribute__((__unused_
 		}
 
 	timediffw(lu_cmd, 'w');
+
+#ifdef REPLICATION
+	rc = replicate(spec, lu_cmd, offset, nbytes);
+#else
+	data = xmalloc(nbytes);
 	rc = pread(spec->fd, data, nbytes, offset);
+#endif
 	timediffw(lu_cmd, 'D');
 	exitblockingcall(endofmacro2)
 	if (markedForFree == 1 || markedForReturn == 1) {
@@ -5556,24 +5624,28 @@ istgt_lu_disk_lbread(ISTGT_LU_DISK *spec, CONN_Ptr conn __attribute__((__unused_
 				conn->id, markedForFree, markedForReturn, conn, conn->cid, diskIoPendingL, nbytes, rc, lba, len);
 		if (diskIoPendingL == 0 && markedForFree == 1)
 			lu_cmd->connGone = 1;
+#ifndef REPLICATION
 		xfree(data);
+#endif
 		return -1;
 	}
 
 	if (rc < 0 || (uint64_t) rc != nbytes) {
+#ifndef REPLICATION
 		xfree(data);
+#endif
 		errlog(lu_cmd, "c#%d lu_disk_read() failed errnor:%d read:%ld (%lu+%lu, lba:%lu+%u)", conn->id, errno, rc, offset, nbytes, lba, len)
 		return -1;
 	}
 	ISTGT_TRACELOG(ISTGT_TRACE_SCSI, "c#%d Read %"PRId64"/%"PRIu64" bytes (lba:%lu+%u)\n",
 	    conn->id, rc, nbytes, lba, len);
 
+#ifndef REPLICATION
 	lu_cmd->data = data;
 	lu_cmd->data_len = rc;
-
+#endif
 	return 0;
 }
-
 static int
 istgt_lu_disk_lbwrite(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, uint64_t lba, uint32_t len)
 {
@@ -5585,14 +5657,17 @@ istgt_lu_disk_lbwrite(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cm
 	uint64_t nbytes;
 	unsigned long nbits = 0;
 	unsigned long nthbitset = 0;
-	uint64_t actual;
 	int64_t rc = 0;
 	int iovcnt;
-	struct iovec iov[20];
+	struct iovec iov[40];
 	int diskIoPendingL = 0, markedForFree = 0;
 	int markedForReturn = 0;
 	const char *msg = "write";
 	int i;
+#ifndef	REPLICATION
+	uint64_t actual;
+#endif
+
 	if (len == 0) {
 		lu_cmd->data_len = 0;
 		return 0;
@@ -5622,6 +5697,13 @@ istgt_lu_disk_lbwrite(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cm
 		iov[i].iov_base = lu_cmd->iobuf[i].iov_base;
 		iov[i].iov_len = lu_cmd->iobuf[i].iov_len;
 	}
+
+#ifdef	REPLICATION
+	while (spec->quiesce) {
+		ISTGT_ERRLOG("c#%d LU%d: quiescing write IOs\n", conn->id, spec->lu->num);
+		sleep(1);
+	}
+#endif
 
 	if (nbytes != lu_cmd->iobufsize) { //aj-the below call doesn't read anything
 		ISTGT_ERRLOG("c#%d nbytes(%zu) != iobufsize(%zu) (write lba:%lu+%u)\n",
@@ -5672,6 +5754,7 @@ freeiovcnt:
 	timediffw(lu_cmd, 'w');
 	if (spec->wzero && nthbitset == nbits) {
 		msg = "wzero";
+#ifndef	REPLICATION
 		//TODO
 		#ifdef __FreeBSD__
 		off_t unmbd[2];
@@ -5681,7 +5764,12 @@ freeiovcnt:
 		if (rc == 0)
 			rc = nbytes;
 		#endif
+#endif
 	} else {
+#ifdef REPLICATION
+		rc = replicate(spec, lu_cmd, offset, nbytes);
+		lu_cmd->data = NULL;
+#else
 		actual = lu_cmd->iobufsize; l_offset = offset;
 		while (actual > 0) {
 			rc = pwritev(spec->fd, &lu_cmd->iobuf[0], iovcnt, l_offset);
@@ -5696,7 +5784,7 @@ freeiovcnt:
 			/* adjust iovec length */
 			for (i = 0; i < iovcnt; i++) {
 				if (lu_cmd->iobuf[i].iov_len != 0 && lu_cmd->iobuf[i].iov_len > (size_t)rc) {
-					lu_cmd->iobuf[i].iov_base = (void *) (((uintptr_t)lu_cmd->iobuf[i].iov_base) + rc);
+					lu_cmd->iobuf[i].iov_base = (void *) (((char *)lu_cmd->iobuf[i].iov_base) + rc);
 					lu_cmd->iobuf[i].iov_len -= rc;
 					break;
 				} else {
@@ -5705,7 +5793,9 @@ freeiovcnt:
 				}
 			}
 		}
+#endif
 	}
+
 	lu_cmd->iobufsize = 0;
 	lu_cmd->iobufindx = -1;
 	for (i=0; i< iovcnt; ++i) {
@@ -5720,22 +5810,28 @@ freeiovcnt:
 				conn->id, markedForFree, markedForReturn, conn, conn->cid, diskIoPendingL, nbytes, rc, lba, len);
 		if (diskIoPendingL == 0 && markedForFree == 1)
 			lu_cmd->connGone = 1;
+#ifndef REPLICATION
 		for (i=0; i<iovcnt; ++i)
 			xfree(iov[i].iov_base);
+#endif
 		return -1;
 	}
 	if (rc < 0)  {
 		errlog(lu_cmd, "c#%d lu_disk_write() failed wrote:%lu of %lu+%lu (%lu) lba:%lu+%u", conn->id, rc, offset, nbytes, l_offset, lba, len)
+#ifndef REPLICATION
 		for (i=0; i<iovcnt; ++i)
 			xfree(iov[i].iov_base);
+#endif
 		return -1;
 	}
 	ISTGT_TRACELOG(ISTGT_TRACE_SCSI, "c#%d Wrote %lu/%lu bytes (lba:%lu+%u) %s\n",
 	    conn->id, rc, nbytes, lba, len, msg);
 
 	lu_cmd->data_len = rc;
+#ifndef REPLICATION
 	for (i=0; i<iovcnt; ++i)
 		xfree(iov[i].iov_base);
+#endif
 	return 0;
 }
 static int
@@ -5811,6 +5907,7 @@ istgt_lu_disk_lbwrite_same(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr 
 				xfree(data);
 			return -1;
 		}
+#ifndef	REPLICATION
 		//TODO
 		#ifdef __FreeBSD__	
 		off_t unmbd[2];
@@ -5818,6 +5915,7 @@ istgt_lu_disk_lbwrite_same(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr 
 		unmbd[1] = llen * blen;
 		rc = ioctl(spec->fd, DIOCGDELETE, unmbd);
 		#endif
+#endif
 		eno = errno;
 		exitblockingcall(endofmacro2);
 		if (markedForFree == 1 || markedForReturn == 1) {
@@ -5880,7 +5978,9 @@ istgt_lu_disk_lbwrite_same(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr 
 			xfree(workbuf);
 			return -1;
 		}
+#ifndef	REPLICATION
 		rc = pwrite(spec->fd, workbuf, reqbytes, offset_local);
+#endif
 		exitblockingcall(endofmacro4);
 		if (markedForFree == 1 || markedForReturn == 1) {
 			timediffw(lu_cmd, 'D');
@@ -5974,7 +6074,9 @@ istgt_lu_disk_lbwrite_ats(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr l
 		xfree(watsbuf);
 		return -1;
 	}
+#ifndef	REPLICATION
 	rc = pread(spec->fd, watsbuf, nbytes, offset);
+#endif
 	exitblockingcall(endofmacro2)
 	if (markedForFree == 1 || markedForReturn == 1) {
 		timediffw(lu_cmd, 'D');
@@ -6027,7 +6129,9 @@ istgt_lu_disk_lbwrite_ats(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr l
 		xfree(watsbuf);
 		return -1;
 	}
+#ifndef	REPLICATION
 	rc = pwrite(spec->fd, data + nbytes, nbytes, offset);
+#endif
 	exitblockingcall(endofmacro4)
 	timediffw(lu_cmd, 'D');
 	if (markedForFree == 1 || markedForReturn == 1) {
@@ -6100,7 +6204,11 @@ istgt_lu_disk_lbsync(ISTGT_LU_DISK *spec, CONN_Ptr conn __attribute__((__unused_
 		exitblockingcall(endofmacro3)
 		return -1;
 	}
+#ifdef REPLICATION
+	rc = replicate(spec, lu_cmd, offset, nbytes);
+#else
 	rc = spec->sync(spec, offset, nbytes);
+#endif
 	exitblockingcall(endofmacro2)
 	timediffw(lu_cmd, 'D');
 	if (markedForFree == 1 || markedForReturn == 1) {
@@ -6464,6 +6572,7 @@ istgt_lu_disk_reset(ISTGT_LU_Ptr lu, int lun , istgt_ua_type ua_type)
 		}
 	}
 
+#ifndef	REPLICATION
 	/* re-open file */
 	if (!spec->lu->readonly) {
 		rc = spec->sync(spec, 0, spec->size);
@@ -6486,6 +6595,7 @@ istgt_lu_disk_reset(ISTGT_LU_Ptr lu, int lun , istgt_ua_type ua_type)
 	 */
 
 	istgt_lu_disk_seek_raw(spec, 0);
+#endif
 
 	if (spec->spc2_reserved) {
 		/* release reservation by key */
@@ -6608,6 +6718,7 @@ istgt_lu_disk_start(ISTGT_LU_Ptr lu, int lun)
 		    lu->num, lun);
 		return -1;
 	}
+
 	MTX_LOCK(&spec->state_mutex);
 	spec->state = ISTGT_LUN_ONLINE;
 	spec->ex_state = ISTGT_LUN_OPEN;
@@ -6669,7 +6780,7 @@ istgt_lu_disk_stop(ISTGT_LU_Ptr lu, int lun)
          * CloudByte Supports/Configures one LUN per Logical Unit so making complete LU to be offline.
          */
 	lu->online = 0;
-	timesdiff(_wrk, _wrkx, _s1)
+	timesdiff(clockid, _wrk, _wrkx, _s1)
 	do {
 		MTX_LOCK(&spec->state_mutex);
 		spec->state = ISTGT_LUN_BUSY;
@@ -6680,8 +6791,9 @@ istgt_lu_disk_stop(ISTGT_LU_Ptr lu, int lun)
 		if (workers_signaled == 0)
 			sleep(1);
 	} while ((workers_signaled == 0) && (++loop  < 10));
-	timesdiff(_wrkx, _wrk, _s2)
+	timesdiff(clockid, _wrkx, _wrk, _s2)
 
+#ifndef	REPLICATION
 	/* re-open file */
 	if (!spec->lu->readonly) {
 		rc = spec->sync(spec, 0, spec->size);
@@ -6693,13 +6805,15 @@ istgt_lu_disk_stop(ISTGT_LU_Ptr lu, int lun)
 		}
 	}
 	rc = spec->close(spec);
-	timesdiff(_wrk, _wrkx, _s3)
+	timesdiff(clockid, _wrk, _wrkx, _s3)
 	if (rc < 0) {
 		ISTGT_ERRLOG("LU%d: LUN%d: lu_disk_close() failed\n",
 		    lu->num, lun);
 		lu->online = 1;
 		return -1;
 	}
+#endif
+
 	MTX_LOCK(&spec->state_mutex);
 	spec->ex_state = ISTGT_LUN_CLOSE;
 	MTX_UNLOCK(&spec->state_mutex);
@@ -6747,7 +6861,7 @@ istgt_lu_disk_modify(ISTGT *istgt, int dofake)
 				++skipped;
 		}
 	}
-	timesdiff(st,wrk,dif1)
+	timesdiff(clockid, st,wrk,dif1)
 
 	notyet = signaled;	
 
@@ -6766,7 +6880,7 @@ istgt_lu_disk_modify(ISTGT *istgt, int dofake)
 			}
 		}
 	}
-	timesdiff(wrk,wrkx,dif2)
+	timesdiff(clockid, wrk,wrkx,dif2)
 	ISTGT_LOG("istgtcontrol modify %s done signaled:%d notdone:%d [%ld.%ld - %ld.%ld]\n",
 			mode, signaled, notyet, dif1.tv_sec, dif1.tv_nsec, dif2.tv_sec, dif2.tv_nsec);
 	return  (failsignal || notyet) ? -1 : 0;
@@ -6797,7 +6911,19 @@ istgt_lu_disk_status(ISTGT_LU_Ptr lu, int lun)
 		return -1;
 
 	MTX_LOCK(&spec->state_mutex);
-	status = spec->state;
+#ifdef	REPLICATION
+	MTX_LOCK(&spec->rq_mtx);
+	if (spec->state == ISTGT_LUN_BUSY || spec->ready == false) {
+#else
+	if (spec->state == ISTGT_LUN_BUSY) {
+#endif
+		status = ISTGT_LUN_BUSY;
+	} else {
+		status = ISTGT_LUN_ONLINE;
+	}
+#ifdef	REPLICATION
+	MTX_UNLOCK(&spec->rq_mtx);
+#endif
 	MTX_UNLOCK(&spec->state_mutex);
 
 	return (status);
@@ -8969,7 +9095,11 @@ istgt_lu_disk_execute(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 	}
 
 	MTX_LOCK(&spec->state_mutex);
-	if (spec->state == ISTGT_LUN_BUSY && (!istgt_lu_disk_busy_excused(cdb[0]))) {
+	if ((spec->state == ISTGT_LUN_BUSY && (!istgt_lu_disk_busy_excused(cdb[0])))
+#ifdef	REPLICATION
+	    || !spec->ready
+#endif
+	    ) {
 		lu_cmd->data_len  = 0;
 		lu_cmd->status = ISTGT_SCSI_STATUS_BUSY;
 		MTX_UNLOCK(&spec->state_mutex);
@@ -10727,3 +10857,4 @@ istgt_lu_disk_execute(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 		xfree(data);
 	return 0;
 }
+

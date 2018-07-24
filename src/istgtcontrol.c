@@ -1065,6 +1065,43 @@ exec_dump(UCTL_Ptr uctl)
 	}
 	return UCTL_CMD_OK;
 }
+#ifdef REPLICATION
+// exec_iostats writes IOSTATS over the wire and gets the
+// iostats from istgt
+static int
+exec_iostats(UCTL_Ptr uctl)
+{
+        const char *delim = ARGS_DELIM;
+        char *arg;
+        char *result;
+        int rc;
+
+        uctl_snprintf(uctl, "IOSTATS\n");
+        rc = uctl_writeline(uctl);
+        if (rc != UCTL_CMD_OK) {
+                return rc;
+        }
+        /* receive result */
+	while(1) {
+		rc = uctl_readline(uctl);
+		if (rc != UCTL_CMD_OK) {
+			return rc;
+		}
+		arg = trim_string(uctl->recvbuf);
+		result = strsepq(&arg, delim);
+		strupr(result);
+		if (strcmp(result, uctl->cmd) !=0){
+			break;
+		}
+		fprintf(stdout, "%s\n", arg);
+	}
+	if (strcmp(result, "OK") != 0) {
+		fprintf(stderr, "ERROR %s\n", arg);
+		return UCTL_CMD_ERR;
+	}
+	return UCTL_CMD_OK;
+}
+#endif
 
 static int
 exec_stats(UCTL_Ptr uctl)
@@ -1083,6 +1120,56 @@ exec_stats(UCTL_Ptr uctl)
 		uctl_snprintf(uctl, "STATS ALL \n");
 	}*/
 	uctl_snprintf(uctl, "STATS %d\n", uctl->setzero);
+	rc = uctl_writeline(uctl);
+	if (rc != UCTL_CMD_OK) {
+		return rc;
+	}
+
+	/* receive result */
+	while (1) {
+		rc = uctl_readline(uctl);
+		if (rc != UCTL_CMD_OK) {
+			return rc;
+		}
+		arg = trim_string(uctl->recvbuf);
+		result = strsepq(&arg, delim);
+		strupr(result);
+		if (strcmp(result, uctl->cmd) != 0)
+			break;
+		if (uctl->iqn != NULL) {
+			printf("%s\n", arg);
+		} else {
+			printf("%s\n", arg);
+		}
+	}
+	if (strcmp(result, "OK") != 0) {
+		if (is_err_req_auth(uctl, arg))
+			return UCTL_CMD_REQAUTH;
+		fprintf(stderr, "ERROR %s\n", arg);
+		return UCTL_CMD_ERR;
+	}
+	return UCTL_CMD_OK;
+}
+
+static int
+exec_snap(UCTL_Ptr uctl)
+{
+	const char *delim = ARGS_DELIM;
+	char *arg;
+	char *result;
+	int rc = 0, wait_time, io_wait_time;
+	char *name = uctl->setargv[0];
+	char *snapname = uctl->setargv[1];
+	if (uctl->setargcnt >= 3)
+		io_wait_time = atoi(uctl->setargv[2]);
+	else
+		io_wait_time = 10;
+	if (uctl->setargcnt >= 4)
+		wait_time = atoi(uctl->setargv[3]);
+	else
+		wait_time = 30;
+
+	uctl_snprintf(uctl, "%s \"%s\" \"%s\" \"%d\" \"%d\"\n", uctl->cmd, name, snapname, io_wait_time, wait_time);
 	rc = uctl_writeline(uctl);
 	if (rc != UCTL_CMD_OK) {
 		return rc;
@@ -1350,8 +1437,13 @@ static EXEC_TABLE exec_table[] =
 	{"RSV", exec_rsv, 0, 0 },
 	{"QUE", exec_que, 0, 0 },
 	{"STATS", exec_stats, 0, 0 },
+#ifdef REPLICATION
+	{"IOSTATS", exec_iostats, 0, 0 },
+#endif
 	{"SET", exec_set, 0, 1},
 	{"MAXTIME", exec_maxtime, 0, 0},
+	{"SNAPCREATE", exec_snap, 2, 0},
+	{"SNAPDESTROY", exec_snap, 2, 0},
 	{ NULL,      NULL,          0, 0 },
 };
 
@@ -1831,6 +1923,7 @@ usage(void)
 	printf(" modify     Modify all the lun devices to Fake/Normal\n");
 	printf(" status     get the status of all or specified lun device \n");
 	printf(" info       show connections of target\n");
+	printf(" iostats    displays iostats of volume\n");
 	printf(" maxtime    list the IOs which took maximum time to process\n");
 	printf(" set        set values for variables:\n");
 	printf("            Syntax: istgtcontrol -t <iqn(ALL to set globally)> set <variable number> <value>\n");
@@ -2101,6 +2194,10 @@ main(int argc, char *argv[])
 		uctl->setargcnt = argc;
 	}
 	
+	if ((strcmp(cmd, "SNAPCREATE") == 0) || (strcmp(cmd, "SNAPDESTROY") == 0)) {
+		uctl->setargv = argv;
+		uctl->setargcnt = argc;
+	}
 
 	/* build parameters */
 	rc = uctl_init(uctl);
@@ -2320,3 +2417,4 @@ main(int argc, char *argv[])
 	}
 	return EXIT_SUCCESS;
 }
+

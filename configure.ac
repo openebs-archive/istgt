@@ -15,7 +15,7 @@ AC_PROG_MKDIR_P
 
 # clagn with -O3
 if test "$CC" = "clang" && test "$ac_test_CFLAGS" != "set"; then
-  CFLAGS="-g -O3"
+  CFLAGS="-g -O3 -DNDEBUG"
 fi
 
 # host OS related
@@ -23,6 +23,9 @@ vboxinc="/usr/local/src/virtualbox/*/include"
 vboxlib="/usr/local/lib/virtualbox"
 AC_SUBST([rctemplate], [""])
 AC_SUBST([rcdir], ['${prefix}/etc/rc.d'])
+AC_SUBST([target_source_files], ['${istgt_source}'])
+AC_SUBST([target_header_files], ['${istgt_header}'])
+
 AC_CANONICAL_HOST
 case "$host_os" in
 *linux*)
@@ -160,12 +163,34 @@ AC_TRY_COMPILE(,,
 CFLAGS="$saved_CFLAGS"
 
 # check enable features
-AC_MSG_CHECKING([whether to use debug mode])
+AC_MSG_CHECKING([whether to dump packet data (tracedump mode)])
+AC_ARG_ENABLE([tracedump],
+  AS_HELP_STRING([--enable-tracedump], [enable tracedump(logging)]),
+  AC_MSG_RESULT(yes); AC_DEFINE([TRACEDUMP], 1, [Define if enable tracedump]),
+  AC_MSG_RESULT(no))
+AC_SUBST([TRACEDUMP])
+
+AC_MSG_CHECKING([whether to enable debug mode])
 AC_ARG_ENABLE([debug],
-  AS_HELP_STRING([--enable-debug], [enable debug(logging)]),
-  AC_MSG_RESULT(yes); AC_DEFINE([DEBUG], 1, [Define if enable debug]),
+  AS_HELP_STRING([--enable-debug], [enable debug]),
+  AC_MSG_RESULT(yes); AC_DEFINE([DEBUG], 1, [Define if enable debug])
+  CFLAGS="-DDEBUG -Werror -ggdb3 -fstack-check",
   AC_MSG_RESULT(no))
 AC_SUBST([DEBUG])
+
+AC_MSG_CHECKING([whether to enable replication mode])
+AC_ARG_ENABLE([replication],
+  AS_HELP_STRING([--enable-replication], [enable replication feature]),
+  AC_MSG_RESULT(yes); AC_DEFINE([REPLICATION], 1, [Define if enable replication])
+  LIBS="$LIBS -lm -ljson-c"
+  AC_SUBST([target_source_files], ['${istgt_source} ${replication_source}'])
+  AC_SUBST([target_header_files], ['${istgt_header} ${replication_header}'])
+  AC_MSG_NOTICE([fetching zrepl_prot.h file...])
+  AC_SUBST([replication_bin], ['istgt_integration replication_test mempool_test'])
+  AS_IF([$( wget -O src/zrepl_prot.h https://raw.githubusercontent.com/openebs/zfs/zfs-0.7-release/include/zrepl_prot.h >> /dev/null 2>&1 )], , [AC_MSG_ERROR([failed to fetch zrepl_prot.h])]),
+  AC_MSG_RESULT(no)
+  AC_SUBST([replication_bin], ['']))
+AC_SUBST([REPLICATION])
 
 AC_MSG_CHECKING([whether to use symlink device])
 AC_ARG_ENABLE([symlink-device],

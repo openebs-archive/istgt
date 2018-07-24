@@ -13,9 +13,9 @@ datarootdir = @datarootdir@
 datadir  = @datadir@
 libexecdir = @libexecdir@
 mandir   = @mandir@
+REPLICATION_BIN = @replication_bin@
 
 CC       = @CC@
-SUBPROGRAM  = @SUBPROGRAM@
 CFLAGS   = @CFLAGS@
 CPPFLAGS = @CPPFLAGS@ -I$(top_srcdir) -I$(srcdir)
 LDFLAGS  = @LDFLAGS@
@@ -26,7 +26,6 @@ MKDIR_P  = @MKDIR_P@
 RANLIB   = @RANLIB@
 MKDEP	 = @MKDEP@
 
-CFLAGS  += -DDEBUG -ggdb3
 CFLAGS  += -fno-strict-aliasing -Wstrict-aliasing
 CFLAGS  += -Wformat=2 -Wreturn-type
 CFLAGS  += -Wbad-function-cast
@@ -35,25 +34,44 @@ CFLAGS  += -Wmissing-prototypes -Wnested-externs -Wpointer-arith
 CFLAGS  += -Wredundant-decls -Wshadow -Wstrict-prototypes -Wwrite-strings
 CFLAGS  += -Wno-error=cast-align
 
-source   = istgt.c istgt_iscsi.c istgt_iscsi_param.c \
-	istgt_lu.c istgt_cmd_table.c istgt_ser_table.c istgt_lu_disk.c istgt_lu_disk_xcopy.c istgt_lu_disk_vbox.c \
-	istgt_lu_ctl.c \
-	istgt_log.c istgt_conf.c istgt_sock.c istgt_misc.c \
-	istgt_queue.c istgt_crc32c.c istgt_md5.c
-header   = istgt_ver.h istgt.h istgt_iscsi.h istgt_iscsi_xcopy.h istgt_iscsi_param.h \
-	istgt_scsi.h istgt_proto.h istgt_lu.h \
-	istgt_log.h istgt_conf.h istgt_sock.h \
-	istgt_misc.h istgt_queue.h istgt_crc32c.h istgt_md5.h
-document = 
-sample   = 
+istgt_source = istgt.c istgt_iscsi.c istgt_iscsi_param.c istgt_lu.c 	\
+		istgt_cmd_table.c istgt_ser_table.c istgt_lu_disk.c 	\
+		istgt_lu_disk_xcopy.c istgt_lu_disk_vbox.c istgt_lu_ctl.c \
+		istgt_log.c istgt_conf.c istgt_sock.c istgt_misc.c \
+		istgt_queue.c istgt_crc32c.c istgt_md5.c
+
+istgt_header = istgt_ver.h istgt.h istgt_iscsi.h istgt_iscsi_xcopy.h istgt_iscsi_param.h \
+		istgt_scsi.h istgt_proto.h istgt_lu.h istgt_log.h istgt_conf.h istgt_sock.h \
+		istgt_misc.h istgt_queue.h istgt_crc32c.h istgt_md5.h
+
+replication_source = replication.c replication_misc.c ring_mempool.c rte_ring.c data_conn.c
+
+replication_header = replication.h  istgt_integration.h zrepl_prot.h 	\
+			rte_atomic_64.h  rte_atomic_generic.h  rte_atomic.h	\
+			rte_common.h rte_memory.h  rte_pause.h  rte_ring.h rte_mempool.h
+
+target_source = @target_source_files@
+target_header = @target_header_files@
+
 
 ctl_source = istgtcontrol.c istgt_conf.c istgt_log.c istgt_sock.c istgt_misc.c \
 	istgt_md5.c
 ctl_header = istgt_ver.h istgt_conf.h istgt_log.h istgt_sock.h istgt_misc.h \
 	istgt_md5.h
 
-ISTGT    = $(source:.c=.o)
+istgt_integration_source  = istgt_integration_test.c mock_client.c replication.c replication_misc.c rte_ring.c \
+	ring_mempool.c data_conn.c istgt_misc.c mock_errored_replica.c
+
+replication_test_source   = replication_test.c replication_misc.c
+replication_test_header   = replication.h istgt_integration.h
+
+mempool_test_source = rte_ring.c mempool_test.c ring_mempool.c
+
+ISTGT    = $(target_source:.c=.o)
 ISTGTCONTROL = $(ctl_source:.c=.o)
+REPLICATION_TEST = $(replication_test_source:.c=.o)
+ISTGT_INTEGRATION = $(istgt_integration_source:.c=.o)
+MEMPOOL_TEST = $(mempool_test_source:.c=.o)
 
 PACKAGE_NAME = @PACKAGE_NAME@
 PACKAGE_STRING = @PACKAGE_STRING@
@@ -70,8 +88,7 @@ DISTEXTVER = `sed -e '/ISTGT_EXTRA_VERSION/!d' -e 's/[^0-9.]*\([0-9.a-z]*\).*/\1
 DISTDIR = $(top_srcdir)/`cat $(top_srcdir)/distdir`
 DISTNAME = $(DISTDIR).tar.gz
 DISTFILES = Makefile.in config.h.in build.h.in \
-	$(header) $(source) $(ctl_header) $(ctl_source) \
-	$(document) $(sample)
+	$(target_header) $(target_source) $(ctl_header) $(ctl_source)
 
 #########################################################################
 
@@ -93,7 +110,26 @@ istgtcontrol: $(ISTGTCONTROL)
 	objcopy --only-keep-debug ${@}.full ${@}.debug
 	objcopy --strip-debug --add-gnu-debuglink=${@}.debug ${@}.full ${@}
 
-all: stamp-depend config.h $(SUBPROGRAM) istgtcontrol istgt
+replication_test: $(REPLICATION_TEST)
+	$(CC) $(LDFLAGS) -o ${@}.full $(REPLICATION_TEST) $(LIBS)
+	objcopy --only-keep-debug ${@}.full ${@}.debug
+	objcopy --strip-debug --add-gnu-debuglink=${@}.debug ${@}.full ${@}
+
+istgt_integration: $(ISTGT_INTEGRATION)
+	$(CC) $(LDFLAGS) -o ${@}.full $(ISTGT_INTEGRATION) $(LIBS)
+	objcopy --only-keep-debug ${@}.full ${@}.debug
+	objcopy --strip-debug --add-gnu-debuglink=${@}.debug ${@}.full ${@}
+
+mempool_test: $(MEMPOOL_TEST)
+	$(CC) $(LDFLAGS) -o ${@}.full $(MEMPOOL_TEST) $(LIBS)
+	objcopy --only-keep-debug ${@}.full ${@}.debug
+	objcopy --strip-debug --add-gnu-debuglink=${@}.debug ${@}.full ${@}
+
+build_image:
+	sh ./package.sh
+
+all: stamp-depend config.h istgtcontrol istgt $(REPLICATION_BIN)
+dev: stamp-depend config.h istgtcontrol istgt $(REPLICATION_BIN)
 
 install: install-dirs
 	$(INSTALL) -m 0755 istgt $(DESTDIR)$(bindir)
@@ -114,7 +150,7 @@ dist: $(DISTFILES)
 
 depend:
 	if [ "x$(MKDEP)" != "x" ]; then \
-		$(MKDEP) -MM $(DEFS) $(CFLAGS) $(CPPFLAGS) $(source); \
+		$(MKDEP) -MM $(DEFS) $(CFLAGS) $(CPPFLAGS) $(target_source); \
 	fi
 	touch stamp-depend
 
@@ -124,6 +160,9 @@ clean:
 	-rm -f istgt istgtcontrol
 	-rm -f istgt.debug istgtcontrol.debug
 	-rm -f istgt.full istgtcontrol.full
+	-rm -f replication_test replication_test.debug replication_test.full
+	-rm -f mempool_test mempool_test.debug mempool_test.full
+	-rm -f istgt_integration istgt_integration.debug istgt_integration.full
 
 distclean: clean
 	-rm -f stamp-depend .depend
