@@ -91,6 +91,7 @@ static int handle_mgmt_event_fd(replica_t *replica);
 			case SBC_SYNCHRONIZE_CACHE_16:			\
 				rcomm_cmd->opcode = ZVOL_OPCODE_SYNC;	\
 				rcomm_cmd->iovcnt = 0;			\
+				rcomm_cmd->data_len = 0;		\
 				break;					\
 			default:					\
 				break;					\
