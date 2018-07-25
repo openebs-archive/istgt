@@ -2927,10 +2927,11 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 {
 	ISTGT_LU_Ptr lu;
 	int rc, length;
+    uint64_t usedlogicalblock;
 	/* instantiate json_object from json-c library. */
         struct json_object *jobj;
 	/* these are utility variables that will be freed at the end of the function. */
-	char *writes, *reads, *totalreadbytes, *totalwritebytes, *size;
+	char *writes, *reads, *totalreadbytes, *totalwritebytes, *size, *usedblocks, *sectorsize;
 	ISTGT_LU_DISK *spec;
 	MTX_LOCK(&specq_mtx);
 	TAILQ_FOREACH(spec, &spec_q, spec_next) {
@@ -2959,17 +2960,31 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 		size = malloc(length + 1);
 		snprintf(size, length + 1, "%"PRIu64, spec->size);
 
+        usedlogicalblock = ( spec->stats.used / spec->blocklen ) ;
+
+        length = snprintf(NULL, 0, "%"PRIu64, usedlogicalblock);
+		usedblocks = malloc(length + 1);
+		snprintf(usedblocks, length + 1, "%"PRIu64, usedlogicalblock);
+
+        length = snprintf(NULL, 0, "%"PRIu64, spec->blocklen);
+		sectorsize = malloc(length + 1);
+		snprintf(sectorsize, length + 1, "%"PRIu64, spec->blocklen);
+
 		json_object *jreads = json_object_new_string(reads);	/* instantiate child object */
 		json_object *jwrites = json_object_new_string(writes);
 		json_object *jtotalreadbytes = json_object_new_string(totalreadbytes);
 		json_object *jtotalwritebytes = json_object_new_string(totalwritebytes);
 		json_object *jsize = json_object_new_string(size);
+		json_object *jusedlogicalblocks = json_object_new_string(usedblocks);
+		json_object *jsectorsize = json_object_new_string(sectorsize);
 
 		json_object_object_add(jobj, "WriteIOPS", jwrites);	/* add values to object field */
 		json_object_object_add(jobj, "ReadIOPS", jreads);
 		json_object_object_add(jobj, "TotalWriteBytes", jtotalwritebytes);
 		json_object_object_add(jobj, "TotalReadBytes", jtotalreadbytes);
 		json_object_object_add(jobj, "Size", jsize);
+     	json_object_object_add(jobj, "UsedLogicalBlocks", jusedlogicalblocks);
+     	json_object_object_add(jobj, "SectorSize", jsectorsize);
 
 		istgt_uctl_snprintf(uctl, "%s  %s\n", uctl->cmd, json_object_to_json_string(jobj));
 		rc = istgt_uctl_writeline(uctl);
@@ -2980,19 +2995,23 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 			free(totalreadbytes);
 			free(totalwritebytes);
 			free(size);
-			/* freeing root json_object will free all the allocated memory
+            free(usedblocks);
+	        free(sectorsize);
+            /* freeing root json_object will free all the allocated memory
 			** associated with the json_object.
 			*/
 			json_object_put(jobj);
 			return rc;
 		}
-		
+
 		free(reads);
 		free(writes);
 		free(totalreadbytes);
 		free(totalwritebytes);
 		free(size);
-		json_object_put(jobj);
+	    free(usedblocks);
+	    free(sectorsize);
+        json_object_put(jobj);
 	}
 	MTX_UNLOCK(&specq_mtx);
 	istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
