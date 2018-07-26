@@ -76,6 +76,8 @@ static void handle_resize_resp(replica_t *replica, mgmt_cmd_t *cmd);
 				cmd_write = true;			\
 				rcomm_cmd->opcode = ZVOL_OPCODE_WRITE;	\
 				rcomm_cmd->iovcnt = cmd->iobufindx + 1;	\
+				__sync_add_and_fetch(&spec->writes, 1); \
+				__sync_add_and_fetch(&spec->writebytes, nbytes);\
 				break;					\
 									\
 			case SBC_READ_6:				\
@@ -84,12 +86,15 @@ static void handle_resize_resp(replica_t *replica, mgmt_cmd_t *cmd);
 			case SBC_READ_16:				\
 				rcomm_cmd->opcode = ZVOL_OPCODE_READ;	\
 				rcomm_cmd->iovcnt = 0;			\
+				__sync_add_and_fetch(&spec->reads, 1);	\
+				__sync_add_and_fetch(&spec->readbytes, nbytes);\
 				break;					\
 									\
 			case SBC_SYNCHRONIZE_CACHE_10:			\
 			case SBC_SYNCHRONIZE_CACHE_16:			\
 				rcomm_cmd->opcode = ZVOL_OPCODE_SYNC;	\
 				rcomm_cmd->iovcnt = 0;			\
+				rcomm_cmd->data_len = 0;		\
 				break;					\
 			default:					\
 				break;					\
@@ -103,7 +108,7 @@ static void handle_resize_resp(replica_t *replica, mgmt_cmd_t *cmd);
 			}						\
 			rcomm_cmd->total_len += cmd->iobufsize;		\
 		}							\
-	} while (0)
+	} while (0)							\
 
 #define BUILD_REPLICA_MGMT_HDR(_mgmtio_hdr, _mgmt_opcode, _data_len)	\
 	do {								\
@@ -261,6 +266,7 @@ enqueue_prepare_for_rebuild(spec_t *spec, replica_t *replica,
 	uint64_t data_len = strlen(spec->volname) + 1;
 
 	mgmt_cmd = malloc(sizeof (mgmt_cmd_t));
+	memset(mgmt_cmd, 0, sizeof (mgmt_cmd_t));
 	BUILD_REPLICA_MGMT_HDR(rmgmtio, opcode, data_len);
 
 	mgmt_cmd->io_hdr = rmgmtio;
@@ -309,6 +315,8 @@ send_prepare_for_rebuild_or_trigger_rebuild(spec_t *spec,
 	mgmt_ack_t *mgmt_data;
 	replica_t *replica;
 	struct rcommon_mgmt_cmd *rcomm_mgmt;
+
+	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 
 	spec->target_replica = target_replica;
 	spec->rebuild_in_progress = true;
@@ -392,11 +400,13 @@ start_rebuild(void *buf, replica_t *replica, uint64_t data_len)
 	zvol_op_code_t mgmt_opcode = ZVOL_OPCODE_START_REBUILD;
 	mgmt_cmd_t *mgmt_cmd;
 
+	ASSERT(MTX_LOCKED(&replica->spec->rq_mtx));
+
 	mgmt_cmd = malloc(sizeof (mgmt_cmd_t));
+	memset(mgmt_cmd, 0, sizeof (mgmt_cmd_t));
 	BUILD_REPLICA_MGMT_HDR(rmgmtio, mgmt_opcode, data_len);
 
 	mgmt_cmd->io_hdr = rmgmtio;
-	mgmt_cmd->io_bytes = 0;
 	mgmt_cmd->data = buf;
 	mgmt_cmd->mgmt_cmd_state = WRITE_IO_SEND_HDR;
 
@@ -436,6 +446,8 @@ trigger_rebuild(spec_t *spec)
 	replica_t *replica = NULL;
 	replica_t *target_replica = NULL;
 	replica_t *healthy_replica = NULL;
+
+	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 
 	if (spec->ready != true) {
 		REPLICA_NOTICELOG("Volume(%s) is not ready to accept IOs\n",
@@ -944,6 +956,7 @@ send_replica_handshake_query(replica_t *replica, spec_t *spec)
 	int ret = 0;
 
 	mgmt_cmd = malloc(sizeof(mgmt_cmd_t));
+	memset(mgmt_cmd, 0, sizeof (mgmt_cmd_t));
 
 	data_len = strlen(spec->volname) + 1;
 
@@ -1165,6 +1178,7 @@ send_replica_query(replica_t *replica, spec_t *spec, zvol_op_code_t opcode)
 	mgmt_cmd_t *mgmt_cmd;
 
 	mgmt_cmd = malloc(sizeof(mgmt_cmd_t));
+	memset(mgmt_cmd, 0, sizeof (mgmt_cmd_t));
 	data_len = strlen(spec->volname) + 1;
 	BUILD_REPLICA_MGMT_HDR(rmgmtio, mgmt_opcode, data_len);
 
@@ -1273,29 +1287,36 @@ handle_prepare_for_rebuild_resp(spec_t *spec, zvol_io_hdr_t *hdr,
 	}
 
 	if (rcomm_mgmt->cmds_sent == rcomm_mgmt->cmds_succeeded) {
-		ret = start_rebuild(buf, spec->target_replica, rcomm_mgmt->buf_size);
-		rcomm_mgmt->buf = NULL;
-		if (ret == 0) {
-			REPLICA_LOG("Rebuild triggered on Replica(%lu) "
-			    "state:%d\n", spec->target_replica->zvol_guid,
-			    spec->target_replica->state);
+		MTX_LOCK(&spec->rq_mtx);
+		if (spec->target_replica) {
+			ret = start_rebuild(buf, spec->target_replica, rcomm_mgmt->buf_size);
+			rcomm_mgmt->buf = NULL;
+			if (ret == 0) {
+				REPLICA_LOG("Rebuild triggered on Replica(%lu) "
+				    "state:%d\n", spec->target_replica->zvol_guid,
+				    spec->target_replica->state);
+			} else {
+				REPLICA_LOG("Unable to trigger rebuild on Replica(%lu)"
+				    " state:%d\n", spec->target_replica->zvol_guid,
+				    spec->target_replica->state);
+				spec->target_replica = NULL;
+				spec->rebuild_in_progress = false;
+			}
 		} else {
-			REPLICA_LOG("Unable to trigger rebuild on Replica(%lu)"
-			    " state:%d\n", spec->target_replica->zvol_guid,
-			    spec->target_replica->state);
-			MTX_LOCK(&spec->rq_mtx);
-			spec->target_replica = NULL;
-			spec->rebuild_in_progress = false;
-			MTX_UNLOCK(&spec->rq_mtx);
-		}	
+			ASSERT(spec->rebuild_in_progress == false);
+		}
+		MTX_UNLOCK(&spec->rq_mtx);
 		free_rcommon_mgmt_cmd(rcomm_mgmt);
+		mgmt_cmd->rcomm_mgmt = NULL;
 	} else if (rcomm_mgmt->cmds_sent ==
 	    (rcomm_mgmt->cmds_failed + rcomm_mgmt->cmds_succeeded)) {
 		free_rcommon_mgmt_cmd(rcomm_mgmt);
-		REPLICA_LOG("Unable to trigger rebuild on Replica(%lu) "
-		    "state:%d\n", spec->target_replica->zvol_guid,
-		    spec->target_replica->state);
+		mgmt_cmd->rcomm_mgmt = NULL;
 		MTX_LOCK(&spec->rq_mtx);
+		if (spec->target_replica)
+			REPLICA_LOG("Unable to trigger rebuild on Replica(%lu) "
+			    "state:%d\n", spec->target_replica->zvol_guid,
+			    spec->target_replica->state);
 		spec->target_replica = NULL;
 		spec->rebuild_in_progress = false;
 		MTX_UNLOCK(&spec->rq_mtx);
@@ -1667,6 +1688,7 @@ read_io_resp_hdr:
 
 					memset(resp_hdr, 0, sizeof(zvol_io_hdr_t));
 					free(*resp_data);
+					mgmt_cmd->cmd_completed = 1;
 
 					if (rc == -1)
 						return (rc);
@@ -1683,6 +1705,7 @@ read_io_resp_hdr:
 
 				case ZVOL_OPCODE_STATS:
 					update_spec_stats(spec, resp_hdr, *resp_data);
+					free(*resp_data);
 					break;
 
 				case ZVOL_OPCODE_PREPARE_FOR_REBUILD:
@@ -1725,7 +1748,12 @@ read_io_resp_hdr:
 			*resp_data = NULL;
 			*read_count = 0;
 			donecount++;
+			mgmt_cmd->cmd_completed = 1;
 			*state = READ_IO_RESP_HDR;
+			/*
+			 * Try to read data from replica again if replica is
+			 * sending more or multiple reponses for the same command.
+			 */
 			goto read_io_resp_hdr;
 			break;
 		default:
@@ -1837,25 +1865,25 @@ empty_mgmt_q_of_replica(replica_t *r)
 	mgmt_cmd_t *mgmt_cmd;
 	while ((mgmt_cmd = TAILQ_FIRST(&r->mgmt_cmd_queue))) {
 		mgmt_cmd->io_hdr->status = ZVOL_OP_STATUS_FAILED;
-		switch (mgmt_cmd->io_hdr->opcode) {
-			case ZVOL_OPCODE_SNAP_CREATE:
-				handle_snap_create_resp(r, mgmt_cmd);
-				break;
-			case ZVOL_OPCODE_PREPARE_FOR_REBUILD:
-				handle_prepare_for_rebuild_resp(r->spec,
-				    mgmt_cmd->io_hdr, NULL, mgmt_cmd);
-				break;
-			case ZVOL_OPCODE_STATS:
-				update_spec_stats(r->spec, mgmt_cmd->io_hdr,
-				    NULL);
-				break;
-			case ZVOL_OPCODE_RESIZE:
-				handle_resize_resp(r, mgmt_cmd);
-			default:
-				break;
+		if (!mgmt_cmd->cmd_completed) {
+			switch (mgmt_cmd->io_hdr->opcode) {
+				case ZVOL_OPCODE_SNAP_CREATE:
+					handle_snap_create_resp(r, mgmt_cmd);
+					break;
+				case ZVOL_OPCODE_PREPARE_FOR_REBUILD:
+					handle_prepare_for_rebuild_resp(r->spec,
+					    mgmt_cmd->io_hdr, NULL, mgmt_cmd);
+					break;
+				case ZVOL_OPCODE_STATS:
+					update_spec_stats(r->spec, mgmt_cmd->io_hdr,
+					    NULL);
+					break;
+				default:
+					break;
+			}
+			REPLICA_NOTICELOG("mgmt command(%d) failed for replica(%lu)\n",
+			    mgmt_cmd->io_hdr->opcode, r->zvol_guid);
 		}
-		REPLICA_NOTICELOG("mgmt command(%d) failed for replica(%lu)\n",
-		    mgmt_cmd->io_hdr->opcode, r->zvol_guid);
 		clear_mgmt_cmd(r, mgmt_cmd);
 	}
 }
