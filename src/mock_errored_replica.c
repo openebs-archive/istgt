@@ -894,7 +894,7 @@ error:
 	if (sfd > 0)
 		close(sfd);
 
-	free(io_hdr);
+  free(io_hdr);
 	free(mgmtio);
 	free(events);
 	REPLICA_ERRLOG("shutting down replica(%d)... \n", replica_port);
