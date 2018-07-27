@@ -63,8 +63,9 @@ do {														\
 	_repl_data = (errored_replica_data_t *)pthread_getspecific(err_repl_key);				\
 	(void) epoll_ctl(_epoll_fd, EPOLL_CTL_DEL, _fd, NULL);							\
 	close(_fd);												\
-	(_repl_data->mgmtfd == _fd) && (_repl_data->mgmtfd = _fd = -1);						\
-	(_repl_data->datafd == _fd) && (_repl_data->datafd = _fd = -1);						\
+	(_repl_data->mgmtfd == _fd) && (_repl_data->mgmtfd = -1);						\
+	(_repl_data->datafd == _fd) && (_repl_data->datafd = -1);						\
+	_fd = -1;												\
 														\
 	if (_err_type & ERROR_TYPE_MGMT)									\
 		_repl_data->mgmt_err_cnt++;									\
@@ -125,8 +126,9 @@ do {														\
 														\
 	_repl_data = (errored_replica_data_t *)pthread_getspecific(err_repl_key);				\
 	close(_fd);												\
-	(_repl_data->mgmtfd == _fd) && (_repl_data->mgmtfd = _fd = -1);						\
-	(_repl_data->datafd == _fd) && (_repl_data->datafd = _fd = -1);						\
+	(_repl_data->mgmtfd == _fd) && (_repl_data->mgmtfd = -1);						\
+	(_repl_data->datafd == _fd) && (_repl_data->datafd = -1);						\
+	_fd = -1;												\
 														\
 	_rc = REPL_TEST_RESTART;										\
 	if (_err_type & ERROR_TYPE_MGMT)									\
@@ -458,6 +460,14 @@ send_mgmt_ack(int fd, zvol_io_hdr_t *mgmt_ack_hdr, void *buf, int *zrepl_status_
 			iovec[iovec_count + i].iov_len = iovec[i].iov_len;
 		}
 		iovec_count = 2 * iovec_count;
+		/*
+		 * Here, We are sending two responses to the target.
+		 * Due to this, target will disconnect this replica.
+		 * This may happen while we are sending seconds response data
+		 * to the target.
+		 * In this case, we will set return value as REPL_TEST_RESTART.
+		 */
+		ret = REPL_TEST_RESTART;
 	}
 
 	for (start = 0; start < iovec_count; start += 1) {
@@ -870,11 +880,13 @@ error:
 	if (mgmtfd != -1) {
 		(void) epoll_ctl(epfd, EPOLL_CTL_DEL, mgmtfd, NULL);
 		close(mgmtfd);
+		mgmtfd = -1;
 	}
 
 	if (iofd != -1) {
 		(void) epoll_ctl(epfd, EPOLL_CTL_DEL, iofd, NULL);
 		close(iofd);
+		iofd = -1;
 	}
 
 	if (data) {
@@ -894,7 +906,7 @@ error:
 	if (sfd > 0)
 		close(sfd);
 
-  free(io_hdr);
+	free(io_hdr);
 	free(mgmtio);
 	free(events);
 	REPLICA_ERRLOG("shutting down replica(%d)... \n", replica_port);
