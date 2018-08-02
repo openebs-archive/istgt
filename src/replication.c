@@ -2114,14 +2114,17 @@ int64_t
 replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t nbytes)
 {
 	int rc = -1, i;
-	bool cmd_write = false;
-	replica_t *replica;
+	bool cmd_write = false, cmd_read = false;
+	replica_t *replica, *last_replica = NULL;
 	rcommon_cmd_t *rcomm_cmd;
 	rcmd_t *rcmd = NULL;
 	int iovcnt = cmd->iobufindx + 1;
 	bool cmd_sent = false;
 	struct timespec abstime, now;
 	int nsec, err_num = 0;
+	int skip_count = 0;
+	uint64_t num_read_ios = 0;
+	int64_t read_io_diff = 0;
 
 	switch (cmd->cdb0) {
 		case SBC_WRITE_6:
@@ -2129,6 +2132,13 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 		case SBC_WRITE_12:
 		case SBC_WRITE_16:
 			cmd_write = true;
+			break;
+
+		case SBC_READ_6:
+		case SBC_READ_10:
+		case SBC_READ_12:
+		case SBC_READ_16:
+			cmd_read = true;
 			break;
 		default:
 			break;
@@ -2155,12 +2165,18 @@ again:
 	ASSERT(spec->io_seq);
 	build_rcomm_cmd(rcomm_cmd, cmd, offset, nbytes);
 
+retry_read:
+
+	skip_count = 0;
+	last_replica = NULL;
+
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
 		/*
 		 * If there are some healthy replica then send read command
 		 * to all healthy replica else send read command to all
 		 * degraded replica.
 		 */
+
 		if (spec->healthy_rcount &&
 		    rcomm_cmd->opcode == ZVOL_OPCODE_READ) {
 			/*
@@ -2169,8 +2185,30 @@ again:
 			 */
 			if (replica->state == ZVOL_STATUS_DEGRADED)
 				continue;
-			else
-				cmd_sent = true;
+			else {
+				if (replica->replica_inflight_read_io_cnt == 0) {
+					cmd_sent = true;
+				} else if (num_read_ios < replica->replica_inflight_read_io_cnt) {
+					if (!last_replica) {
+						num_read_ios = replica->replica_inflight_read_io_cnt;
+						last_replica = replica;
+					}
+					skip_count++;
+				} else if (num_read_ios > replica->replica_inflight_read_io_cnt) {
+					last_replica = replica;
+					num_read_ios = replica->replica_inflight_read_io_cnt;
+					skip_count++;
+				} else
+					skip_count++;
+
+				if (skip_count == spec->healthy_rcount) {
+					replica = last_replica;
+					cmd_sent = true;
+				}
+
+				if (!cmd_sent)
+					continue;
+			}
 		}
 
 		rcomm_cmd->copies_sent++;
@@ -2178,6 +2216,9 @@ again:
 
 		if (cmd_write)
 			__sync_fetch_and_add(&replica->replica_inflight_write_io_cnt, 1);
+
+		if (cmd_read)
+			__sync_fetch_and_add(&replica->replica_inflight_read_io_cnt, 1);
 
 		put_to_mempool(&replica->cmdq, rcmd);
 
@@ -2198,6 +2239,12 @@ again:
 		if (rc) {
 			if (rc == 1) {
 				rc = cmd->data_len = rcomm_cmd->data_len;
+			} else if (rcomm_cmd->opcode == ZVOL_OPCODE_READ &&
+			    rcomm_cmd->copies_sent == 1) {
+				rcomm_cmd->copies_sent = 0;
+				memset(rcomm_cmd->resp_list, 0, sizeof (rcomm_cmd->resp_list));
+				MTX_LOCK(&spec->rq_mtx);
+				goto retry_read;
 			}
 			rcomm_cmd->state = CMD_EXECUTION_DONE;
 

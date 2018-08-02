@@ -63,6 +63,9 @@ int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 		if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE)		\
 			__sync_fetch_and_sub(				\
 			    &r->replica_inflight_write_io_cnt, 1); 	\
+		if (rcomm_cmd->opcode == ZVOL_OPCODE_READ)		\
+			__sync_fetch_and_sub(				\
+			    &r->replica_inflight_read_io_cnt, 1);	\
 		rcomm_cmd->resp_list[idx].io_resp_hdr.status =		\
 		    ZVOL_OP_STATUS_FAILED;				\
 		rcomm_cmd->resp_list[idx].data_ptr = NULL;		\
@@ -540,6 +543,10 @@ start:
 		rcomm_cmd->resp_list[idx].data_ptr = r->ongoing_io_buf;
 		if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE)
 			__sync_fetch_and_sub(&r->replica_inflight_write_io_cnt,
+			    1);
+
+		if (rcomm_cmd->opcode == ZVOL_OPCODE_READ)
+			__sync_fetch_and_sub(&r->replica_inflight_read_io_cnt,
 			    1);
 
 		/*
