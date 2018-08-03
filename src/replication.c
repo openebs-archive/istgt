@@ -500,11 +500,11 @@ trigger_rebuild(spec_t *spec)
 }
 
 static bool
-is_replica_familiar(spec_t *spec, replica_t *new_replica)
+is_replica_new_or_familar(spec_t *spec, replica_t *new_replica)
 {
 	known_replica_t *kr = NULL;
 	int familiar_replicas = 0;
-	bool ret = false, found = false;
+	bool newly_connected = false, found = false;
 	replica_t *old_replica = NULL;
 
 	ASSERT(MTX_LOCKED(&spec->rq_mtx));
@@ -514,7 +514,7 @@ is_replica_familiar(spec_t *spec, replica_t *new_replica)
 		if (kr->zvol_guid == new_replica->zvol_guid) {
 			found = true;
 			if (!kr->is_connected) {
-				ret = true;
+				newly_connected = true;
 				kr->is_connected = true;
 			}
 			break;
@@ -525,31 +525,26 @@ is_replica_familiar(spec_t *spec, replica_t *new_replica)
 		kr = malloc(sizeof (known_replica_t));
 		kr->zvol_guid = new_replica->zvol_guid;
 		kr->is_connected = true;
-		ret = true;
+		newly_connected = true;
 		TAILQ_INSERT_TAIL(&spec->identified_replica, kr, next);
 	}
 
 	/*
 	 * If the target has already an active session with this replica
-	 * then the target will disconnect from the previous session and
-	 * allow a new session
+	 * then the target will not allow new session
 	 */
-	if (found && !ret) {
-		TAILQ_FOREACH(old_replica, &spec->rq, r_next) {
-			if (old_replica->zvol_guid == new_replica->zvol_guid) {
-				MTX_UNLOCK(&spec->rq_mtx);
-				REPLICA_LOG("Disconnecting replica(%lu)'s old "
-				    "session\n", old_replica->zvol_guid);
-				handle_mgmt_conn_error(old_replica, 0, NULL, 0);
-				MTX_LOCK(&spec->rq_mtx);
-				kr->is_connected = true;
-				ret = true;
-				break;
-			}
-		}
+	if (found && !newly_connected) {
+		REPLICA_ERRLOG("replica(%lu) has already an active session\n",
+		    kr->zvol_guid);
+		/*
+		 * handle_mgmt_conn_error will update identified_replica status
+		 * according to replica's zvol_guid. To avoid conflict, unset
+		 * new replica's zvol_guid
+		 */
+		new_replica->zvol_guid = 0;
 	}
 
-	return ret;
+	return newly_connected;
 }
 
 static bool
@@ -927,15 +922,16 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	MTX_LOCK(&spec->rq_mtx);
 	if (is_rf_replicas_connected(spec, replica)) {
 		MTX_UNLOCK(&spec->rq_mtx);
-		ISTGT_ERRLOG("failed to verify replica(ip:%s port:%d "
-		    "guid:%lu)\n", replica->ip, replica->port,
+		REPLICA_ERRLOG("Already %d replicas are connected..."
+		    " disconnecting new replica(ip:%s port:%d "
+		    "guid:%lu)\n", spec->replication_factor, replica->ip, replica->port,
 		    replica->zvol_guid);
 		goto replica_error;
 	}
 
-	if (!is_replica_familiar(spec, replica)) {
+	if (!is_replica_new_or_familar(spec, replica)) {
 		MTX_UNLOCK(&spec->rq_mtx);
-		ISTGT_ERRLOG("replica(ip:%s port:%d "
+		REPLICA_ERRLOG("replica(ip:%s port:%d "
 		    "guid:%lu) is not permitted to connect\n", replica->ip, replica->port,
 		    replica->zvol_guid);
 		goto replica_error;
