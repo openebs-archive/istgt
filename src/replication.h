@@ -17,7 +17,7 @@
 #include <stdbool.h>
 #include "zrepl_prot.h"
 
-#define MAXREPLICA 10
+#define MAXREPLICA 5
 #define MAXEVENTS 64
 #define BUFSIZE 1024
 #define MAXIPLEN 56

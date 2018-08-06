@@ -2226,6 +2226,7 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	int nsec, err_num = 0;
 	int skip_count = 0;
 	uint64_t num_read_ios = 0;
+	uint64_t inflight_read_ios = 0;
 
 	switch (cmd->cdb0) {
 		case SBC_WRITE_6:
@@ -2288,17 +2289,19 @@ retry_read:
 			if (replica->state == ZVOL_STATUS_DEGRADED)
 				continue;
 			else {
-				if (replica->replica_inflight_read_io_cnt == 0) {
+				inflight_read_ios = replica->replica_inflight_read_io_cnt;
+
+				if (inflight_read_ios == 0) {
 					replica_choosen = true;
-				} else if (num_read_ios < replica->replica_inflight_read_io_cnt) {
+				} else if (num_read_ios < inflight_read_ios) {
 					if (!last_replica) {
-						num_read_ios = replica->replica_inflight_read_io_cnt;
+						num_read_ios = inflight_read_ios;
 						last_replica = replica;
 					}
 					skip_count++;
-				} else if (num_read_ios > replica->replica_inflight_read_io_cnt) {
+				} else if (num_read_ios > inflight_read_ios) {
 					last_replica = replica;
-					num_read_ios = replica->replica_inflight_read_io_cnt;
+					num_read_ios = inflight_read_ios;
 					skip_count++;
 				} else
 					skip_count++;
