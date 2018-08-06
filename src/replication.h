@@ -157,6 +157,12 @@ typedef struct mgmt_event {
 	replica_t *r_ptr;
 } mgmt_event_t;
 
+typedef struct known_replica_s {
+	TAILQ_ENTRY(known_replica_s) next;
+	int is_connected;
+	uint64_t zvol_guid;
+} known_replica_t;
+
 void *init_replication(void *);
 int make_socket_non_blocking(int);
 int send_mgmtack(int, zvol_op_code_t, void *, char *, int);

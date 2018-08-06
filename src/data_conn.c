@@ -275,6 +275,15 @@ handle_data_conn_error(replica_t *r)
 	if (r1 == NULL) {
 		REPLICA_ERRLOG("replica %s %d not part of rqlist..\n",
 		    r->ip, r->port);
+		/*
+		 * mgmt thread will check mgmt_eventfd2 fd to see if
+		 * it needs to wait for replica thread or not.
+		 * At this stage, the replica hasn't been added to
+		 * spec's rqlist so we need to update mgmt_eventfd2 to -1
+		 * here So that mgmt_thread can skip replica thread check.
+		 */
+		if (r->mgmt_eventfd2 != -1)
+			r->mgmt_eventfd2 = -1;
 		MTX_UNLOCK(&spec->rq_mtx);
 		return -1;
 	}
@@ -295,12 +304,7 @@ handle_data_conn_error(replica_t *r)
 	MTX_UNLOCK(&spec->rq_mtx);
 
 	MTX_LOCK(&r->r_mtx);
-	if (epoll_ctl(r->epollfd, EPOLL_CTL_DEL, r->iofd, NULL) == -1) {
-		MTX_UNLOCK(&r->r_mtx);
-		REPLICA_ERRLOG("epoll error for replica(%s:%d) iofd:%d "
-		    "err(%d)\n", r->ip, r->port, r->iofd, errno);
-		return -1;
-	}
+	(void) epoll_ctl(r->epollfd, EPOLL_CTL_DEL, r->iofd, NULL);
 
 	fd = r->iofd;
 	r->iofd = -1;

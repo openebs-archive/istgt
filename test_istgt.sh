@@ -359,7 +359,7 @@ run_read_consistency_test ()
 	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev -d &
 	replica1_pid=$!
 	sleep 5
-	write_data 13631488 24117248 4096 "/dev/$device_name" $file_name &
+	write_data 13631488 10485760 4096 "/dev/$device_name" $file_name &
 	w_pid=$!
 	sleep 1
 	kill -9 $replica2_pid
@@ -369,7 +369,7 @@ run_read_consistency_test ()
 	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V $replica2_vdev -d &
 	replica2_pid=$!
 	sleep 5
-	write_data 31457280 41943040 4096 "/dev/$device_name" $file_name &
+	write_data 31457280 10485760 4096 "/dev/$device_name" $file_name &
 	w_pid=$!
 	sleep 1
 	kill -9 $replica3_pid
@@ -385,6 +385,7 @@ run_read_consistency_test ()
 	if [ $? -ne 0 ]; then
 		echo "read consistency test failed"
 		tail -50 /var/log/syslog
+		exit 1
 	else
 		echo "read consistency test passed"
 	fi
@@ -396,7 +397,7 @@ run_read_consistency_test ()
 	stop_istgt
 }
 
-run_lu_add_test ()
+run_lu_rf_test ()
 {
 	local replica1_port="6161"
 	local replica2_port="6162"
@@ -451,10 +452,6 @@ run_lu_add_test ()
 
 	sleep 5
 
-	kill -9 $replica1_pid $replica2_pid $replica3_pid
-	rm -rf ${replica1_vdev}* ${replica2_vdev}* ${replica3_vdev}*
-	stop_istgt
-
 	cat /var/log/syslog | grep "is ready for IOs now" > /dev/null 2>&1
 	if [ $? -eq 0 ]; then
 		echo "lun refresh passed"
@@ -463,6 +460,26 @@ run_lu_add_test ()
 		cat /var/log/syslog
 		exit 1
 	fi
+
+	sleep 5
+
+	kill -9 $replica3_pid
+	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$(($replica3_port + 10))" -V $replica3_vdev &
+	replica3_pid=$!
+	sleep 5
+
+	wait $replica3_pid
+	if [ $? -eq 0 ]; then
+		echo "Replica identification test failed"
+		cat /var/log/syslog
+		exit 1
+	else
+		echo "Replica identification test passed"
+	fi
+
+	kill -9 $replica1_pid $replica2_pid $replica3_pid
+	rm -rf ${replica1_vdev}* ${replica2_vdev}* ${replica3_vdev}*
+	stop_istgt
 }
 
 run_replication_factor_test()
@@ -517,7 +534,7 @@ run_replication_factor_test()
 	fi
 }
 
-run_lu_add_test
+run_lu_rf_test
 run_data_integrity_test
 run_mempool_test
 run_istgt_integration
