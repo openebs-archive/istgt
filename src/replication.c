@@ -2221,12 +2221,11 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	rcommon_cmd_t *rcomm_cmd;
 	rcmd_t *rcmd = NULL;
 	int iovcnt = cmd->iobufindx + 1;
-	bool cmd_sent = false;
+	bool replica_choosen = false;
 	struct timespec abstime, now;
 	int nsec, err_num = 0;
 	int skip_count = 0;
 	uint64_t num_read_ios = 0;
-	int64_t read_io_diff = 0;
 
 	switch (cmd->cdb0) {
 		case SBC_WRITE_6:
@@ -2268,9 +2267,10 @@ again:
 	build_rcomm_cmd(rcomm_cmd, cmd, offset, nbytes);
 
 retry_read:
-
+	replica_choosen = false;
 	skip_count = 0;
 	last_replica = NULL;
+	num_read_ios = 0;
 
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
 		/*
@@ -2289,7 +2289,7 @@ retry_read:
 				continue;
 			else {
 				if (replica->replica_inflight_read_io_cnt == 0) {
-					cmd_sent = true;
+					replica_choosen = true;
 				} else if (num_read_ios < replica->replica_inflight_read_io_cnt) {
 					if (!last_replica) {
 						num_read_ios = replica->replica_inflight_read_io_cnt;
@@ -2305,10 +2305,10 @@ retry_read:
 
 				if (skip_count == spec->healthy_rcount) {
 					replica = last_replica;
-					cmd_sent = true;
+					replica_choosen = true;
 				}
 
-				if (!cmd_sent)
+				if (!replica_choosen)
 					continue;
 			}
 		}
@@ -2316,17 +2316,16 @@ retry_read:
 		rcomm_cmd->copies_sent++;
 		build_rcmd();
 
-		if (cmd_write)
-			__sync_fetch_and_add(&replica->replica_inflight_write_io_cnt, 1);
-
 		if (cmd_read)
 			__sync_fetch_and_add(&replica->replica_inflight_read_io_cnt, 1);
+		else if (cmd_write)
+			__sync_fetch_and_add(&replica->replica_inflight_write_io_cnt, 1);
 
 		put_to_mempool(&replica->cmdq, rcmd);
 
 		eventfd_write(replica->data_eventfd, 1);
 
-		if (cmd_sent)
+		if (replica_choosen)
 			break;
 	}
 
@@ -2346,6 +2345,7 @@ retry_read:
 				rcomm_cmd->copies_sent = 0;
 				memset(rcomm_cmd->resp_list, 0, sizeof (rcomm_cmd->resp_list));
 				MTX_LOCK(&spec->rq_mtx);
+				TAILQ_REMOVE(&spec->rcommon_waitq, rcomm_cmd, wait_cmd_next);
 				goto retry_read;
 			}
 			rcomm_cmd->state = CMD_EXECUTION_DONE;
