@@ -359,7 +359,7 @@ run_read_consistency_test ()
 	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev -d &
 	replica1_pid=$!
 	sleep 5
-	write_data 13631488 24117248 4096 "/dev/$device_name" $file_name &
+	write_data 13631488 10485760 4096 "/dev/$device_name" $file_name &
 	w_pid=$!
 	sleep 1
 	kill -9 $replica2_pid
@@ -369,7 +369,7 @@ run_read_consistency_test ()
 	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V $replica2_vdev -d &
 	replica2_pid=$!
 	sleep 5
-	write_data 31457280 41943040 4096 "/dev/$device_name" $file_name &
+	write_data 31457280 10485760 4096 "/dev/$device_name" $file_name &
 	w_pid=$!
 	sleep 1
 	kill -9 $replica3_pid
@@ -385,6 +385,7 @@ run_read_consistency_test ()
 	if [ $? -ne 0 ]; then
 		echo "read consistency test failed"
 		tail -50 /var/log/syslog
+		exit 1
 	else
 		echo "read consistency test passed"
 	fi
