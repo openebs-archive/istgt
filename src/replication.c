@@ -499,8 +499,20 @@ trigger_rebuild(spec_t *spec)
 	}
 }
 
+/*
+ * is_replica_newly_connected returns whether the connection is newly created
+ * from a familiar replica or newly connected from an unknown replica that
+ * target is waiting for.
+ * return value :
+ *	true  : if the connection is from a familiar replica (which does not
+ *		have an active session with the target) or from an unknown
+ *		replica for which target is waiting
+ *	false : if the connection is from a familiar replica which is already
+ *		connected to target or target is not waiting for any new
+ *		replica.
+ */
 static bool
-is_replica_new_or_familar(spec_t *spec, replica_t *new_replica)
+is_replica_newly_connected(spec_t *spec, replica_t *new_replica)
 {
 	known_replica_t *kr = NULL;
 	int familiar_replicas = 0;
@@ -827,11 +839,11 @@ int
 update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 {
 	int rc;
-	zvol_io_hdr_t *rio_hdr;
+	zvol_io_hdr_t *rio_hdr = NULL;
 	pthread_t r_thread;
 	zvol_io_hdr_t *ack_hdr;
 	mgmt_ack_t *ack_data;
-	zvol_op_open_data_t *rio_payload;
+	zvol_op_open_data_t *rio_payload = NULL;
 	int i;
 
 	ack_hdr = replica->mgmt_io_resp_hdr;	
@@ -853,6 +865,16 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 
 	replica->pool_guid = ack_data->pool_guid;
 	replica->zvol_guid = ack_data->zvol_guid;
+
+	MTX_LOCK(&spec->rq_mtx);
+	if (!is_replica_newly_connected(spec, replica)) {
+		MTX_UNLOCK(&spec->rq_mtx);
+		REPLICA_ERRLOG("replica(ip:%s port:%d "
+		    "guid:%lu) is not permitted to connect\n", replica->ip, replica->port,
+		    replica->zvol_guid);
+		goto replica_error;
+	}
+	MTX_UNLOCK(&spec->rq_mtx);
 
 	replica->spec = spec;
 	replica->io_resp_hdr = (zvol_io_hdr_t *) malloc(sizeof (zvol_io_hdr_t));
@@ -929,13 +951,6 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 		goto replica_error;
 	}
 
-	if (!is_replica_new_or_familar(spec, replica)) {
-		MTX_UNLOCK(&spec->rq_mtx);
-		REPLICA_ERRLOG("replica(ip:%s port:%d "
-		    "guid:%lu) is not permitted to connect\n", replica->ip, replica->port,
-		    replica->zvol_guid);
-		goto replica_error;
-	}
 	MTX_UNLOCK(&spec->rq_mtx);
 
 	rc = pthread_create(&r_thread, NULL, &replica_thread,
@@ -946,8 +961,10 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 replica_error:
 		replica->iofd = -1;
 		close(iofd);
-		free(rio_hdr);
-		free(rio_payload);
+		if (rio_hdr)
+			free(rio_hdr);
+		if (rio_payload)
+			free(rio_payload);
 		return -1;
 	}
 
