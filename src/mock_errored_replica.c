@@ -24,6 +24,7 @@ int start_errored_replica(int replica_count);
 void trigger_data_conn_error(void);
 void shutdown_errored_replica(void);
 void wait_for_spec_ready(void);
+static int verify_replica_removal(int replica_mgmt_sport);
 
 extern int replication_initialized;
 extern int replication_factor;
@@ -44,6 +45,7 @@ typedef struct {
 	int replica_port;
 	int mgmtfd;
 	int datafd;
+	int sfd;
 	int mgmt_err_cnt;
 	int data_err_cnt;
 	int replica_status;
@@ -61,8 +63,9 @@ do {														\
 	_repl_data = (errored_replica_data_t *)pthread_getspecific(err_repl_key);				\
 	(void) epoll_ctl(_epoll_fd, EPOLL_CTL_DEL, _fd, NULL);							\
 	close(_fd);												\
-	(_repl_data->mgmtfd == _fd) && (_repl_data->mgmtfd = _fd = -1);						\
-	(_repl_data->datafd == _fd) && (_repl_data->datafd = _fd = -1);						\
+	(_repl_data->mgmtfd == _fd) && (_repl_data->mgmtfd = -1);						\
+	(_repl_data->datafd == _fd) && (_repl_data->datafd = -1);						\
+	_fd = -1;												\
 														\
 	if (_err_type & ERROR_TYPE_MGMT)									\
 		_repl_data->mgmt_err_cnt++;									\
@@ -123,8 +126,9 @@ do {														\
 														\
 	_repl_data = (errored_replica_data_t *)pthread_getspecific(err_repl_key);				\
 	close(_fd);												\
-	(_repl_data->mgmtfd == _fd) && (_repl_data->mgmtfd = _fd = -1);						\
-	(_repl_data->datafd == _fd) && (_repl_data->datafd = _fd = -1);						\
+	(_repl_data->mgmtfd == _fd) && (_repl_data->mgmtfd = -1);						\
+	(_repl_data->datafd == _fd) && (_repl_data->datafd = -1);						\
+	_fd = -1;												\
 														\
 	_rc = REPL_TEST_RESTART;										\
 	if (_err_type & ERROR_TYPE_MGMT)									\
@@ -141,6 +145,7 @@ do {														\
 static void
 exit_errored_replica(void *arg)
 {
+	int rc = 0;
 	errored_replica_data_t *rdata = (errored_replica_data_t *)arg;
 
 	if (rdata->mgmtfd != -1)
@@ -148,6 +153,9 @@ exit_errored_replica(void *arg)
 
 	if (rdata->datafd != -1)
 		close(rdata->datafd);
+
+	if (rdata->sfd != -1)
+		close(rdata->sfd);
 
 	REPLICA_LOG("Errored Replica(%d) destroyed.. "
 	    "total injected errors mgmt(%d) data(%d)", rdata->replica_port,
@@ -267,8 +275,8 @@ retry:
 		MTX_UNLOCK(&spec->rq_mtx);
 		retry_count--;
 
-		/* Sleep for 10 us to avoid lock starvation */
-		usleep(10000);
+		/* Sleep for 1 second to avoid lock starvation */
+		sleep(1);
 	}
 #else
 #warning Debug mode is disabled
@@ -452,6 +460,14 @@ send_mgmt_ack(int fd, zvol_io_hdr_t *mgmt_ack_hdr, void *buf, int *zrepl_status_
 			iovec[iovec_count + i].iov_len = iovec[i].iov_len;
 		}
 		iovec_count = 2 * iovec_count;
+		/*
+		 * Here, We are sending two responses to the target.
+		 * Due to this, target will disconnect this replica.
+		 * This may happen while we are sending seconds response data
+		 * to the target.
+		 * In this case, we will set return value as REPL_TEST_RESTART.
+		 */
+		ret = REPL_TEST_RESTART;
 	}
 
 	for (start = 0; start < iovec_count; start += 1) {
@@ -554,7 +570,7 @@ errored_replica(void *arg)
 	int replica_port = *(int *)arg;
 	int replica_mgmt_sport = 0;
 	zvol_op_open_data_t *open_ptr;
-	int sfd, rc, epfd, event_count, i;
+	int sfd = -1, rc, epfd, event_count, i;
 	volatile int mgmtfd = -1, iofd = -1;
 	int64_t count;
 	struct epoll_event event, *events;
@@ -593,8 +609,11 @@ errored_replica(void *arg)
 	//Create non-blocking listener for io connections from controller and add to epoll
 	if((sfd = replication_listen("127.0.0.1", replica_port, 32, 1)) < 0) {
                	rc = REPL_TEST_ERROR;
+		rdata->sfd = sfd = -1;
 		goto error;
         }
+
+	rdata->sfd = sfd;
 
 	event.data.fd = sfd;
 	event.events = EPOLLIN | EPOLLET;
@@ -620,8 +639,6 @@ try_again:
 		rc = REPL_TEST_ERROR;
 		goto error;
 	}
-
-	rdata->mgmtfd = mgmtfd;
 
 	replica_mgmt_sport = get_socket_info(mgmtfd);
 	if (replica_mgmt_sport < 0) {
@@ -863,11 +880,13 @@ error:
 	if (mgmtfd != -1) {
 		(void) epoll_ctl(epfd, EPOLL_CTL_DEL, mgmtfd, NULL);
 		close(mgmtfd);
+		mgmtfd = -1;
 	}
 
 	if (iofd != -1) {
 		(void) epoll_ctl(epfd, EPOLL_CTL_DEL, iofd, NULL);
 		close(iofd);
+		iofd = -1;
 	}
 
 	if (data) {
@@ -883,6 +902,9 @@ error:
 		}
 		goto try_again;
 	}
+
+	if (sfd > 0)
+		close(sfd);
 
 	free(io_hdr);
 	free(mgmtio);

@@ -25,8 +25,11 @@ replication_connect(const char *host, int port)
 	int val = 1;
 	int rc;
 
-	if (host == NULL)
+	if (host == NULL) {
+		REPLICA_ERRLOG("host is NULL!\n");
 		return -1;
+	}
+
 	if (host[0] == '[') {
 		strncpy(buf, host + 1, sizeof buf);
 		p = strchr(buf, ']');
@@ -83,6 +86,14 @@ retry:
 			sock = -1;
 			continue;
 		}
+		rc = set_socket_keepalive(sock);
+		if (rc != 0) {
+			ISTGT_ERRLOG("failed to set keepalive for fd(%d)\n", sock);
+			close(sock);
+			sock = -1;
+			continue;
+		}
+
 		/* connect OK */
 		break;
 	}
@@ -213,4 +224,40 @@ make_socket_non_blocking(int sfd)
 	}
 
 	return 0;
+}
+
+int
+set_socket_keepalive(int sfd)
+{
+	int val = 1;
+	int ret = 0;
+	int max_idle_time = 5;
+	int max_try = 5;
+	int probe_interval = 5;
+
+	if (setsockopt(sfd, SOL_SOCKET, SO_KEEPALIVE, &val, sizeof (val)) < 0) {
+		REPLICA_ERRLOG("Failed to set SO_KEEPALIVE for fd(%d) err(%d)\n", sfd, errno);
+		ret = errno;
+		goto out;
+	}
+
+	if (setsockopt(sfd, SOL_TCP, TCP_KEEPCNT, &max_try, sizeof (max_try))) {
+		REPLICA_ERRLOG("Failed to set TCP_KEEPCNT for fd(%d) err(%d)\n", sfd, errno);
+		ret = errno;
+		goto out;
+	}
+
+	if (setsockopt(sfd, SOL_TCP, TCP_KEEPIDLE, &max_idle_time, sizeof (max_idle_time))) {
+		REPLICA_ERRLOG("Failed to set TCP_KEEPIDLE for fd(%d) err(%d)\n", sfd, errno);
+		ret = errno;
+		goto out;
+	}
+
+	if (setsockopt(sfd, SOL_TCP, TCP_KEEPINTVL, &probe_interval, sizeof (probe_interval))) {
+		REPLICA_ERRLOG("Failed to set TCP_KEEPINTVL for fd(%d) err(%d)\n", sfd, errno);
+		ret = errno;
+	}
+
+out:
+	return ret;
 }

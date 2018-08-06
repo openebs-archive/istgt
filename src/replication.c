@@ -259,7 +259,6 @@ enqueue_prepare_for_rebuild(spec_t *spec, replica_t *replica,
 	BUILD_REPLICA_MGMT_HDR(rmgmtio, opcode, data_len);
 
 	mgmt_cmd->io_hdr = rmgmtio;
-	mgmt_cmd->io_bytes = 0;
 	mgmt_cmd->data = (char *)malloc(data_len);
 	snprintf((char *)mgmt_cmd->data, data_len, "%s", spec->volname);
 	mgmt_cmd->mgmt_cmd_state = WRITE_IO_SEND_HDR;
@@ -498,6 +497,66 @@ trigger_rebuild(spec_t *spec)
 		REPLICA_ERRLOG("Failed to trigger rebuild on replica(%lu)\n",
 		    target_replica->zvol_guid);
 	}
+}
+
+/*
+ * is_replica_newly_connected returns whether the connection is newly created
+ * from a familiar replica or newly connected from an unknown replica that
+ * target is waiting for.
+ * return value :
+ *	true  : if the connection is from a familiar replica (which does not
+ *		have an active session with the target) or from an unknown
+ *		replica for which target is waiting
+ *	false : if the connection is from a familiar replica which is already
+ *		connected to target or target is not waiting for any new
+ *		replica.
+ */
+static bool
+is_replica_newly_connected(spec_t *spec, replica_t *new_replica)
+{
+	known_replica_t *kr = NULL;
+	int familiar_replicas = 0;
+	bool newly_connected = false, found = false;
+	replica_t *old_replica = NULL;
+
+	ASSERT(MTX_LOCKED(&spec->rq_mtx));
+
+	TAILQ_FOREACH(kr, &spec->identified_replica, next) {
+		familiar_replicas++;
+		if (kr->zvol_guid == new_replica->zvol_guid) {
+			found = true;
+			if (!kr->is_connected) {
+				newly_connected = true;
+				kr->is_connected = true;
+			}
+			break;
+		}
+	}
+
+	if (!found && familiar_replicas < spec->replication_factor) {
+		kr = malloc(sizeof (known_replica_t));
+		kr->zvol_guid = new_replica->zvol_guid;
+		kr->is_connected = true;
+		newly_connected = true;
+		TAILQ_INSERT_TAIL(&spec->identified_replica, kr, next);
+	}
+
+	/*
+	 * If the target has already an active session with this replica
+	 * then the target will not allow new session
+	 */
+	if (found && !newly_connected) {
+		REPLICA_ERRLOG("replica(%lu) has already an active session\n",
+		    kr->zvol_guid);
+		/*
+		 * handle_mgmt_conn_error will update identified_replica status
+		 * according to replica's zvol_guid. To avoid conflict, unset
+		 * new replica's zvol_guid
+		 */
+		new_replica->zvol_guid = 0;
+	}
+
+	return newly_connected;
 }
 
 static bool
@@ -780,11 +839,11 @@ int
 update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 {
 	int rc;
-	zvol_io_hdr_t *rio_hdr;
+	zvol_io_hdr_t *rio_hdr = NULL;
 	pthread_t r_thread;
 	zvol_io_hdr_t *ack_hdr;
 	mgmt_ack_t *ack_data;
-	zvol_op_open_data_t *rio_payload;
+	zvol_op_open_data_t *rio_payload = NULL;
 	int i;
 
 	ack_hdr = replica->mgmt_io_resp_hdr;	
@@ -806,6 +865,16 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 
 	replica->pool_guid = ack_data->pool_guid;
 	replica->zvol_guid = ack_data->zvol_guid;
+
+	MTX_LOCK(&spec->rq_mtx);
+	if (!is_replica_newly_connected(spec, replica)) {
+		MTX_UNLOCK(&spec->rq_mtx);
+		REPLICA_ERRLOG("replica(ip:%s port:%d "
+		    "guid:%lu) is not permitted to connect\n", replica->ip, replica->port,
+		    replica->zvol_guid);
+		goto replica_error;
+	}
+	MTX_UNLOCK(&spec->rq_mtx);
 
 	replica->spec = spec;
 	replica->io_resp_hdr = (zvol_io_hdr_t *) malloc(sizeof (zvol_io_hdr_t));
@@ -873,13 +942,15 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	}
 
 	MTX_LOCK(&spec->rq_mtx);
-	if(is_rf_replicas_connected(spec, replica)) {
+	if (is_rf_replicas_connected(spec, replica)) {
 		MTX_UNLOCK(&spec->rq_mtx);
-		ISTGT_ERRLOG("failed to verify replica(ip:%s port:%d "
-		    "guid:%lu)\n", replica->ip, replica->port,
+		REPLICA_ERRLOG("Already %d replicas are connected..."
+		    " disconnecting new replica(ip:%s port:%d "
+		    "guid:%lu)\n", spec->replication_factor, replica->ip, replica->port,
 		    replica->zvol_guid);
 		goto replica_error;
 	}
+
 	MTX_UNLOCK(&spec->rq_mtx);
 
 	rc = pthread_create(&r_thread, NULL, &replica_thread,
@@ -890,8 +961,10 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 replica_error:
 		replica->iofd = -1;
 		close(iofd);
-		free(rio_hdr);
-		free(rio_payload);
+		if (rio_hdr)
+			free(rio_hdr);
+		if (rio_payload)
+			free(rio_payload);
 		return -1;
 	}
 
@@ -955,10 +1028,8 @@ send_replica_handshake_query(replica_t *replica, spec_t *spec)
 	snprintf((char *)data, data_len, "%s", spec->volname);
 
 	mgmt_cmd->io_hdr = rmgmtio;
-	mgmt_cmd->io_bytes = 0;
 	mgmt_cmd->data = data;
 	mgmt_cmd->mgmt_cmd_state = WRITE_IO_SEND_HDR;
-	mgmt_cmd->rcomm_mgmt = NULL;
 
 	MTX_LOCK(&replica->r_mtx);
 	TAILQ_INSERT_TAIL(&replica->mgmt_cmd_queue, mgmt_cmd, mgmt_cmd_next);
@@ -1023,7 +1094,6 @@ send_replica_snapshot(spec_t *spec, replica_t *replica, uint64_t io_seq,
 	rmgmtio->io_seq = io_seq;
 
 	mgmt_cmd->io_hdr = rmgmtio;
-	mgmt_cmd->io_bytes = 0;
 	mgmt_cmd->data = data;
 	mgmt_cmd->mgmt_cmd_state = WRITE_IO_SEND_HDR;
 
@@ -1252,10 +1322,8 @@ send_replica_query(replica_t *replica, spec_t *spec, zvol_op_code_t opcode)
 	snprintf(data, data_len, "%s", spec->volname);
 
 	mgmt_cmd->io_hdr = rmgmtio;
-	mgmt_cmd->io_bytes = 0;
 	mgmt_cmd->data = data;
 	mgmt_cmd->mgmt_cmd_state = WRITE_IO_SEND_HDR;
-	mgmt_cmd->rcomm_mgmt = NULL;
 
 	MTX_LOCK(&replica->r_mtx);
 	TAILQ_INSERT_TAIL(&replica->mgmt_cmd_queue, mgmt_cmd, mgmt_cmd_next);
@@ -1393,7 +1461,7 @@ handle_prepare_for_rebuild_resp(spec_t *spec, zvol_io_hdr_t *hdr,
  * Handler for stats opcode response from replica
  */
 static void
-update_spec_stats(spec_t *spec, zvol_io_hdr_t *hdr, void *resp)
+handle_update_spec_stats(spec_t *spec, zvol_io_hdr_t *hdr, void *resp)
 {
 	zvol_op_stat_t *stats = (zvol_op_stat_t *)resp;
 	if (hdr->status != ZVOL_OP_STATUS_OK)
@@ -1540,6 +1608,13 @@ accept_mgmt_conns(int epfd, int sfd)
 		if (rc == -1) {
 			REPLICA_ERRLOG("make_socket_non_blocking() failed on "
 			    "fd(%d), closing it..", mgmt_fd);
+			close(mgmt_fd);
+			continue;
+		}
+
+		rc = set_socket_keepalive(mgmt_fd);
+		if (rc) {
+			REPLICA_ERRLOG("Failed to set keepalive for fd(%d)\n", mgmt_fd);
 			close(mgmt_fd);
 			continue;
 		}
@@ -1766,7 +1841,7 @@ read_io_resp_hdr:
 					break;
 
 				case ZVOL_OPCODE_STATS:
-					update_spec_stats(spec, resp_hdr, *resp_data);
+					handle_update_spec_stats(spec, resp_hdr, *resp_data);
 					free(*resp_data);
 					break;
 
@@ -1932,7 +2007,7 @@ empty_mgmt_q_of_replica(replica_t *r)
 					    mgmt_cmd->io_hdr, NULL, mgmt_cmd);
 					break;
 				case ZVOL_OPCODE_STATS:
-					update_spec_stats(r->spec, mgmt_cmd->io_hdr,
+					handle_update_spec_stats(r->spec, mgmt_cmd->io_hdr,
 					    NULL);
 					break;
 				default:
@@ -2280,6 +2355,7 @@ handle_mgmt_conn_error(replica_t *r, int sfd, struct epoll_event *events, int ev
 	int i;
 	mgmt_event_t *mevent;
 	replica_t *r_ev;
+	known_replica_t *kr = NULL;
 
 	MTX_LOCK(&r->spec->rq_mtx);
 	MTX_LOCK(&r->r_mtx);
@@ -2364,6 +2440,13 @@ handle_mgmt_conn_error(replica_t *r, int sfd, struct epoll_event *events, int ev
 		    r->zvol_guid);
 		r->spec->target_replica = NULL;
 		r->spec->rebuild_in_progress = false;
+	}
+
+	TAILQ_FOREACH(kr, &r->spec->identified_replica, next) {
+		if (kr->zvol_guid == r->zvol_guid) {
+			kr->is_connected = false;
+			break;
+		}
 	}
 	MTX_UNLOCK(&r->spec->rq_mtx);
 
@@ -2617,6 +2700,7 @@ initialize_volume(spec_t *spec, int replication_factor, int consistency_factor)
 	TAILQ_INIT(&spec->rcommon_waitq);
 	TAILQ_INIT(&spec->rq);
 	TAILQ_INIT(&spec->rwaitq);
+	TAILQ_INIT(&spec->identified_replica);
 
 	VERIFY(replication_factor > 0);
 	VERIFY(consistency_factor > 0);
