@@ -1612,6 +1612,13 @@ accept_mgmt_conns(int epfd, int sfd)
 			continue;
 		}
 
+		rc = set_socket_keepalive(mgmt_fd);
+		if (rc) {
+			REPLICA_ERRLOG("Failed to set keepalive for fd(%d)\n", mgmt_fd);
+			close(mgmt_fd);
+			continue;
+		}
+
                 MTX_LOCK(&specq_mtx);
                 TAILQ_FOREACH(spec, &spec_q, spec_next) {
 			// Since we are supporting single spec per controller
