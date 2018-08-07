@@ -896,7 +896,7 @@ mock_repl(void *args)
 			while (!TAILQ_EMPTY(&(rargs->mgmt_recv_list))) {
 				zio_cmd = TAILQ_FIRST(&rargs->mgmt_recv_list);
 				TAILQ_REMOVE(&rargs->mgmt_recv_list, zio_cmd, next);
-				free(zio_cmd);
+				zio_cmd_free(&zio_cmd);
 			}
 
 			while (!TAILQ_EMPTY(&rargs->mgmt_send_list)) {

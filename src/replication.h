@@ -136,7 +136,7 @@ typedef struct mgmt_cmd_s {
 	zvol_io_hdr_t *io_hdr;			/* management command header */
 	void *data;				/* cmd data */
 	int mgmt_cmd_state;			/* current state of cmd */
-
+	int cmd_completed;			/* if command execution has completed */
 	/*
 	 * amount of IO data written/read in current command state
 	 */
