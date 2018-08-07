@@ -1,3 +1,4 @@
+#include <config.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -17,6 +18,7 @@ cstor_conn_ops_t cstor_ops = {
 	.conn_listen = replication_listen,
 	.conn_connect = replication_connect,
 };
+
 __thread char  tinfo[50] =  {0};
 #define build_mgmt_ack_hdr {\
 	mgmt_ack_hdr = (zvol_io_hdr_t *)malloc(sizeof(zvol_io_hdr_t));\
@@ -41,6 +43,14 @@ int error_freq = 0;
 void *md_list;
 int mdlist_fd = 0;
 size_t mdlist_size = 0;
+uint64_t read_ios;
+uint64_t write_ios;
+
+static void
+sig_handler(int sig)
+{
+	printf("read IOs:%lu write IOs:%lu\n", read_ios, write_ios);
+}
 
 static int
 init_mdlist(char *vol_name)
@@ -260,7 +270,8 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 		mgmt_ack_hdr->len = 0;
 	} else if (opcode == ZVOL_OPCODE_REPLICA_STATUS) {
 		if (((*zrepl_status_msg_cnt) >= 2) &&
-		    (zrepl_status->state != ZVOL_STATUS_HEALTHY)) {
+		    (zrepl_status->state != ZVOL_STATUS_HEALTHY) &&
+		    !degraded_mode) {
 			zrepl_status->state = ZVOL_STATUS_HEALTHY;
 			zrepl_status->rebuild_status = ZVOL_REBUILDING_DONE;
 			(*zrepl_status_msg_cnt) = 0;
@@ -491,6 +502,8 @@ main(int argc, char **argv)
 	if(check != 63) {
 		usage();
 	}
+
+	(void) signal(SIGHUP, sig_handler);
 
 	vol_fd = open(test_vol, O_RDWR, 0666);
 	io_hdr = malloc(sizeof(zvol_io_hdr_t));
@@ -752,6 +765,7 @@ execute_io:
 
 						data -= sizeof(struct zvol_io_rw_hdr);
 						usleep(sleeptime);
+						write_ios++;
 					} else if(io_hdr->opcode == ZVOL_OPCODE_READ) {
 						uint8_t *user_data = NULL;
 						if (delay > 0)
@@ -791,6 +805,7 @@ execute_io:
 						if (user_data)
 							free(user_data);
 						io_hdr->len = nbytes;
+						read_ios++;
 					}
 
 					rc = send_io_resp(iofd, io_hdr, data);
@@ -809,7 +824,8 @@ execute_io:
 	}
 
 error:
-	REPLICA_ERRLOG("shutting down replica(%s:%d)\n", ctrl_ip, ctrl_port);
+	REPLICA_ERRLOG("shutting down replica(%s:%d) IOs(read:%lu write:%lu)\n",
+	    ctrl_ip, ctrl_port, read_ios, write_ios);
 	if (data)
 		free(data);
 	close(vol_fd);
