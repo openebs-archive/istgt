@@ -148,7 +148,6 @@ writer(void *args)
 		}
 	}
 end:
-	free(lu_cmd);
 	REPLICA_ERRLOG("exiting wrote %d from %s\n", count, tinfo);
 
 	free(lu_cmd);
@@ -225,7 +224,6 @@ reader(void *args)
 		}
 	}
 end:
-	free(lu_cmd);
 	REPLICA_ERRLOG("exiting read %d from %s\n", count, tinfo);
 
 	if (lu_cmd->data)

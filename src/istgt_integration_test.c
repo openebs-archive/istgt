@@ -1315,7 +1315,6 @@ main(int argc, char **argv)
 	pthread_cond_wait(&test_args->test_state_cv, &test_args->test_mtx);
 	MTX_UNLOCK(&test_args->test_mtx);
 
-	create_mock_client(spec);
 	kill_all_replicas();
 
 	for (i = 0; i < MAXREPLICA; i++) {

@@ -117,6 +117,7 @@ extern clockid_t clockid;
 			goto macroname;	\
 		}	\
 		markedForReturn = 2;	\
+		ISTGT_ERRLOG("Spec is busy!");	\
 		goto macroname;	\
 	}                                      \
 	++(spec->ludsk_ref);				   \
@@ -5406,8 +5407,10 @@ istgt_lu_disk_unmap(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd,
 			if (markedForReturn == 1) {
 				ret = -1;
 				break;
-			} else if (markedForReturn == 2)
+			} else if (markedForReturn == 2) {
+				errno = EBUSY;
 				return 0;
+			}
 
 			if (lu_cmd->aborted == 1) {
 				ISTGT_LOG("(0x%x) c#%d aborting the IO\n", lu_cmd->CmdSN, conn->id);
@@ -5608,8 +5611,10 @@ istgt_lu_disk_lbread(ISTGT_LU_DISK *spec, CONN_Ptr conn __attribute__((__unused_
 	if (markedForReturn == 1) {
 		ISTGT_ERRLOG("Error in locking");
 		return -1;
-	} else if (markedForReturn == 2)
-		return 0;
+	} else if (markedForReturn == 2) {
+		errno = EBUSY;
+		return -1;
+	}
 
 	if (lu_cmd->aborted == 1) {
 		ISTGT_LOG("(0x%x) c#%d aborting the IO\n", lu_cmd->CmdSN, conn->id);
@@ -5729,6 +5734,9 @@ freeiovcnt:
 				xfree(iov[i].iov_base);
 			iov[i].iov_base = NULL;
 		}
+
+		if (markedForReturn == 2)
+			errno = EBUSY;
 		return -1;
 	}
 	if (spec->lu->readonly) {
@@ -5752,7 +5760,7 @@ freeiovcnt:
 		ISTGT_ERRLOG("c#%d Error in entering block call", conn->id);
 		goto freeiovcnt;
 	} else if (markedForReturn == 2)
-		return 0;
+		goto freeiovcnt;
 
 	if(lu_cmd->aborted == 1)
 	{
@@ -5917,8 +5925,10 @@ istgt_lu_disk_lbwrite_same(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr 
 			if (markedForReturn == 1) {
 				ISTGT_ERRLOG("c#%d Error in locking", conn->id);
 				return -1;
-			} else if (markedForReturn == 2)
-				return 0;
+			} else if (markedForReturn == 2) {
+				errno = EBUSY;
+				return -1;
+			}
 		}
 
 		if (lu_cmd->aborted == 1) {
@@ -5989,8 +5999,10 @@ istgt_lu_disk_lbwrite_same(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr 
 			if (markedForReturn == 1) {
 				ISTGT_ERRLOG("c#%d Error in locking", conn->id);
 				return -1;
-			} else if (markedForReturn == 2)
-				return 0;
+			} else if (markedForReturn == 2) {
+				errno = EBUSY;
+				return -1;
+			}
 		}
 
 		if (lu_cmd->aborted == 1) {
@@ -6089,8 +6101,10 @@ istgt_lu_disk_lbwrite_ats(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr l
 		if (markedForReturn == 1) {
 			ISTGT_ERRLOG("c#%d Error in locking", conn->id);
 			return -1;
-		} else if (markedForReturn == 2)
-			return 0;
+		} else if (markedForReturn == 2) {
+			errno = EBUSY;
+			return -1;
+		}
 	}
 
 	timediffw(lu_cmd, 'w');
@@ -6147,8 +6161,10 @@ istgt_lu_disk_lbwrite_ats(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr l
 		if (markedForReturn == 1) {
 			ISTGT_ERRLOG("c#%d Error in locking", conn->id);
 			return -1;
-		} else if (markedForReturn == 2)
-			return 0;
+		} else if (markedForReturn == 2) {
+			errno = EBUSY;
+			return -1;
+		}
 	}
 
 	if (lu_cmd->aborted == 1) {
@@ -6225,8 +6241,10 @@ istgt_lu_disk_lbsync(ISTGT_LU_DISK *spec, CONN_Ptr conn __attribute__((__unused_
 	if (markedForReturn == 1) {
 		ISTGT_ERRLOG("c#%d Error in locking", conn->id);
 		return -1;
-	} else if (markedForReturn == 2)
-		return 0;
+	} else if (markedForReturn == 2) {
+		errno = EBUSY;
+		return -1;
+	}
 
 	timediffw(lu_cmd, 'w');
 	if (lu_cmd->aborted == 1) {
@@ -8568,7 +8586,6 @@ istgt_lu_disk_cmd_queue_count(ISTGT_LU_Ptr lu, int *lun)
 				}\
 			}\
 			MTX_UNLOCK(&spec->lu_tmf_mutex[worker_id]);\
-			decrement_conn_inflight = 0;		\
 			if(likely(lu_task != NULL)) {\
 				if((lu_task->lu_cmd).aborted == 1) {\
 					ISTGT_LOG("CmdSN %d aborted in inflight", (lu_task->lu_cmd).CmdSN);\
@@ -10828,7 +10845,7 @@ istgt_lu_disk_execute(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 			|| lu_cmd->status == ISTGT_SCSI_STATUS_GOOD) {
 		/* Do we need this? */
 		MTX_LOCK(&spec->state_mutex);
-		if (lu_cmd->status == ISTGT_SCSI_STATUS_CHECK_CONDITION && spec->state  == ISTGT_LUN_BUSY) {
+		if (lu_cmd->status == ISTGT_SCSI_STATUS_CHECK_CONDITION && IS_SPEC_BUSY(spec)) {
 			msg = "(CheckCond_on_fake changed to Busy)"; dolog = 1;
 			lu_cmd->status = ISTGT_SCSI_STATUS_BUSY;
 		}
