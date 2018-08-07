@@ -17,7 +17,7 @@
 #include <stdbool.h>
 #include "zrepl_prot.h"
 
-#define MAXREPLICA 10
+#define MAXREPLICA 5
 #define MAXEVENTS 64
 #define BUFSIZE 1024
 #define MAXIPLEN 56
@@ -156,6 +156,12 @@ typedef struct mgmt_event {
 	int fd;
 	replica_t *r_ptr;
 } mgmt_event_t;
+
+typedef struct known_replica_s {
+	TAILQ_ENTRY(known_replica_s) next;
+	int is_connected;
+	uint64_t zvol_guid;
+} known_replica_t;
 
 void *init_replication(void *);
 int make_socket_non_blocking(int);

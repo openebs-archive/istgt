@@ -63,6 +63,9 @@ int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 		if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE)		\
 			__sync_fetch_and_sub(				\
 			    &r->replica_inflight_write_io_cnt, 1); 	\
+		if (rcomm_cmd->opcode == ZVOL_OPCODE_READ)		\
+			__sync_fetch_and_sub(				\
+			    &r->replica_inflight_read_io_cnt, 1);	\
 		rcomm_cmd->resp_list[idx].io_resp_hdr.status =		\
 		    ZVOL_OP_STATUS_FAILED;				\
 		rcomm_cmd->resp_list[idx].data_ptr = NULL;		\
@@ -272,6 +275,15 @@ handle_data_conn_error(replica_t *r)
 	if (r1 == NULL) {
 		REPLICA_ERRLOG("replica %s %d not part of rqlist..\n",
 		    r->ip, r->port);
+		/*
+		 * mgmt thread will check mgmt_eventfd2 fd to see if
+		 * it needs to wait for replica thread or not.
+		 * At this stage, the replica hasn't been added to
+		 * spec's rqlist so we need to update mgmt_eventfd2 to -1
+		 * here So that mgmt_thread can skip replica thread check.
+		 */
+		if (r->mgmt_eventfd2 != -1)
+			r->mgmt_eventfd2 = -1;
 		MTX_UNLOCK(&spec->rq_mtx);
 		return -1;
 	}
@@ -535,6 +547,10 @@ start:
 		rcomm_cmd->resp_list[idx].data_ptr = r->ongoing_io_buf;
 		if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE)
 			__sync_fetch_and_sub(&r->replica_inflight_write_io_cnt,
+			    1);
+
+		if (rcomm_cmd->opcode == ZVOL_OPCODE_READ)
+			__sync_fetch_and_sub(&r->replica_inflight_read_io_cnt,
 			    1);
 
 		/*
