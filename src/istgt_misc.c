@@ -244,8 +244,8 @@ poolfini(void)
 
 	}
 
-	if (gstart != NULL)
-		free(gstart);
+//	if (gstart != NULL)
+//		free(gstart);
 	gstart = NULL;
 	gend = NULL;
 }

@@ -292,12 +292,7 @@ handle_data_conn_error(replica_t *r)
 	MTX_UNLOCK(&spec->rq_mtx);
 
 	MTX_LOCK(&r->r_mtx);
-	if (epoll_ctl(r->epollfd, EPOLL_CTL_DEL, r->iofd, NULL) == -1) {
-		MTX_UNLOCK(&r->r_mtx);
-		REPLICA_ERRLOG("epoll error for replica(%s:%d) iofd:%d "
-		    "err(%d)\n", r->ip, r->port, r->iofd, errno);
-		return -1;
-	}
+	(void) epoll_ctl(r->epollfd, EPOLL_CTL_DEL, r->iofd, NULL);
 
 	fd = r->iofd;
 	r->iofd = -1;
@@ -600,7 +595,7 @@ handle_mgmt_eventfd(void *arg)
 void *
 replica_thread(void *arg)
 {
-	int r_data_eventfd, r_mgmt_eventfd, r_epollfd;
+	int r_data_eventfd = -1, r_mgmt_eventfd = -1, r_epollfd = -1;
 	struct epoll_event ev, events[MAXEVENTS];
 	int i, nfds, fd, ret = 0;
 	void *ptr;
@@ -661,8 +656,10 @@ replica_thread(void *arg)
 		REPLICA_ERRLOG("epoll error for replica(%s:%d) err(%d)\n",
 		    r->ip, r->port, errno);
 initialize_error:
-		close(r->mgmt_eventfd2);
-		r->mgmt_eventfd2 = -1;
+		if (r_mgmt_eventfd > 0) {
+			close (r_mgmt_eventfd);
+			r_mgmt_eventfd = -1;
+		}
 
 		if ((r_epollfd > 0) && (r_data_eventfd > 0)) {
 			/*

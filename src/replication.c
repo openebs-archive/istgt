@@ -752,9 +752,8 @@ create_replica_entry(spec_t *spec, int epfd, int mgmt_fd)
 	if (rc != 0) {
 		REPLICA_ERRLOG("pthread_cond_init() failed err(%d) for "
 		    "replica(%s:%d)\n", rc, replica->ip, replica->port);
-error:
 		(void) pthread_mutex_destroy(&replica->r_mtx);
-
+error:
 		MTX_LOCK(&spec->rq_mtx);
 		TAILQ_REMOVE(&spec->rwaitq, replica, r_waitnext);
 		MTX_UNLOCK(&spec->rq_mtx);
@@ -1603,6 +1602,11 @@ accept_mgmt_conns(int epfd, int sfd)
 			    "err(%d).. closing it.. for replica(%s:%d)\n",
 			    mgmt_fd, errno, replica->ip, replica->port);
 cleanup:
+			if (replica->mgmt_eventfd1 != -1) {
+				(void) epoll_ctl(epfd, EPOLL_CTL_DEL, replica->mgmt_eventfd1, NULL);
+				close(replica->mgmt_eventfd1);
+			}
+
 			if (mevent1) {
 				free(mevent1);
 				mevent1 = NULL;
@@ -1611,11 +1615,6 @@ cleanup:
 			if (mevent2) {
 				free(mevent2);
 				mevent2 = NULL;
-			}
-
-			if (replica->mgmt_eventfd1 != -1) {
-				(void) epoll_ctl(epfd, EPOLL_CTL_DEL, replica->mgmt_eventfd1, NULL);
-				close(replica->mgmt_eventfd1);
 			}
 
 			if (replica) {
@@ -1883,6 +1882,12 @@ free_replica(replica_t *r)
 {
 	pthread_mutex_destroy(&r->r_mtx);
 	pthread_cond_destroy(&r->r_cond);
+
+#ifdef	DEBUG
+	if (r->cmdq.ring)
+		ASSERT0(get_num_entries_from_mempool(&r->cmdq));
+#endif
+	destroy_mempool(&r->cmdq);
 
 	free(r->mgmt_io_resp_hdr);
 	free(r->m_event1);

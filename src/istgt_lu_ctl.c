@@ -2479,18 +2479,16 @@ istgt_uctl_cmd_dump(UCTL_Ptr uctl)
 		istgt_lock_gconns();
 		MTX_LOCK(&lu->mutex);
 		/* limit host string to 2048 characters */
-		for (j = 0; j < lu->maxmap && rem > 256; j++) {
+		for (j = 0; j < lu->maxmap && rem; j++) {
 			pgp = istgt_lu_find_portalgroup(uctl->istgt, lu->map[j].pg_tag);
 			if(pgp != NULL) {
-				for( x = 0; x < pgp->nportals && rem > 256; x++) {
-					ln = snprintf(bp, 256, " IP%d:%s  ", x+1, pgp->portals[x]->host);
-					if(ln < 0)
+				for( x = 0; x < pgp->nportals && rem; x++) {
+					ln = snprintf(bp, rem, " IP%d:%s  ", x+1, pgp->portals[x]->host);
+					if (ln < 0)
 						ln = 0;
-					else if(ln > 0) {
-						if (ln > 256)
-							ln = 256;
-						rem -= ln;
-					}
+					else if (ln > rem)
+						ln = rem;
+					rem -= ln;
 					bp += ln;
 					*bp = '\0';
 				}

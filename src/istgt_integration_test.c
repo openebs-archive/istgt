@@ -18,6 +18,9 @@
 
 __thread char tinfo[50] = {0};
 int g_trace_flag = 0;
+pthread_t new_replica[10] = { 0 };
+int replication_factor = 3, consistency_factor = 2;
+int new_replica_count = 3;	/* Assign same number as replication factor */
 
 typedef enum unit_test_state {
         UNIT_TEST_STATE_NONE = 0,
@@ -949,17 +952,18 @@ exit:
  * - three threads to work on IOs
  */
 static void
-create_mock_replicas(int replication_factor, char *volname)
+create_mock_replicas(int r_factor, char *volname)
 {
-	all_rargs = (rargs_t *)malloc(sizeof (rargs_t) * replication_factor);
-	all_rthrds = (pthread_t *)malloc(sizeof (pthread_t) * replication_factor);
+	all_rargs = (rargs_t *)malloc(sizeof (rargs_t) * MAXREPLICA);
+	all_rthrds = (pthread_t *)malloc(sizeof (pthread_t) * MAXREPLICA);
 	rargs_t *rargs;
 	char filepath[50];
 	int i;
 
-	memset(all_rargs, 0, sizeof (rargs_t) * replication_factor);
+	memset(all_rargs, 0, sizeof (rargs_t) * MAXREPLICA);
+	memset(all_rthrds, 0, sizeof (pthread_t) * MAXREPLICA);
 
-	for (i = 0; i < replication_factor; i++) {
+	for (i = 0; i < r_factor; i++) {
 		rargs = &(all_rargs[i]);
 		strncpy(rargs->replica_ip, "127.0.0.1", MAX_IP_LEN);
 		rargs->replica_port = 6161 + i;
@@ -1085,7 +1089,7 @@ process_options(int argc, char **argv)
 	    total_time_in_sec, test_id);
 }
 
-static void
+static pthread_t
 reregister_replica(spec_t *spec, rargs_t *rargs, int port)
 {
 	char filepath[50];
@@ -1108,15 +1112,17 @@ reregister_replica(spec_t *spec, rargs_t *rargs, int port)
 	REPLICA_ERRLOG("Reconnecting new replica:%s port:%d\n",
 	    rargs->replica_ip, rargs->replica_port);
 	pthread_create(&replica_thread, NULL, &mock_repl, rargs);
+	return replica_thread;
 }
 
 static void
-kill_all_replicas(int replication_factor)
+kill_all_replicas(void)
 {
 	int i; 
 
-	for (i = 0; i < replication_factor; i++) {
-		all_rargs[i].kill_replica = true;
+	for (i = 0; i < MAXREPLICA; i++) {
+		if (all_rargs[i].replica_port)
+			all_rargs[i].kill_replica = true;
 	}
 }
 
@@ -1162,7 +1168,7 @@ rebuild_test(void *arg)
 
         		case UNIT_TEST_STATE_KILL_ALL_REPLICA:
 		    		if (test_args->data_read_write_test_done) {
-					kill_all_replicas(spec->replication_factor);
+					kill_all_replicas();
 					test_args->state++;
 				}
  				break;
@@ -1172,8 +1178,10 @@ rebuild_test(void *arg)
 				    (spec->healthy_rcount == 0)) {
 					spec->replication_factor = 1;
 					spec->consistency_factor = 1;
-					reregister_replica(spec, rargs, 6166);
+					all_rthrds[new_replica_count] =
+					    reregister_replica(spec, &(all_rargs[new_replica_count]), 6166);
 					test_args->state++;
+					new_replica_count += 1;
 				}
 				break;
        
@@ -1193,8 +1201,6 @@ exit:
 	return NULL;
 }
 
-int replication_factor = 3, consistency_factor = 2;
-
 int
 main(int argc, char **argv)
 {
@@ -1205,6 +1211,7 @@ main(int argc, char **argv)
 	pthread_t rebuild_test_thread;
 	rebuild_test_t *test_args;
 	struct timespec now;
+	int i;
 
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	srandom(now.tv_sec);
@@ -1308,6 +1315,19 @@ main(int argc, char **argv)
 	MTX_UNLOCK(&test_args->test_mtx);
 
 	create_mock_client(spec);
+	kill_all_replicas();
+
+	for (i = 0; i < MAXREPLICA; i++) {
+		if (all_rthrds[i]) {
+			rc = pthread_join(all_rthrds[i], NULL);
+			if (rc)
+				REPLICA_ERRLOG("pthread_join failed for replica number(%d), err(%d)\n", i, rc);
+		}
+	}
+	free(all_rargs);
+	free(all_rthrds);
+
+	destroy_replication_mempool();
 
 	return 0;
 }

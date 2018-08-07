@@ -90,11 +90,11 @@ extern clockid_t clockid;
 //#define ISTGT_TRACE_DISK
 
 #ifdef	REPLICATION
-#define	IS_SPEC_READY(_spec)						\
+#define	IS_SPEC_BUSY(_spec)						\
 		(_spec->state == ISTGT_LUN_BUSY ||			\
 		    _spec->ready == false)
 #else
-#define	IS_SPEC_READY(_spec)	\
+#define	IS_SPEC_BUSY(_spec)	\
 		(_spec->state == ISTGT_LUN_BUSY)
 #endif
 
@@ -108,7 +108,7 @@ extern clockid_t clockid;
 		markedForReturn = 1;	\
 		goto macroname;	\
 	}	\
-	if (IS_SPEC_READY(spec)) {  \
+	if (IS_SPEC_BUSY(spec)) {  \
 		lu_cmd->data_len  = 0;             \
 		lu_cmd->status = ISTGT_SCSI_STATUS_BUSY; \
 		if(pthread_mutex_unlock(&spec->state_mutex) != 0)	\
@@ -954,7 +954,7 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 		rc = pthread_cond_init(&spec->cmd_queue_cond, NULL);
 		if (rc != 0) {
 			ISTGT_ERRLOG("LU%d: cond_init() failed errno:%d\n", lu->num, errno);
-			goto spec_error;
+			return -1;
 		}
 
 		istgt_queue_init(&spec->cmd_queue);
@@ -962,7 +962,7 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 		rc = pthread_cond_init(&spec->maint_cmd_queue_cond, NULL);
 		if (rc != 0) {
 			ISTGT_ERRLOG("LU%d: maint_cond_init() failed errno:%d\n", lu->num, errno);
-			goto spec_error;
+			return -1;
 		}
 
 		istgt_queue_init(&spec->maint_cmd_queue);
@@ -971,38 +971,38 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 		rc = pthread_mutex_init(&spec->clone_mutex, &istgt->mutex_attr);
 		if (rc != 0) {
 			ISTGT_ERRLOG("LU%d: clone_mutex_init() failed errno:%d\n", lu->num, errno);
-			goto spec_error;
+			return -1;
 		}
 
 		rc = pthread_mutex_init(&spec->complete_queue_mutex, &istgt->mutex_attr);
 		if (rc != 0) {
 			ISTGT_ERRLOG("LU%d: comp_q_mutex_init() failed errno:%d\n", lu->num, errno);
-			goto spec_error;
+			return -1;
 		}
 		istgt_queue_init(&spec->complete_queue);
 
 		rc = pthread_mutex_init(&spec->wait_lu_task_mutex, NULL);
 		if (rc != 0) {
 			ISTGT_ERRLOG("LU%d: wait_mutex_init() failed errno:%d\n", lu->num, errno);
-			goto spec_error;
+			return -1;
 		}
 
 		rc = pthread_mutex_init(&spec->schdler_mutex, &istgt->mutex_attr);
 		if (rc != 0) {
 			ISTGT_ERRLOG("LU%d: scheduler mutex_init() failed errno:%d\n", lu->num, errno);
-			goto spec_error;
+			return -1;
 		}
 
 		rc = pthread_mutex_init(&spec->sleep_mutex, &istgt->mutex_attr);
 		if (rc != 0) {
 			ISTGT_ERRLOG("LU%d: sleep mutex_init() failed errno:%d\n", lu->num, errno);
-			goto spec_error;
+			return -1;
 		}
 
 		rc = pthread_cond_init(&spec->schdler_cond, NULL);
 		if (rc != 0) {
 			ISTGT_ERRLOG("LU%d:scheduler cond_init() failed errno:%d\n", lu->num, errno);
-			goto spec_error;
+			return -1;
 		}
 
 		for(k = 0; k < ISTGT_MAX_NUM_LUWORKERS; k++) {
@@ -1013,39 +1013,39 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 			rc = pthread_mutex_init(&spec->luworker_mutex[k], &istgt->mutex_attr);
 			if (rc != 0) {
 				ISTGT_ERRLOG("LU%d: luworker %d mutex_init() failed errno:%d\n", lu->num, k, errno);
-				goto spec_error;
+				return -1;
 			}
         
 			rc = pthread_cond_init(&spec->luworker_cond[k], NULL);
 			if (rc != 0) {
 				ISTGT_ERRLOG("LU%d: luworker %d cond_init() failed errno:%d\n", lu->num, k, errno);
-				goto spec_error;
+				return -1;
 			}
 
 #ifdef	REPLICATION
 			rc = pthread_mutex_init(&spec->luworker_rmutex[k], &istgt->mutex_attr);
 			if (rc != 0) {
 				ISTGT_ERRLOG("LU%d: luworker %d mutex_init() failed errno:%d\n", lu->num, k, errno);
-				goto spec_error;
+				return -1;
 			}
         
 			rc = pthread_cond_init(&spec->luworker_rcond[k], NULL);
 			if (rc != 0) {
 				ISTGT_ERRLOG("LU%d: luworker %d cond_init() failed errno:%d\n", lu->num, k, errno);
-				goto spec_error;
+				return -1;
 			}
 #endif
 
 			rc = pthread_mutex_init(&spec->lu_tmf_mutex[k], &istgt->mutex_attr);
 			if (rc != 0) {
 				ISTGT_ERRLOG("LU%d: lu_tmf_mutex %d mutex_init() failed errno:%d\n", lu->num, k, errno);
-				goto spec_error;
+				return -1;
 			}
         
 			rc = pthread_cond_init(&spec->lu_tmf_cond[k], NULL);
 			if (rc != 0) {
 				ISTGT_ERRLOG("LU%d: lu_tmf_cond %d cond_init() failed errno:%d\n", lu->num, k, errno);
-				goto spec_error;
+				return -1;
 			}
 		}
 		istgt_queue_init(&spec->blocked_queue);
@@ -1053,7 +1053,7 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 		rc = initialize_volume(spec, spec->lu->replication_factor, spec->lu->consistency_factor);
 		if (rc != 0) {
 			ISTGT_ERRLOG("LU%d: persistent reservation mutex_init() failed errno:%d\n", lu->num, errno);
-			goto error_return;
+			return -1;
 		}
 #endif
 		memset(&spec->lu_free_matrix, 0, ((ISTGT_MAX_NUM_LUWORKERS/32)+1)*4);
@@ -1066,13 +1066,13 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 		rc = pthread_mutex_init(&spec->pr_rsv_mutex, NULL);
 		if (rc != 0) {
 			ISTGT_ERRLOG("LU%d: persistent reservation mutex_init() failed errno:%d\n", lu->num, errno);
-			goto error_return;
+			return -1;
 		}
 
 		rc = pthread_mutex_init(&spec->state_mutex, NULL);
 		if (rc != 0) {
 			ISTGT_ERRLOG("LU%d: mutex_init() failed errno:%d\n", lu->num, errno);
-			goto error_return;
+			return -1;
 		}
 
 		spec->npr_keys = 0;
@@ -1092,7 +1092,25 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 		uuid_create(&spec->uuid, &status);
 		if (status != uuid_s_ok) {
 			ISTGT_ERRLOG("LU%d: LUN%d: uuid_create() failed\n", lu->num, i);
-			goto error_return;
+			(void) pthread_mutex_destroy(&spec->wait_lu_task_mutex);
+			(void) pthread_mutex_destroy(&spec->complete_queue_mutex);
+			(void) pthread_mutex_destroy(&spec->pr_rsv_mutex);
+			(void) pthread_mutex_destroy(&spec->state_mutex);
+			(void) pthread_mutex_destroy(&spec->schdler_mutex);
+			(void) pthread_mutex_destroy(&spec->sleep_mutex);
+			(void) pthread_cond_destroy(&spec->schdler_cond);
+			(void) pthread_cond_destroy(&spec->cmd_queue_cond);
+			(void) pthread_cond_destroy(&spec->maint_cmd_queue_cond);
+			istgt_queue_destroy(&spec->cmd_queue);
+			istgt_queue_destroy(&spec->blocked_queue);
+			istgt_queue_destroy(&spec->maint_cmd_queue);
+			istgt_queue_destroy(&spec->maint_blocked_queue);
+			for(k = 0; k < ISTGT_MAX_NUM_LUWORKERS; k++) {
+				(void) pthread_mutex_destroy(&spec->luworker_mutex[k]);
+				(void) pthread_cond_destroy(&spec->luworker_cond[k]);
+			}
+			xfree(spec);
+			return -1;
 		}
 #endif /* HAVE_UUID_H */
 
@@ -1136,10 +1154,6 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 				ISTGT_ERRLOG("LU%d: LUN%d: invalid blocklen %"PRIu64"\n",
 				    lu->num, i, spec->blocklen);
 error_return:
-#ifdef	REPLICATION
-				destroy_volume(spec);
-#endif
-spec_error:
 				(void) pthread_mutex_destroy(&spec->wait_lu_task_mutex);
 				(void) pthread_mutex_destroy(&spec->complete_queue_mutex);
 				(void) pthread_mutex_destroy(&spec->pr_rsv_mutex);
@@ -1153,21 +1167,10 @@ spec_error:
 				istgt_queue_destroy(&spec->blocked_queue);
 				istgt_queue_destroy(&spec->maint_cmd_queue);
 				istgt_queue_destroy(&spec->maint_blocked_queue);
-				istgt_queue_destroy(&spec->complete_queue);
-
 				for(k = 0; k < ISTGT_MAX_NUM_LUWORKERS; k++) {
 					(void) pthread_mutex_destroy(&spec->luworker_mutex[k]);
-					(void) pthread_mutex_destroy(&spec->lu_tmf_mutex[k]);
 					(void) pthread_cond_destroy(&spec->luworker_cond[k]);
-					(void) pthread_cond_destroy(&spec->lu_tmf_cond[k]);
 				}
-				TAILQ_EMPTY(&spec->nexus);
-#ifdef	REPLICATION
-				if (spec->volname)
-					xfree(spec->volname);
-#endif
-				if (spec->exspec)
-					xfree(spec->exspec);
 				xfree(spec);
 				return -1;
 			}
@@ -1322,6 +1325,7 @@ spec_error:
 			}
 		} else {
 			ISTGT_ERRLOG("LU%d: LUN%d: unsupported format\n", lu->num, i);
+			goto error_return;
 		}
 
 		printf("LU%d: LUN%d serial:%s\n", lu->num, i,
@@ -4151,7 +4155,7 @@ istgt_lu_disk_scsi_persistent_reserve_out(ISTGT_LU_DISK *spec,
 	ISTGT_LU_DISK *spec_bkp = NULL;
 	char *old_rsv_port = NULL;
 	char **initiator_ports = NULL;
-	int maxports, nports;
+	int maxports = 0, nports;
 	int plen, total;
 	uint64_t rkey;
 	uint64_t sarkey;
@@ -5043,6 +5047,7 @@ do_register:
 		/* specified ports */
 		prkey->ninitiator_ports = nports;
 		prkey->initiator_ports = initiator_ports;
+		initiator_ports = NULL;
 		prkey->all_tpg = (all_tg_pt) ? 1 : 0;
 
 		if (change_rsv == 1)
@@ -5398,13 +5403,13 @@ istgt_lu_disk_unmap(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd,
 			unmbd[0] *= spec->blocklen;
 			unmbd[1] *= spec->blocklen;
 			enterblockingcall(endofmacro1)
-			if(markedForReturn == 1)
-			{
+			if (markedForReturn == 1) {
 				ret = -1;
 				break;
-			}
-			if(lu_cmd->aborted == 1)
-			{
+			} else if (markedForReturn == 2)
+				return 0;
+
+			if (lu_cmd->aborted == 1) {
 				ISTGT_LOG("(0x%x) c#%d aborting the IO\n", lu_cmd->CmdSN, conn->id);
 				exitblockingcall(endofmacro3)
 				return -1;
@@ -5600,13 +5605,13 @@ istgt_lu_disk_lbread(ISTGT_LU_DISK *spec, CONN_Ptr conn __attribute__((__unused_
 		}
 
 	enterblockingcall(endofmacro1)
-	if(markedForReturn == 1)
-	{
+	if (markedForReturn == 1) {
 		ISTGT_ERRLOG("Error in locking");
 		return -1;
-	}
-	if(lu_cmd->aborted == 1)
-	{
+	} else if (markedForReturn == 2)
+		return 0;
+
+	if (lu_cmd->aborted == 1) {
 		ISTGT_LOG("(0x%x) c#%d aborting the IO\n", lu_cmd->CmdSN, conn->id);
 		exitblockingcall(endofmacro3)
 		return -1;
@@ -5746,7 +5751,9 @@ freeiovcnt:
 	if (markedForReturn == 1) {
 		ISTGT_ERRLOG("c#%d Error in entering block call", conn->id);
 		goto freeiovcnt;
-	}
+	} else if (markedForReturn == 2)
+		return 0;
+
 	if(lu_cmd->aborted == 1)
 	{
 		ISTGT_LOG("(0x%x) c#%d aborting the IO\n", lu_cmd->CmdSN, conn->id);
@@ -5904,20 +5911,17 @@ istgt_lu_disk_lbwrite_same(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr 
 	if (spec->wzero && nthbitset == nbits) {
 		msg = "wzero";
 		enterblockingcall(endofmacro1);
-		if(markedForReturn == 1)
-		{
+		if (markedForReturn == 1 || markedForReturn == 2) {
 			if(freedata == 1)
 				xfree(data);
-			ISTGT_ERRLOG("c#%d Error in locking", conn->id);
-			return -1;
-		} else if (markedForReturn == 2) {
-			/* Spec is not ready */
-			if(freedata == 1)
-				xfree(data);
-			return 0;
+			if (markedForReturn == 1) {
+				ISTGT_ERRLOG("c#%d Error in locking", conn->id);
+				return -1;
+			} else if (markedForReturn == 2)
+				return 0;
 		}
-		if(lu_cmd->aborted == 1)
-		{
+
+		if (lu_cmd->aborted == 1) {
 			ISTGT_LOG("(0x%x) c#%d aborting the IO\n", lu_cmd->CmdSN, conn->id);
 			exitblockingcall(endofmacro5)
 			if(freedata == 1)
@@ -5978,21 +5982,18 @@ istgt_lu_disk_lbwrite_same(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr 
 		uint64_t reqblocks = DMIN64(wblocks, (llen - nblocks));
 		uint64_t reqbytes = reqblocks * nbytes;
 		enterblockingcall(endofmacro3);
-		if(markedForReturn == 1)
-		{
+		if (markedForReturn == 1 || markedForReturn == 2) {
 			if(freedata == 1)
 				xfree(data);
 			xfree(workbuf);
-			ISTGT_ERRLOG("c#%d Error in locking", conn->id);
-			return -1;
-		} else if (markedForReturn == 2) {
-			if (freedata == 1)
-				xfree(data);
-			xfree(workbuf);
-			return 0;
+			if (markedForReturn == 1) {
+				ISTGT_ERRLOG("c#%d Error in locking", conn->id);
+				return -1;
+			} else if (markedForReturn == 2)
+				return 0;
 		}
-		if(lu_cmd->aborted == 1)
-		{
+
+		if (lu_cmd->aborted == 1) {
 			ISTGT_LOG("(0x%x) c#%d aborting the IO\n", lu_cmd->CmdSN, conn->id);
 			exitblockingcall(endofmacro6)
 			if(freedata == 1)
@@ -6081,23 +6082,19 @@ istgt_lu_disk_lbwrite_ats(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr l
 
 	watsbuf = xmalloc(nbytes);
 	enterblockingcall(endofmacro1)
-	if(markedForReturn == 1)
-	{
-		ISTGT_ERRLOG("c#%d Error in locking", conn->id);
+	if (markedForReturn == 1 || markedForReturn == 2) {
 		if (freedata == 1)
 			xfree(data);
 		xfree(watsbuf);
-		return -1;
-	} else if (markedForReturn == 2) {
-		if (freedata == 1)
-			xfree(data);
-		xfree(watsbuf);
-		return 0;
+		if (markedForReturn == 1) {
+			ISTGT_ERRLOG("c#%d Error in locking", conn->id);
+			return -1;
+		} else if (markedForReturn == 2)
+			return 0;
 	}
 
 	timediffw(lu_cmd, 'w');
-	if(lu_cmd->aborted == 1)
-	{
+	if (lu_cmd->aborted == 1) {
 		ISTGT_LOG("(0x%x) c#%d aborting the IO\n", lu_cmd->CmdSN, conn->id);
 		exitblockingcall(endofmacro5)
 		if(freedata == 1)
@@ -6143,22 +6140,18 @@ istgt_lu_disk_lbwrite_ats(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr l
 	}
 
 	enterblockingcall(endofmacro3)
-	if(markedForReturn == 1)
-	{
+	if (markedForReturn == 1 || markedForReturn == 2) {
 		if(freedata == 1)
 			xfree(data);
 		xfree(watsbuf);
-		ISTGT_ERRLOG("c#%d Error in locking", conn->id);
-		return -1;
-	} else if (markedForReturn == 2) {
-		if(freedata == 1)
-			xfree(data);
-		xfree(watsbuf);
-		return 0;
+		if (markedForReturn == 1) {
+			ISTGT_ERRLOG("c#%d Error in locking", conn->id);
+			return -1;
+		} else if (markedForReturn == 2)
+			return 0;
 	}
 
-	if(lu_cmd->aborted == 1)
-	{
+	if (lu_cmd->aborted == 1) {
 		ISTGT_LOG("(0x%x) c#%d aborting the IO\n", lu_cmd->CmdSN, conn->id);
 		exitblockingcall(endofmacro6)
 		if(freedata == 1)
@@ -6229,14 +6222,14 @@ istgt_lu_disk_lbsync(ISTGT_LU_DISK *spec, CONN_Ptr conn __attribute__((__unused_
 	}
 
 	enterblockingcall(endofmacro1)
-	if(markedForReturn == 1)
-	{
+	if (markedForReturn == 1) {
 		ISTGT_ERRLOG("c#%d Error in locking", conn->id);
 		return -1;
-	}
+	} else if (markedForReturn == 2)
+		return 0;
+
 	timediffw(lu_cmd, 'w');
-	if(lu_cmd->aborted == 1)
-	{
+	if (lu_cmd->aborted == 1) {
 		ISTGT_LOG("(0x%x) c#%d aborting the IO\n", lu_cmd->CmdSN, conn->id);
 		exitblockingcall(endofmacro3)
 		return -1;
@@ -8575,7 +8568,6 @@ istgt_lu_disk_cmd_queue_count(ISTGT_LU_Ptr lu, int *lun)
 				}\
 			}\
 			MTX_UNLOCK(&spec->lu_tmf_mutex[worker_id]);\
-			aborted = 0;				\
 			decrement_conn_inflight = 0;		\
 			if(likely(lu_task != NULL)) {\
 				if((lu_task->lu_cmd).aborted == 1) {\
@@ -8719,8 +8711,7 @@ istgt_lu_disk_queue_start(ISTGT_LU_Ptr lu, int lun, int worker_id)
 		MTX_UNLOCK(&conn->result_queue_mutex);
 	}
 
-	msg = NULL;
-	retval = 0;
+	retval = -1;
 	if (lu_cmd->W_bit) {
 		if (lu_cmd->pdu->data_segment_len >= lu_cmd->transfer_len) {
 			i = ++lu_cmd->iobufindx;
@@ -9011,7 +9002,6 @@ istgt_lu_disk_queue_start(ISTGT_LU_Ptr lu, int lun, int worker_id)
 error_return:
 	INFLIGHT_IO_CLEANUP;	
 error_return_no_cleanup:
-	printmsg = 0;
 	if (lu_cmd && conn && lu_cmd->connGone == 1) {
 		ISTGT_ERRLOG("c#%d LU%d: LUN%d connGone set, error:%s, op:0x%x cmdSN:0x%x (ret:%d)\n",
 		    conn->id, lu->num, lun, msg, opcode, CmdSN, rc);

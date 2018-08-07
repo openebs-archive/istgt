@@ -2312,7 +2312,6 @@ reload:
 		}
 	}
 	*/
-	MTX_UNLOCK(&istgt->mutex);
 	ucidx = nidx;
 	for (i = 0; i < istgt->nuctl_portal; i++) {
 		event.data.fd = istgt->uctl_portal[i].sock;
@@ -2345,10 +2344,13 @@ reload:
 	event.events = EPOLLIN;
 	rc = epoll_ctl(epfd, EPOLL_CTL_ADD, istgt->sig_pipe[0], &event);
 	if (rc == -1) {
+		MTX_UNLOCK(&istgt->mutex);
 		ISTGT_ERRLOG("epoll_ctl() failed, errno:%d\n", errno);
 		close(epfd);
 		return -1;
 	}
+	MTX_UNLOCK(&istgt->mutex);
+
 	epsocks[nidx] = istgt->sig_pipe[0];
 	nidx++;
 	/*
@@ -2937,12 +2939,7 @@ main(int argc, char **argv)
 	rc = istgt_init(istgt);
 	if (rc < 0) {
 		ISTGT_ERRLOG("istgt_init() failed\n");
-	initialize_error:
-#ifdef	REPLICATION
-		destroy_replication_mempool();
-#endif
-		istgt_iscsi_shutdown(istgt);
-		istgt_lu_shutdown(istgt);
+initialize_error:
 		istgt_close_log();
 		istgt_free_config(config);
 		poolfini();

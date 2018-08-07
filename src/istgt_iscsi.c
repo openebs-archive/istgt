@@ -6910,7 +6910,7 @@ istgt_remove_conn(CONN_Ptr conn)
 	int delayedFree = 0;
 	int sessConns = 0, ioPending = 0;
 	int rc = 0;
-	int lun;
+	int lu_num;
 	uint16_t tsih;
 
 	if(conn->sess != NULL){
@@ -6956,7 +6956,7 @@ istgt_remove_conn(CONN_Ptr conn)
 	sessConns = sess->connections;
 	MTX_UNLOCK(&sess->mutex);
 
-	lun = (sess->lu == NULL)? 0 : sess->lu->num;
+	lu_num = (sess->lu == NULL)? 0 : sess->lu->num;
 	tsih = sess->tsih;
 
 	if (sessConns == 0) {
@@ -7005,7 +7005,7 @@ istgt_remove_conn(CONN_Ptr conn)
 
 	ISTGT_NOTICELOG("remove_conn->initiator:%s(%s) Target: %s(%s LU%d) conn:%p:%d tsih:%d connections:%d %s IOPending=%d",
 	    conn->initiator_addr, conn->initiator_name, conn->target_addr, conn->target_name,
-	    lun, conn, conn->cid, tsih, sessConns,
+	    lu_num, conn, conn->cid, tsih, sessConns,
 	    (delayedFree == 1) ? "delay_free" : "", ioPending);
 	if (strcmp(conn->target_name, "dummy") && conn->exec_logout == 0)
 		ioctl_call(conn, TYPE_CONNBRK);
@@ -7056,15 +7056,13 @@ istgt_iscsi_drop_all_conns(CONN_Ptr conn)
 		}
 	}
 
-	MTX_UNLOCK(&g_conns_mutex);
-	if (num != 0){
+	if (num != 0) {
 		istgt_yield();
 		sleep(1);
 		ISTGT_NOTICELOG("drop all %d connections %d %s by %s\n",
 	    			num, conn->id, conn->target_name, conn->initiator_name);
 	}
 
-	MTX_LOCK(&g_conns_mutex);
 	if (num > max_conns + 1) {
 		for (i = 0; i <= g_max_connidx; i++) {
 			xconn = g_conns[i];
@@ -7138,16 +7136,14 @@ istgt_iscsi_drop_old_conns(CONN_Ptr conn)
 			num++;
 		}
 	}
-	MTX_UNLOCK(&g_conns_mutex);
 
-	if(num != 0){
+	if (num != 0) {
 		istgt_yield();
 		sleep(1);
 		ISTGT_NOTICELOG("drop all %d old connections %d %s by %s\n",
 	    				num, conn->id, conn->target_name, conn->initiator_port);
 	}
 
-	MTX_LOCK(&g_conns_mutex);
 	if (num > max_conns + 1) {
 		for (i = 0; i <= g_max_connidx; i++) {
 			xconn = g_conns[i];
