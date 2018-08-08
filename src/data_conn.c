@@ -611,7 +611,7 @@ handle_mgmt_eventfd(void *arg)
 void *
 replica_thread(void *arg)
 {
-	int r_data_eventfd, r_mgmt_eventfd, r_epollfd;
+	int r_data_eventfd = -1, r_mgmt_eventfd = -1, r_epollfd = -1;
 	struct epoll_event ev, events[MAXEVENTS];
 	int i, nfds, fd, ret = 0;
 	void *ptr;
@@ -672,8 +672,10 @@ replica_thread(void *arg)
 		REPLICA_ERRLOG("epoll error for replica(%s:%d) err(%d)\n",
 		    r->ip, r->port, errno);
 initialize_error:
-		close(r->mgmt_eventfd2);
-		r->mgmt_eventfd2 = -1;
+		if (r_mgmt_eventfd > 0) {
+			close (r_mgmt_eventfd);
+			r_mgmt_eventfd = -1;
+		}
 
 		if ((r_epollfd > 0) && (r_data_eventfd > 0)) {
 			/*

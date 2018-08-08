@@ -243,8 +243,9 @@ poolfini(void)
 		mpools[i].endmem = NULL;
 
 	}
-	//if (gstart != NULL)
-	//	free(gstart);
+
+//	if (gstart != NULL)
+//		free(gstart);
 	gstart = NULL;
 	gend = NULL;
 }

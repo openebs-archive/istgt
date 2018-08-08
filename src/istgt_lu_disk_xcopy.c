@@ -67,7 +67,10 @@ istgt_lu_disk_receive_copy_results(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 
 	data_len =  allocation_len;
 	if (data_len != 0) {
-		istgt_lu_disk_transfer_data(conn, lu_cmd, data_len);
+		if (istgt_lu_disk_transfer_data(conn, lu_cmd, data_len) < 0) {
+			ISTGT_ERRLOG("c#%d lu_disk_transfer_data() failed\n", conn->id);
+			return -1;
+		}
 	}
 
 	data = xmalloc(200);
@@ -78,12 +81,14 @@ istgt_lu_disk_receive_copy_results(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 		{
 			/* ILLEGAL REQUEST */
 			BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);
+			xfree(data);
 			return -1;
 		}
 		case 0x01: /* Receive data */
 		{
 			/* ILLEGAL REQUEST */
 			BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);
+			xfree(data);
 			return -1;
 		}
 		case 0x03: /* Operating parameters */
@@ -112,12 +117,14 @@ istgt_lu_disk_receive_copy_results(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 		{
 			/* ILLEGAL REQUEST */
 			BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);
+			xfree(data);
 			return -1;
 		}
 		default:	/* Illegal Request */
 		{
 			/* ILLEGAL REQUEST */
 			BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);
+			xfree(data);
 			return -1;
 		}
 	}
@@ -193,6 +200,7 @@ istgt_get_xcopy_target(ISTGT_LU_DISK *spec, uint8_t *target_descriptor, ISTGT_LU
 		/* ILLEGAL REQUEST UNSUPPORTED TARGET DESCRIPTOR */
 		ISTGT_ERRLOG("TARGET_DESCRIPTOR OPCODE NOT SUPPORTED %x \n", td_opcode);
 		BUILD_SENSE(ILLEGAL_REQUEST, 0x26, 0x07); // Refer  SCSI Primary Commands - 3 (SPC-3)
+		xfree(target);
 		return NULL;
 	}
 
@@ -222,17 +230,20 @@ istgt_get_xcopy_target(ISTGT_LU_DISK *spec, uint8_t *target_descriptor, ISTGT_LU
 	}
 	else {
 		ISTGT_ERRLOG("Identifier Type not supported \n");
+		xfree(target);
 		return NULL;
 	}
 
 	target->spec = istgt_find_xcopy_target(spec->lu->istgt, identifier);
 	if (target->spec == NULL) {
 		ISTGT_ERRLOG("Target not found \n");
+		xfree(target);
 		return NULL;
 	}
 
 	if (! (pdt == PDT_DIRECT_ACCESS_BLK_DEV || pdt == PDT_SIMPLIFIED_DIRECT_ACCESS_DEV)) {
 		ISTGT_ERRLOG("INVALID peripheral device type %x\n", pdt);
+		xfree(target);
 		return NULL;
 	}
 
@@ -570,13 +581,15 @@ istgt_lu_disk_lbxcopy(ISTGT_XCOPY_TGT *src_tgt, ISTGT_XCOPY_TGT *dst_tgt, CONN_P
 	llen = (nbytes / dst_tgt->block_len);
 	if (dst_tgt->lba >= maxlba || llen > maxlba || dst_tgt->lba > (maxlba - llen)) {
 		ISTGT_ERRLOG("c#%d end of media\n", conn->id);
+		xfree(clone_buf);
 		return -1;
 	}
 
 	
 	if (dst_tgt->spec->lu->readonly) {
-			ISTGT_ERRLOG("c#%d LU%d: readonly unit\n", conn->id, dst_tgt->spec->lu->num);
-			return -1;
+		ISTGT_ERRLOG("c#%d LU%d: readonly unit\n", conn->id, dst_tgt->spec->lu->num);
+		xfree(clone_buf);
+		return -1;
 	}
 
 	MTX_LOCK(&dst_tgt->spec->clone_mutex);

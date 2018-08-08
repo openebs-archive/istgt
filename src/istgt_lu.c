@@ -225,6 +225,7 @@ istgt_connection_status(CONN_Ptr conn, const char *status)
 	MTX_UNLOCK(&conn->istgt->mutex);
 	fp = fopen (logfile, "a");
 	if (fp == NULL) {
+		xfree(logfile);
 		fprintf(stderr, "Cannot open the file %s \n", logfile);
 		return;
 	}
@@ -4136,7 +4137,7 @@ maintenance_io_worker(void *arg)
 	ISTGT_LU_DISK *spec = NULL;
 	ISTGT_LU_TASK_Ptr lu_task;
 	int qcnt;
-	int lun;
+	int lu_num;
 	int rc = 0, i, j;
 	int retry_runningstate_count = 0;
 	int tind = 0;
@@ -4175,7 +4176,7 @@ maintenance_io_worker(void *arg)
 	}
 
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "LU%d:%d loop start\n", lu->num, tind);
-	lun = 0;
+	lu_num = 0;
 	qcnt = 0;
 	pthread_cleanup_push(luw_cleanup, (void *)spec);
 
@@ -4192,14 +4193,14 @@ maintenance_io_worker(void *arg)
 			if (istgt_lu_get_state(lu) != ISTGT_STATE_RUNNING)
 				goto loop_exit;
 
-			if (lun >= lu->maxlun) {
-				lun = 0;
+			if (lu_num >= lu->maxlun) {
+				lu_num = 0;
 			}
                 
-			spec = (ISTGT_LU_DISK *) lu->lun[lun].spec;
+			spec = (ISTGT_LU_DISK *) lu->lun[lu_num].spec;
 			MTX_LOCK(&spec->complete_queue_mutex);
 again:
-			do{
+			do {
 				if (istgt_lu_get_state(lu) != ISTGT_STATE_RUNNING)
 				{
 					MTX_UNLOCK(&spec->complete_queue_mutex);
@@ -4244,13 +4245,14 @@ again:
 				}
 				MTX_UNLOCK(&spec->state_mutex);
 
+				rc = 0;
 				if (do_close == 1)
 					rc = istgt_lu_disk_close(spec->lu, spec->lun);
 				if (do_open == 1)
 					rc = istgt_lu_disk_open(spec->lu, spec->lun);
 
 				MTX_LOCK(&spec->complete_queue_mutex);
-				if(rc == 0) 
+				if (rc == 0)
 					spec->disk_modify_work_pending = 0;
 				else {
 					lu_task = istgt_queue_dequeue(&spec->maint_cmd_queue);
@@ -4271,7 +4273,7 @@ again:
 			if(unlikely(spec->rsv_pending & ISTGT_RSV_READ)) {
 				MTX_UNLOCK(&spec->pr_rsv_mutex);
 				rc = istgt_lu_disk_post_open(spec);
-				if(rc != 0) {
+				if (rc != 0) {
 					MTX_LOCK(&spec->complete_queue_mutex);
 					lu_task = istgt_queue_dequeue(&spec->maint_cmd_queue);
 					if(lu_task != NULL) {
@@ -4302,16 +4304,16 @@ execute_task:
 			MTX_UNLOCK(&spec->luworker_mutex[tind]);
 
 			lu_task->lu_cmd.flags |= ISTGT_MAINT_WORKER_PICKED;
-			rc = istgt_lu_disk_queue_start(lu, lun, tind);
+			rc = istgt_lu_disk_queue_start(lu, lu_num, tind);
 			if (rc < 0) {
 				ISTGT_ERRLOG("LU%d: lu_disk_queue_start() %s %d\n",
 						lu->num, rc == -2 ? "aborted" : "failed", rc);
 			}
 
-			lun++;
+			lu_num++;
 		}
 	}
- loop_exit:
+loop_exit:
 	;
 	pthread_cleanup_pop(0);
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "LU%d loop ended\n", lu->num);
@@ -4324,7 +4326,7 @@ luworker(void *arg)
 	ISTGT_LU_Ptr lu = (ISTGT_LU_Ptr) arg;
 	ISTGT_LU_DISK *spec = NULL;
 	ISTGT_LU_TASK_Ptr lu_task;
-	int lun;
+	int lu_num;
 	int rc, i, j, oldtimeset = 0;
 	int retry_runningstate_count = 0;
 	int tind = 0;
@@ -4379,7 +4381,7 @@ luworker(void *arg)
 	}
 
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "LU%d loop start\n", lu->num);
-	lun = 0;
+	lu_num = 0;
 	for (j = 0; j< lu->maxlun; j++) { 
 		spec = (ISTGT_LU_DISK *) lu->lun[j].spec;
 		MTX_LOCK(&spec->luworker_mutex[tind]);
@@ -4431,17 +4433,17 @@ luworker(void *arg)
 				retry_runningstate_count++;
 			}
 
-			if (istgt_lu_get_state(lu) != ISTGT_STATE_RUNNING)
+			if ((istgt_lu_get_state(lu) != ISTGT_STATE_RUNNING))
 				goto loop_exit;
 
-				id = 14;
-				clock_gettime(clockid, &second2);
-				tdiff(first, second2, r);
-			if (lun >= lu->maxlun) {
-				lun = 0;
+			id = 14;
+			clock_gettime(clockid, &second2);
+			tdiff(first, second2, r);
+			if (lu_num >= lu->maxlun) {
+				lu_num = 0;
 			}
                 
-			spec = (ISTGT_LU_DISK *) lu->lun[lun].spec;
+			spec = (ISTGT_LU_DISK *) lu->lun[lu_num].spec;
 			MTX_LOCK(&spec->luworker_mutex[tind]);
 			while ( spec->inflight_io[tind] == NULL) {
 				if(unlikely(BGET32(spec->lu_free_matrix[(tind >> 5)], (tind & 31)) == 0))
@@ -4503,7 +4505,7 @@ luworker(void *arg)
 			lu_task->lu_cmd.luworkerindx = tind;
 #endif
 			lu_task->lu_cmd.flags |= ISTGT_WORKER_PICKED;
-			rc = istgt_lu_disk_queue_start(lu, lun, tind);
+			rc = istgt_lu_disk_queue_start(lu, lu_num, tind);
 			if (rc < 0) {
 				ISTGT_ERRLOG("LU%d: lu_disk_queue_start() %s %d\n",
 						lu->num, rc == -2 ? "aborted" : "failed", rc);
@@ -4520,7 +4522,7 @@ luworker(void *arg)
 			oldtime = now1;
 			oldtimeset = 1;
 
-			lun++;
+			lu_num++;
 		}
 	}
  loop_exit:

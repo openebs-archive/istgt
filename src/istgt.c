@@ -317,33 +317,42 @@ istgt_add_portal_group(ISTGT_Ptr istgt, CF_SECTION *sp, int *pgp_idx)
 static int
 istgt_pg_match_all(PORTAL_GROUP *pgp, CF_SECTION *sp)
 {
-	char *label, *portal, *host, *port;
+	char *label = NULL, *portal = NULL, *host = NULL, *port = NULL;
 	int que;
 	int rc;
+	int ret = 0;
 	int i;
 
 	for (i = 0; i < pgp->nportals; i++) {
 		label = istgt_get_nmval(sp, "Portal", i, 0);
 		portal = istgt_get_nmval(sp, "Portal", i, 1);
 		if (label == NULL || portal == NULL)
-			return 0;
+			goto no_match;
 		rc = istgt_parse_portal(portal, &host, &port, &que);
 		if (rc < 0)
-			return 0;
+			goto no_match;
 		if (strcmp(pgp->portals[i]->label, label) != 0)
-			return 0;
+			goto no_match;
 		if (strcmp(pgp->portals[i]->host, host) != 0)
-			return 0;
+			goto no_match;
 		if (strcmp(pgp->portals[i]->port, port) != 0)
-			return 0;
+			goto no_match;
 		if (pgp->portals[i]->que != que)
-			return 0;
+			goto no_match;
 	}
+
 	label = istgt_get_nmval(sp, "Portal", i, 0);
 	portal = istgt_get_nmval(sp, "Portal", i, 1);
 	if (label != NULL || portal != NULL)
-		return 0;
-	return 1;
+		goto no_match;
+	ret = 1;
+
+no_match:
+	if (port)
+		xfree(port);
+	if (host)
+		xfree(host);
+	return ret;
 }
 
 static int
@@ -1637,27 +1646,6 @@ istgt_init(ISTGT_Ptr istgt)
 		    istgt->discovery_auth_group);
 	}
 
-	rc = istgt_uctl_init(istgt);
-	if (rc < 0) {
-		ISTGT_ERRLOG("istgt_uctl_init() failed\n");
-		return -1;
-	}
-	rc = istgt_build_uctl_portal(istgt);
-	if (rc < 0) {
-		ISTGT_ERRLOG("istgt_build_uctl_portal() failed\n");
-		return -1;
-	}
-	rc = istgt_build_portal_group_array(istgt);
-	if (rc < 0) {
-		ISTGT_ERRLOG("istgt_build_portal_array() failed\n");
-		return -1;
-	}
-	rc = istgt_build_initiator_group_array(istgt);
-	if (rc < 0) {
-		ISTGT_ERRLOG("build_initiator_group_array() failed\n");
-		return -1;
-	}
-
 	rc = pthread_attr_init(&istgt->attr);
 	if (rc != 0) {
 		ISTGT_ERRLOG("pthread_attr_init() failed\n");
@@ -1711,6 +1699,27 @@ istgt_init(ISTGT_Ptr istgt)
 	rc = pthread_cond_init(&istgt->reload_cond, NULL);
 	if (rc != 0) {
 		ISTGT_ERRLOG("cond_init() failed\n");
+		return -1;
+	}
+
+	rc = istgt_uctl_init(istgt);
+	if (rc < 0) {
+		ISTGT_ERRLOG("istgt_uctl_init() failed\n");
+		return -1;
+	}
+	rc = istgt_build_uctl_portal(istgt);
+	if (rc < 0) {
+		ISTGT_ERRLOG("istgt_build_uctl_portal() failed\n");
+		return -1;
+	}
+	rc = istgt_build_portal_group_array(istgt);
+	if (rc < 0) {
+		ISTGT_ERRLOG("istgt_build_portal_array() failed\n");
+		return -1;
+	}
+	rc = istgt_build_initiator_group_array(istgt);
+	if (rc < 0) {
+		ISTGT_ERRLOG("build_initiator_group_array() failed\n");
 		return -1;
 	}
 
@@ -2034,9 +2043,11 @@ istgt_reload(ISTGT_Ptr istgt)
 	config_new = istgt_allocate_config();
 	config_old = istgt->config;
 	config_file = config_old->file;
+
 	rc = istgt_read_config(config_new, config_file);
 	if (rc < 0) {
 		ISTGT_ERRLOG("config error\n");
+		istgt_free_config(config_new);
 		return -1;
 	}
 	if (config_new->section == NULL) {
@@ -2301,7 +2312,6 @@ reload:
 		}
 	}
 	*/
-	MTX_UNLOCK(&istgt->mutex);
 	ucidx = nidx;
 	for (i = 0; i < istgt->nuctl_portal; i++) {
 		event.data.fd = istgt->uctl_portal[i].sock;
@@ -2339,6 +2349,8 @@ reload:
 		close(epfd);
 		return -1;
 	}
+	MTX_UNLOCK(&istgt->mutex);
+
 	epsocks[nidx] = istgt->sig_pipe[0];
 	nidx++;
 	/*
@@ -2725,6 +2737,7 @@ main(int argc, char **argv)
 	pthread_t replication_thread;
 #endif
 
+	(void) detach;
 	send_abrt_resp = 0;
 	abort_result_queue = 0;
 	wait_inflights = 1;
@@ -2926,7 +2939,7 @@ main(int argc, char **argv)
 	rc = istgt_init(istgt);
 	if (rc < 0) {
 		ISTGT_ERRLOG("istgt_init() failed\n");
-	initialize_error:
+initialize_error:
 		istgt_close_log();
 		istgt_free_config(config);
 		poolfini();
@@ -2986,7 +2999,8 @@ main(int argc, char **argv)
 */
 	/* setup signal handler thread */
 	signal(SIGPIPE, SIG_IGN);
-	#if 0
+
+#if 0
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "setup signal handler\n");
 	memset(&sigact, 0, sizeof sigact);
 	memset(&sigoldact_pipe, 0, sizeof sigoldact_pipe);
@@ -3089,7 +3103,8 @@ main(int argc, char **argv)
 		goto initialize_error;
 	}
 #endif
-	#endif
+
+#endif
 
 	/* create LUN threads for command queuing */
 	istgt_queue_init(&closedconns);

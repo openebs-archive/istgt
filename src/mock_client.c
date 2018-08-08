@@ -136,7 +136,9 @@ writer(void *args)
 
 		if (rc != len && !ignore_io_error)
 			goto end;
+
 		count++;
+
 		clock_gettime(CLOCK_MONOTONIC, &now);
 		if (now.tv_sec - start.tv_sec > 120)
 			break;
@@ -146,8 +148,9 @@ writer(void *args)
 		}
 	}
 end:
-	free(lu_cmd);
 	REPLICA_ERRLOG("exiting wrote %d from %s\n", count, tinfo);
+
+	free(lu_cmd);
 
 	MTX_LOCK(mtx);
 	*cnt = *cnt + 1;
@@ -206,7 +209,7 @@ reader(void *args)
 		if (rc != len && !ignore_io_error)
 			goto end;
 
-		if (rc == len)
+		if (lu_cmd->data)
 			xfree(lu_cmd->data);
 
 		lu_cmd->data = NULL;
@@ -221,8 +224,11 @@ reader(void *args)
 		}
 	}
 end:
-	free(lu_cmd);
 	REPLICA_ERRLOG("exiting read %d from %s\n", count, tinfo);
+
+	if (lu_cmd->data)
+		xfree(lu_cmd->data);
+	free(lu_cmd);
 
 	MTX_LOCK(mtx);
 	*cnt = *cnt + 1;
