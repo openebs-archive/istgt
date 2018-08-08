@@ -5409,7 +5409,7 @@ istgt_lu_disk_unmap(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd,
 				break;
 			} else if (markedForReturn == 2) {
 				errno = EBUSY;
-				return 0;
+				return -1;
 			}
 
 			if (lu_cmd->aborted == 1) {
@@ -5924,11 +5924,10 @@ istgt_lu_disk_lbwrite_same(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr 
 				xfree(data);
 			if (markedForReturn == 1) {
 				ISTGT_ERRLOG("c#%d Error in locking", conn->id);
-				return -1;
 			} else if (markedForReturn == 2) {
 				errno = EBUSY;
-				return -1;
 			}
+			return -1;
 		}
 
 		if (lu_cmd->aborted == 1) {
@@ -5998,11 +5997,10 @@ istgt_lu_disk_lbwrite_same(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr 
 			xfree(workbuf);
 			if (markedForReturn == 1) {
 				ISTGT_ERRLOG("c#%d Error in locking", conn->id);
-				return -1;
 			} else if (markedForReturn == 2) {
 				errno = EBUSY;
-				return -1;
 			}
+			return -1;
 		}
 
 		if (lu_cmd->aborted == 1) {
@@ -6100,11 +6098,10 @@ istgt_lu_disk_lbwrite_ats(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr l
 		xfree(watsbuf);
 		if (markedForReturn == 1) {
 			ISTGT_ERRLOG("c#%d Error in locking", conn->id);
-			return -1;
 		} else if (markedForReturn == 2) {
 			errno = EBUSY;
-			return -1;
 		}
+		return -1;
 	}
 
 	timediffw(lu_cmd, 'w');
@@ -6160,11 +6157,10 @@ istgt_lu_disk_lbwrite_ats(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr l
 		xfree(watsbuf);
 		if (markedForReturn == 1) {
 			ISTGT_ERRLOG("c#%d Error in locking", conn->id);
-			return -1;
 		} else if (markedForReturn == 2) {
 			errno = EBUSY;
-			return -1;
 		}
+		return -1;
 	}
 
 	if (lu_cmd->aborted == 1) {
