@@ -2504,11 +2504,7 @@ istgt_lu_disk_scsi_inquiry(ISTGT_LU_DISK *spec, CONN_Ptr conn, uint8_t *cdb, uin
 		BDSET8W(&data[1], rmb, 7, 1);
 		/* VERSION */
 		/* See SPC3/SBC2/MMC4/SAM2 for more details */
-#ifndef	REPLICATION
 		data[2] = SPC_VERSION_SPC3;
-#else
-		data[2] = SPC_VERSION_SPC2;
-#endif
 		/* NORMACA(5) HISUP(4) RESPONSE DATA FORMAT(3-0) */
 		BDSET8W(&data[3], 2, 3, 4);		/* format 2 */
 		BDADD8(&data[1], 1, 4);         /* hierarchical support */
@@ -2548,11 +2544,7 @@ istgt_lu_disk_scsi_inquiry(ISTGT_LU_DISK *spec, CONN_Ptr conn, uint8_t *cdb, uin
 		data[57] = 0;
 		/* VERSION DESCRIPTOR 1-8 */
 		DSET16(&data[58], 0x0960); /* iSCSI (no version claimed) */
-#ifndef	REPLICATION
 		DSET16(&data[60], 0x0300); /* SPC-3 (no version claimed) */
-#else
-		DSET16(&data[60], 0x0260); /* SPC-2 (no version claimed) */
-#endif
 		DSET16(&data[62], 0x0320); /* SBC-2 (no version claimed) */
 		DSET16(&data[64], 0x0040); /* SAM-2 (no version claimed) */
 		DSET16(&data[66], 0x0000);

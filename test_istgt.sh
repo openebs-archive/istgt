@@ -372,11 +372,6 @@ run_read_consistency_test ()
 		kill -9 $replica1_pid $replica2_pid $replica3_pid
 		return
 	fi
-	var1="$(sudo sg_inq /dev/$device_name | grep SPC-2 | wc -l)"
-	if [ $var1 -ne 1 ]; then
-		sudo sg_inq /dev/$device_name
-		echo "sg_inq command failed" && exit 1
-	fi
 
 	write_data 0 41943040 512 "/dev/$device_name" $file_name
 	sync
