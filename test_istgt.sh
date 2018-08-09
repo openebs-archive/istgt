@@ -187,6 +187,8 @@ setup_test_env() {
 	mkdir -p /mnt/store
 	truncate -s 5G /tmp/test_vol1 /tmp/test_vol2 /tmp/test_vol3
 	logout_of_volume
+	sudo killall -9 istgt
+	sudo killall -9 replication_test
 
 	start_istgt 5G
 }
@@ -369,6 +371,11 @@ run_read_consistency_test ()
 		echo "error happened while running read consistency test"
 		kill -9 $replica1_pid $replica2_pid $replica3_pid
 		return
+	fi
+	var1="$(sudo sg_inq /dev/$device_name | grep SPC-2 | wc -l)"
+	if [ $var1 -ne 1 ]; then
+		sudo sg_inq /dev/$device_name
+		echo "sg_inq command failed" && exit 1
 	fi
 
 	write_data 0 41943040 512 "/dev/$device_name" $file_name
