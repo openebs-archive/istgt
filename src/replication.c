@@ -902,7 +902,7 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 
 	rio_payload = (zvol_op_open_data_t *) malloc(
 	    sizeof (zvol_op_open_data_t));
-	rio_payload->timeout = (10 * 60);
+	rio_payload->timeout = (3 * replica_timeout);
 	rio_payload->tgt_block_size = spec->blocklen;
 	strncpy(rio_payload->volname, spec->volname,
 	    sizeof (rio_payload->volname));

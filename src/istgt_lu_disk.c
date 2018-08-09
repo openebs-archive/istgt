@@ -9056,6 +9056,8 @@ istgt_lu_disk_busy_excused(int opcode)
 }
 #define checklength \
 	if(transfer_len*spec->blocklen > (uint64_t)lu->MaxBurstLength) { \
+		ISTGT_WARNLOG("c#%d checklength error: transferlen %lu should be < maxburstlen %lu\n", \
+			conn->id, transfer_len*spec->blocklen, (uint64_t)(lu->MaxBurstLength)); \
 		lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION; \
 		BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);\
 		break;\
@@ -10585,6 +10587,12 @@ istgt_lu_disk_execute(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 
 	case SPC_PERSISTENT_RESERVE_IN:
 		{
+#ifdef	REPLICATION
+			ISTGT_TRACELOG(ISTGT_TRACE_SCSI, "c#%d RESERVE_IN not handled\n", conn->id);
+			/* INVALID COMMAND OPERATION CODE */
+			BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);
+			lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
+#else
 			sa = BGET8W(&cdb[1], 4, 5);
 			if (lu_cmd->R_bit == 0) {
 				ISTGT_ERRLOG("c#%d PERSISTENT_RESERVE_IN: sa:0x%2.2x R_bit == 0\n", conn->id, sa);
@@ -10620,11 +10628,18 @@ istgt_lu_disk_execute(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 			lu_cmd->data_len = DMIN32((size_t)data_len, lu_cmd->transfer_len);
 			lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
 			ISTGT_TRACELOG(ISTGT_TRACE_SCSI, "c#%d PERSISTENT_RESERVE_IN sa:0x%2.2x data:%u/%u/%u\n", conn->id, sa, data_len, lu_cmd->transfer_len, allocation_len);
+#endif
 		}
 		break;
 
 	case SPC_PERSISTENT_RESERVE_OUT:
 		{
+#ifdef	REPLICATION
+			ISTGT_TRACELOG(ISTGT_TRACE_SCSI, "c#%d RESERVE_OUT not handled\n", conn->id);
+			/* INVALID COMMAND OPERATION CODE */
+			BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);
+			lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
+#else
 			int scope, type;
 			sa = BGET8W(&cdb[1], 4, 5);
 
@@ -10672,6 +10687,7 @@ istgt_lu_disk_execute(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 			lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
 			ISTGT_ERRLOG("c#%d PERSISTENT_RESERVE_OUT sa:0x%2.2x scope:%x type:%x plen:%d success (%d)",
 						conn->id, sa, scope, type, parameter_len, data_len);
+#endif
 		}
 		break;
 

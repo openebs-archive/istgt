@@ -187,6 +187,8 @@ setup_test_env() {
 	mkdir -p /mnt/store
 	truncate -s 5G /tmp/test_vol1 /tmp/test_vol2 /tmp/test_vol3
 	logout_of_volume
+	sudo killall -9 istgt
+	sudo killall -9 replication_test
 
 	start_istgt 5G
 }
