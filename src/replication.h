@@ -183,15 +183,14 @@ void destroy_volume(spec_t *spec);
 /* Replica default timeout is 200 seconds */
 #define	REPLICA_DEFAULT_TIMEOUT	200
 
-#define REPLICA_LOG(fmt, ...)	syslog(LOG_NOTICE, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
-#define REPLICA_NOTICELOG(fmt, ...)	syslog(LOG_NOTICE, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
-#define REPLICA_ERRLOG(fmt, ...)	syslog(LOG_ERR, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
-#define REPLICA_WARNLOG(fmt, ...)	syslog(LOG_ERR, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
+#define REPLICA_LOG(fmt, ...)		fprintf(stderr, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
+#define REPLICA_NOTICELOG(fmt, ...)	fprintf(stderr, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
+#define REPLICA_ERRLOG(fmt, ...)	fprintf(stderr, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
+#define REPLICA_WARNLOG(fmt, ...)	fprintf(stderr, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
 
 #ifdef	DEBUG
-#define REPLICA_DEBUGLOG(fmt, ...)	syslog(LOG_NOTICE, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
+#define REPLICA_DEBUGLOG(fmt, ...)	fprintf(stderr, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
 #else
 #define REPLICA_DEBUGLOG(fmt, ...)
 #endif
 #endif /* _REPLICATION_H */
-
