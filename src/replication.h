@@ -193,4 +193,57 @@ void destroy_volume(spec_t *spec);
 #else
 #define REPLICA_DEBUGLOG(fmt, ...)
 #endif
+
+#define DECREASE_INFLIGHT_REPLICA_IO_CNT(_r, _opcode)			\
+	do {								\
+		switch (_opcode) {					\
+			case ZVOL_OPCODE_WRITE:				\
+				__sync_fetch_and_sub(			\
+				    &_r->replica_inflight_write_io_cnt,	\
+				    1);					\
+				break;					\
+									\
+			case ZVOL_OPCODE_READ:				\
+				__sync_fetch_and_sub(			\
+				    &_r->replica_inflight_read_io_cnt,	\
+				    1);					\
+				break;					\
+									\
+			case ZVOL_OPCODE_SYNC:				\
+				__sync_fetch_and_sub(			\
+				    &_r->replica_inflight_sync_io_cnt,	\
+				    1);					\
+				break;					\
+									\
+			default:					\
+				break;					\
+		}							\
+	} while (0)
+
+#define INCREASE_INFLIGHT_REPLICA_IO_CNT(_r, _opcode)			\
+	do {								\
+		switch (_opcode) {					\
+			case ZVOL_OPCODE_WRITE:				\
+				__sync_fetch_and_add(			\
+				    &_r->replica_inflight_write_io_cnt,	\
+				    1);					\
+				break;					\
+									\
+			case ZVOL_OPCODE_READ:				\
+				__sync_fetch_and_add(			\
+				    &_r->replica_inflight_read_io_cnt,	\
+				    1);					\
+				break;					\
+									\
+			case ZVOL_OPCODE_SYNC:				\
+				__sync_fetch_and_add(			\
+				    &_r->replica_inflight_sync_io_cnt,	\
+				    1);					\
+				break;					\
+									\
+			default:					\
+				break;					\
+		}							\
+	} while (0)
+
 #endif /* _REPLICATION_H */

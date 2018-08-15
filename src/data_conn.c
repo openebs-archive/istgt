@@ -44,7 +44,8 @@ int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 	}								\
 }
 
-#define SEND_ERROR_RESPONSES(head, _cond, _cnt, _time_diff, _r, _w) {	\
+#define SEND_ERROR_RESPONSES(head, r, _cond, _cnt, _time_diff, _r, _w)	\
+{									\
 	_cnt = 0;							\
 	memset(&_time_diff, 0, sizeof (_time_diff));			\
 	rcmd = TAILQ_FIRST(head);					\
@@ -60,12 +61,14 @@ int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 		idx = rcmd->idx;					\
 		rcomm_cmd = rcmd->rcommq_ptr;				\
 		_cond = rcomm_cmd->cond_var;				\
+									\
+		DECREASE_INFLIGHT_REPLICA_IO_CNT(r, rcomm_cmd->opcode);	\
+									\
 		if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE)		\
-			__sync_fetch_and_sub(				\
-			    &r->replica_inflight_write_io_cnt, 1); 	\
+			++_w;						\
 		if (rcomm_cmd->opcode == ZVOL_OPCODE_READ)		\
-			__sync_fetch_and_sub(				\
-			    &r->replica_inflight_read_io_cnt, 1);	\
+			++_r;						\
+									\
 		rcomm_cmd->resp_list[idx].io_resp_hdr.status =		\
 		    ZVOL_OP_STATUS_FAILED;				\
 		rcomm_cmd->resp_list[idx].data_ptr = NULL;		\
@@ -76,7 +79,6 @@ int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 		 * rcomm_cmd, we will update response status in 	\
 		 * rcomm_cmd at last.					\
 		 */							\
-		(rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) ? ++_w : ++_r;	\
 		if (rcomm_cmd->state != CMD_EXECUTION_DONE) {		\
 			rcomm_cmd->resp_list[idx].status |= 		\
 			    RECEIVED_ERR;				\
@@ -233,11 +235,11 @@ respond_with_error_for_all_outstanding_ios(replica_t *r)
 	while ((rcmd = dequeue_replica_cmdq(r)) != NULL)
 		move_to_blocked_or_ready_q(r, rcmd);
 
-	SEND_ERROR_RESPONSES((&(r->waitq)), cond_var, wait_cnt, wait_diff,
+	SEND_ERROR_RESPONSES((&(r->waitq)), r, cond_var, wait_cnt, wait_diff,
 	    read_cnt, write_cnt);
-	SEND_ERROR_RESPONSES((&(r->readyq)), cond_var, ready_cnt, ready_diff,
-	    read_cnt, write_cnt);
-	SEND_ERROR_RESPONSES((&(r->blockedq)), cond_var, blocked_cnt,
+	SEND_ERROR_RESPONSES((&(r->readyq)), r, cond_var, ready_cnt,
+	    ready_diff, read_cnt, write_cnt);
+	SEND_ERROR_RESPONSES((&(r->blockedq)), r, cond_var, blocked_cnt,
 	    blocked_diff, read_cnt, write_cnt);
 
 	REPLICA_ERRLOG("IO command set with error for replica(%lu) .."
@@ -545,13 +547,8 @@ start:
 
 		rcomm_cmd->resp_list[idx].io_resp_hdr = *(r->io_resp_hdr);
 		rcomm_cmd->resp_list[idx].data_ptr = r->ongoing_io_buf;
-		if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE)
-			__sync_fetch_and_sub(&r->replica_inflight_write_io_cnt,
-			    1);
 
-		if (rcomm_cmd->opcode == ZVOL_OPCODE_READ)
-			__sync_fetch_and_sub(&r->replica_inflight_read_io_cnt,
-			    1);
+		DECREASE_INFLIGHT_REPLICA_IO_CNT(r, rcomm_cmd->opcode);
 
 		/*
 		 * cleanup_deadlist thread performs cleanup of rcomm_cmd.

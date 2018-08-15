@@ -107,6 +107,55 @@ static int handle_mgmt_event_fd(replica_t *replica);
 		}							\
 	} while (0)							\
 
+#define	CHECK_IO_TYPE(_cmd, _is_read, _is_write, _is_sync)		\
+	do {								\
+		switch (_cmd->cdb0) {					\
+			case SBC_WRITE_6:				\
+			case SBC_WRITE_10:				\
+			case SBC_WRITE_12:				\
+			case SBC_WRITE_16:				\
+				_is_write = true;			\
+				break;					\
+									\
+			case SBC_READ_6:				\
+			case SBC_READ_10:				\
+			case SBC_READ_12:				\
+			case SBC_READ_16:				\
+				_is_read = true;			\
+				break;					\
+									\
+			case SBC_SYNCHRONIZE_CACHE_10:			\
+			case SBC_SYNCHRONIZE_CACHE_16:			\
+				_is_sync = true;			\
+				break;					\
+									\
+			default:					\
+				break;					\
+		}							\
+	} while (0)
+
+#define UPDATE_INFLIGHT_SPEC_IO_CNT(_spec, _lun_cmd, _value)		\
+do {									\
+	switch (_lun_cmd->cdb0) {					\
+			case SBC_WRITE_6:                               \
+			case SBC_WRITE_10:                              \
+			case SBC_WRITE_12:                              \
+			case SBC_WRITE_16:                              \
+				_spec->inflight_write_io_cnt +=		\
+				    (_value);				\
+				break;					\
+									\
+			case SBC_SYNCHRONIZE_CACHE_10:			\
+			case SBC_SYNCHRONIZE_CACHE_16:			\
+				_spec->inflight_sync_io_cnt +=		\
+				    (_value);				\
+				break;					\
+									\
+			default:					\
+				break;					\
+		}							\
+	} while (0)
+
 #define BUILD_REPLICA_MGMT_HDR(_mgmtio_hdr, _mgmt_opcode, _data_len)	\
 	do {								\
 		_mgmtio_hdr = malloc(sizeof(zvol_io_hdr_t));		\
@@ -1171,7 +1220,7 @@ pause_and_timed_wait_for_ongoing_ios(spec_t *spec, int sec)
 {
 	struct timespec last, now, diff;
 	bool ret = false;
-	bool write_io_found = false;
+	bool io_found = false;	/* Write or Sync IOs */
 	replica_t *replica;
 
 	ASSERT(MTX_LOCKED(&spec->rq_mtx));
@@ -1181,23 +1230,28 @@ pause_and_timed_wait_for_ongoing_ios(spec_t *spec, int sec)
 	timesdiff(CLOCK_MONOTONIC, last, now, diff);
 
 	while ((diff.tv_sec < sec) && (is_volume_healthy(spec) == true)) {
-		write_io_found = false;
-		if (spec->inflight_write_io_cnt != 0)
-			write_io_found = true;
+		io_found = false;
+		if (spec->inflight_write_io_cnt != 0 ||
+		    spec->inflight_sync_io_cnt != 0)
+			io_found = true;
 		else {
 			TAILQ_FOREACH(replica, &spec->rq, r_next) {
-				if (replica->replica_inflight_write_io_cnt != 0) {
-					write_io_found = true;
+				if (replica->replica_inflight_write_io_cnt != 0 ||
+				    replica->replica_inflight_sync_io_cnt != 0) {
+					io_found = true;
 					break;
 				}
 			}
 		}
-		if (write_io_found == false) {
+		if (io_found == false) {
 			ret = true;
 			break;
 		}
 		MTX_UNLOCK(&spec->rq_mtx);
-		/* inflight write IOs in spec, or in replica, so, wait for some time */
+		/*
+		 * inflight write/sync IOs in spec, or in replica,
+		 * so, wait for some time
+		 */
 		sleep (1);
 		MTX_LOCK(&spec->rq_mtx);
 		timesdiff(CLOCK_MONOTONIC, last, now, diff);
@@ -2116,6 +2170,7 @@ respond_with_error_for_all_outstanding_mgmt_ios(replica_t *r)
 		else							\
 			rcmd->iov[0].iov_len = sizeof(zvol_io_hdr_t);	\
 		rcmd->iovcnt++;						\
+		INCREASE_INFLIGHT_REPLICA_IO_CNT(replica, rcmd->opcode);\
 	} while (0);							\
 
 /*
@@ -2249,7 +2304,7 @@ int64_t
 replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t nbytes)
 {
 	int rc = -1, i;
-	bool cmd_write = false, cmd_read = false;
+	bool cmd_write = false, cmd_read = false, cmd_sync = false;
 	replica_t *replica, *last_replica = NULL;
 	rcommon_cmd_t *rcomm_cmd;
 	rcmd_t *rcmd = NULL;
@@ -2261,23 +2316,7 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	uint64_t num_read_ios = 0;
 	uint64_t inflight_read_ios = 0;
 
-	switch (cmd->cdb0) {
-		case SBC_WRITE_6:
-		case SBC_WRITE_10:
-		case SBC_WRITE_12:
-		case SBC_WRITE_16:
-			cmd_write = true;
-			break;
-
-		case SBC_READ_6:
-		case SBC_READ_10:
-		case SBC_READ_12:
-		case SBC_READ_16:
-			cmd_read = true;
-			break;
-		default:
-			break;
-	}
+	CHECK_IO_TYPE(cmd, cmd_read, cmd_write, cmd_sync);
 
 again:
 	MTX_LOCK(&spec->rq_mtx);
@@ -2287,15 +2326,14 @@ again:
 		return -1;
 	}
 
-	/* Quiesce write IOs based on flag */
-	if (cmd_write && spec->quiesce == 1) { 
+	/* Quiesce write/sync IOs based on flag */
+	if ((cmd_write || cmd_sync) && spec->quiesce == 1) { 
 		MTX_UNLOCK(&spec->rq_mtx);
 		sleep(1);
 		goto again;
 	}
 
-	if (cmd_write)
-		spec->inflight_write_io_cnt += 1;
+	UPDATE_INFLIGHT_SPEC_IO_CNT(spec, cmd, 1);
 
 	ASSERT(spec->io_seq);
 	build_rcomm_cmd(rcomm_cmd, cmd, offset, nbytes);
@@ -2350,12 +2388,8 @@ retry_read:
 		}
 
 		rcomm_cmd->copies_sent++;
-		build_rcmd();
 
-		if (cmd_read)
-			__sync_fetch_and_add(&replica->replica_inflight_read_io_cnt, 1);
-		else if (cmd_write)
-			__sync_fetch_and_add(&replica->replica_inflight_write_io_cnt, 1);
+		build_rcmd();
 
 		put_to_mempool(&replica->cmdq, rcmd);
 
@@ -2397,8 +2431,7 @@ retry_read:
 
 			MTX_LOCK(&spec->rq_mtx);
 			TAILQ_REMOVE(&spec->rcommon_waitq, rcomm_cmd, wait_cmd_next);
-			if (cmd_write)
-				spec->inflight_write_io_cnt -= 1;
+			UPDATE_INFLIGHT_SPEC_IO_CNT(spec, cmd, -1);
 			MTX_UNLOCK(&spec->rq_mtx);
 
 			put_to_mempool(&spec->rcommon_deadlist, rcomm_cmd);

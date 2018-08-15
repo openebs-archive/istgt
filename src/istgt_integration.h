@@ -68,6 +68,7 @@ typedef struct replica_s {
 	 */
 	uint64_t replica_inflight_write_io_cnt;
 	uint64_t replica_inflight_read_io_cnt;
+	uint64_t replica_inflight_sync_io_cnt;
 
 	zvol_io_hdr_t *io_resp_hdr;	/* header recieved on data connection */
 	int io_state;			/* state of command on data connection */
