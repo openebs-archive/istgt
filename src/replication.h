@@ -194,7 +194,7 @@ void destroy_volume(spec_t *spec);
 #define REPLICA_DEBUGLOG(fmt, ...)
 #endif
 
-#define DECREASE_INFLIGHT_REPLICA_IO_CNT(_r, _opcode)			\
+#define DECREMENT_INFLIGHT_REPLICA_IO_CNT(_r, _opcode)			\
 	do {								\
 		switch (_opcode) {					\
 			case ZVOL_OPCODE_WRITE:				\
@@ -220,7 +220,7 @@ void destroy_volume(spec_t *spec);
 		}							\
 	} while (0)
 
-#define INCREASE_INFLIGHT_REPLICA_IO_CNT(_r, _opcode)			\
+#define INCREMENT_INFLIGHT_REPLICA_IO_CNT(_r, _opcode)			\
 	do {								\
 		switch (_opcode) {					\
 			case ZVOL_OPCODE_WRITE:				\

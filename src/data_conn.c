@@ -62,7 +62,7 @@ int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 		rcomm_cmd = rcmd->rcommq_ptr;				\
 		_cond = rcomm_cmd->cond_var;				\
 									\
-		DECREASE_INFLIGHT_REPLICA_IO_CNT(r, rcomm_cmd->opcode);	\
+		DECREMENT_INFLIGHT_REPLICA_IO_CNT(r, rcomm_cmd->opcode);\
 									\
 		if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE)		\
 			++_w;						\
@@ -548,7 +548,7 @@ start:
 		rcomm_cmd->resp_list[idx].io_resp_hdr = *(r->io_resp_hdr);
 		rcomm_cmd->resp_list[idx].data_ptr = r->ongoing_io_buf;
 
-		DECREASE_INFLIGHT_REPLICA_IO_CNT(r, rcomm_cmd->opcode);
+		DECREMENT_INFLIGHT_REPLICA_IO_CNT(r, rcomm_cmd->opcode);
 
 		/*
 		 * cleanup_deadlist thread performs cleanup of rcomm_cmd.

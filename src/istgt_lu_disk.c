@@ -6235,7 +6235,7 @@ istgt_lu_disk_lbsync(ISTGT_LU_DISK *spec, CONN_Ptr conn __attribute__((__unused_
 
 #ifdef  REPLICATION
 	while (spec->quiesce) {
-		ISTGT_ERRLOG("c#%d LU%d: quiescing write IOs\n", conn->id, spec->lu->num);
+		ISTGT_ERRLOG("c#%d LU%d: quiescing sync IOs\n", conn->id, spec->lu->num);
 		sleep(1);
 	}
 #endif

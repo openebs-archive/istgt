@@ -2170,7 +2170,6 @@ respond_with_error_for_all_outstanding_mgmt_ios(replica_t *r)
 		else							\
 			rcmd->iov[0].iov_len = sizeof(zvol_io_hdr_t);	\
 		rcmd->iovcnt++;						\
-		INCREASE_INFLIGHT_REPLICA_IO_CNT(replica, rcmd->opcode);\
 	} while (0);							\
 
 /*
@@ -2390,6 +2389,8 @@ retry_read:
 		rcomm_cmd->copies_sent++;
 
 		build_rcmd();
+
+		INCREMENT_INFLIGHT_REPLICA_IO_CNT(replica, rcmd->opcode);
 
 		put_to_mempool(&replica->cmdq, rcmd);
 
