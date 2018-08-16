@@ -125,7 +125,7 @@ writer(void *args)
 		len_in_blocks = random() % 15;
 		len = len_in_blocks * blklen;
 
-		if ((random() % 200) == 0) {
+		if ((random() % 3) == 0) {
 			opcode = SBC_SYNCHRONIZE_CACHE_16;
 			len = 0;
 		}

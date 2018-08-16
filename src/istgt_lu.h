@@ -768,6 +768,8 @@ typedef struct istgt_lu_disk_t {
 #ifdef	REPLICATION
 	/* inflight write IOs in replication layer */
 	uint64_t inflight_write_io_cnt;
+	/* inflight sync IOs in replication layer */
+	uint64_t inflight_sync_io_cnt;
 #endif
 
 	uint32_t max_unmap_sectors;

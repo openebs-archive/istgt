@@ -6233,6 +6233,13 @@ istgt_lu_disk_lbsync(ISTGT_LU_DISK *spec, CONN_Ptr conn __attribute__((__unused_
 		return -1;
 	}
 
+#ifdef  REPLICATION
+	while (spec->quiesce) {
+		ISTGT_ERRLOG("c#%d LU%d: quiescing sync IOs\n", conn->id, spec->lu->num);
+		sleep(1);
+	}
+#endif
+
 	enterblockingcall(endofmacro1)
 	if (markedForReturn == 1) {
 		ISTGT_ERRLOG("c#%d Error in locking", conn->id);

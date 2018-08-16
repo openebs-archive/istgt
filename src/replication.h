@@ -16,6 +16,7 @@
 #include <syslog.h>
 #include <stdbool.h>
 #include "zrepl_prot.h"
+#include "replication_log.h"
 
 #define MAXREPLICA 5
 #define MAXEVENTS 64
@@ -183,15 +184,56 @@ void destroy_volume(spec_t *spec);
 /* Replica default timeout is 200 seconds */
 #define	REPLICA_DEFAULT_TIMEOUT	200
 
-#define REPLICA_LOG(fmt, ...)	syslog(LOG_NOTICE, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
-#define REPLICA_NOTICELOG(fmt, ...)	syslog(LOG_NOTICE, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
-#define REPLICA_ERRLOG(fmt, ...)	syslog(LOG_ERR, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
-#define REPLICA_WARNLOG(fmt, ...)	syslog(LOG_ERR, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
+#define DECREMENT_INFLIGHT_REPLICA_IO_CNT(_r, _opcode)			\
+	do {								\
+		switch (_opcode) {					\
+			case ZVOL_OPCODE_WRITE:				\
+				__sync_fetch_and_sub(			\
+				    &_r->replica_inflight_write_io_cnt,	\
+				    1);					\
+				break;					\
+									\
+			case ZVOL_OPCODE_READ:				\
+				__sync_fetch_and_sub(			\
+				    &_r->replica_inflight_read_io_cnt,	\
+				    1);					\
+				break;					\
+									\
+			case ZVOL_OPCODE_SYNC:				\
+				__sync_fetch_and_sub(			\
+				    &_r->replica_inflight_sync_io_cnt,	\
+				    1);					\
+				break;					\
+									\
+			default:					\
+				break;					\
+		}							\
+	} while (0)
 
-#ifdef	DEBUG
-#define REPLICA_DEBUGLOG(fmt, ...)	syslog(LOG_NOTICE, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
-#else
-#define REPLICA_DEBUGLOG(fmt, ...)
-#endif
+#define INCREMENT_INFLIGHT_REPLICA_IO_CNT(_r, _opcode)			\
+	do {								\
+		switch (_opcode) {					\
+			case ZVOL_OPCODE_WRITE:				\
+				__sync_fetch_and_add(			\
+				    &_r->replica_inflight_write_io_cnt,	\
+				    1);					\
+				break;					\
+									\
+			case ZVOL_OPCODE_READ:				\
+				__sync_fetch_and_add(			\
+				    &_r->replica_inflight_read_io_cnt,	\
+				    1);					\
+				break;					\
+									\
+			case ZVOL_OPCODE_SYNC:				\
+				__sync_fetch_and_add(			\
+				    &_r->replica_inflight_sync_io_cnt,	\
+				    1);					\
+				break;					\
+									\
+			default:					\
+				break;					\
+		}							\
+	} while (0)
+
 #endif /* _REPLICATION_H */
-
