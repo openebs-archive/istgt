@@ -467,7 +467,7 @@ trigger_rebuild(spec_t *spec)
 		}
 
 		timesdiff(CLOCK_MONOTONIC, replica->create_time, now, diff);
-		if (diff.tv_sec <= replica_timeout) {
+		if (diff.tv_sec <= (2 * replica_timeout)) {
 			REPLICA_LOG("Replica:%p added very recently, "
 			    "skipping rebuild.\n", replica);
 			continue;
@@ -996,6 +996,7 @@ replica_error:
 		replica->dont_free = 1;
 		replica->iofd = -1;
 		MTX_UNLOCK(&replica->r_mtx);
+		MTX_UNLOCK(&spec->rq_mtx);
 		shutdown(iofd, SHUT_RDWR);
 		close(iofd);
 		return -1;

@@ -58,6 +58,23 @@
 #define ISTGT_TRACE_CMD		0x04000000U
 
 extern __thread char tinfo[50];
+
+#ifdef	REPLICATION
+#include "replication_log.h"
+
+#define ISTGT_LOG		REPLICA_LOG
+#define ISTGT_NOTICELOG		REPLICA_NOTICELOG
+#define ISTGT_ERRLOG		REPLICA_ERRLOG
+#define ISTGT_WARNLOG		REPLICA_WARNLOG
+
+#define ISTGT_TRACELOG(FLAG, fmt, ...)					\
+	do {								\
+		if (g_trace_flag & FLAG)				\
+			fprintf(stderr, "%-18.18s:%4d: %-20.20s: " fmt,	\
+			     __func__, __LINE__, tinfo, ##__VA_ARGS__); \
+	} while (0)
+/* REPLICATION */
+#else
 #define ISTGT_LOG(fmt, ...)  syslog(LOG_NOTICE, 	 "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
 #define ISTGT_NOTICELOG(fmt, ...) syslog(LOG_NOTICE, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
 #define ISTGT_ERRLOG(fmt, ...) syslog(LOG_ERR,  	 "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
@@ -68,11 +85,13 @@ extern __thread char tinfo[50];
 		if (g_trace_flag & FLAG)		\
 			syslog(LOG_NOTICE, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__); \
 	} while (0)
+#endif
+
 #ifdef TRACEDUMP
 #define ISTGT_TRACEDUMP(FLAG, LABEL, BUF, LEN)				\
 	do {								\
 		if (g_trace_flag & (FLAG)) {				\
-			istgt_trace_dump((FLAG), (LABEL), (BUF), (LEN)); \
+			istgt_trace_dump((FLAG), (LABEL), (BUF), (LEN));\
 		}							\
 	} while (0)
 #else
