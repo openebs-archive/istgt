@@ -2589,8 +2589,12 @@ usage(void)
 	printf("options:\n");
 	printf(" -c config  config file (default %s)\n", DEFAULT_CONFIG);
 	printf(" -p pidfile use specific file\n");
+#ifdef	REPLICATION
+	printf(" -l log level (info, error, debug default:info)\n");
+#else
 	printf(" -l facility use specific syslog facility (default %s)\n",
 	    DEFAULT_LOG_FACILITY);
+#endif
 	printf(" -m mode    operational mode (default %d, 0=traditional, "
 	    "1=normal, 2=experimental)\n", DEFAULT_ISTGT_SWMODE);
 	printf(" -t flag    trace flag (all, net, iscsi, scsi, lu)\n");
@@ -2735,6 +2739,7 @@ main(int argc, char **argv)
 	int rc;
 #ifdef	REPLICATION
 	pthread_t replication_thread;
+	replication_log_level = LOG_LEVEL_INFO;
 #endif
 
 	(void) detach;
@@ -2781,7 +2786,22 @@ main(int argc, char **argv)
 			pidfile = optarg;
 			break;
 		case 'l':
+#ifdef	REPLICATION
+			if (strncmp(optarg, "debug", sizeof ("debug")) == 0)
+				replication_log_level = LOG_LEVEL_DEBUG;
+			else if (strncmp(optarg, "info", sizeof ("info")) == 0)
+				replication_log_level = LOG_LEVEL_INFO;
+			else if (strncmp(optarg, "error",
+			    sizeof ("error")) == 0)
+				replication_log_level = LOG_LEVEL_ERR;
+			else {
+				fprintf(stderr, "Log level should be one of "
+				    "\"debug\", \"info\" or \"error\"\n");
+				return (-1);
+			}
+#else
 			logfacility = optarg;
+#endif
 			break;
 		case 'm':
 			swmode = strtol(optarg, NULL, 10);

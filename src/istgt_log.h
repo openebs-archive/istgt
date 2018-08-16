@@ -60,26 +60,19 @@
 extern __thread char tinfo[50];
 
 #ifdef	REPLICATION
-#define ISTGT_LOG(fmt, ...)		fprintf(stderr, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
-#define ISTGT_NOTICELOG(fmt, ...)	fprintf(stderr, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
-#define ISTGT_ERRLOG(fmt, ...)		fprintf(stderr, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
-#define ISTGT_WARNLOG(fmt, ...)		fprintf(stderr, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
+#include "replication_log.h"
 
-#define ISTGT_TRACELOG(FLAG, fmt, ...)  \
+#define ISTGT_LOG		REPLICA_LOG
+#define ISTGT_NOTICELOG		REPLICA_NOTICELOG
+#define ISTGT_ERRLOG		REPLICA_ERRLOG
+#define ISTGT_WARNLOG		REPLICA_WARNLOG
+
+#define ISTGT_TRACELOG(FLAG, fmt, ...)					\
 	do {								\
-		if (g_trace_flag & FLAG)		\
-			fprintf(stderr, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__); \
+		if (g_trace_flag & FLAG)				\
+			fprintf(stderr, "%-18.18s:%4d: %-20.20s: " fmt,	\
+			     __func__, __LINE__, tinfo, ##__VA_ARGS__); \
 	} while (0)
-#ifdef TRACEDUMP
-#define ISTGT_TRACEDUMP(FLAG, LABEL, BUF, LEN)				\
-	do {								\
-		if (g_trace_flag & (FLAG)) {				\
-			istgt_trace_dump((FLAG), (LABEL), (BUF), (LEN)); \
-		}							\
-	} while (0)
-#else
-#define ISTGT_TRACEDUMP(FLAG, LABEL, BUF, LEN)
-#endif /* TRACEDUMP */
 /* REPLICATION */
 #else
 #define ISTGT_LOG(fmt, ...)  syslog(LOG_NOTICE, 	 "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
@@ -92,17 +85,18 @@ extern __thread char tinfo[50];
 		if (g_trace_flag & FLAG)		\
 			syslog(LOG_NOTICE, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__); \
 	} while (0)
+#endif
+
 #ifdef TRACEDUMP
 #define ISTGT_TRACEDUMP(FLAG, LABEL, BUF, LEN)				\
 	do {								\
 		if (g_trace_flag & (FLAG)) {				\
-			istgt_trace_dump((FLAG), (LABEL), (BUF), (LEN)); \
+			istgt_trace_dump((FLAG), (LABEL), (BUF), (LEN));\
 		}							\
 	} while (0)
 #else
 #define ISTGT_TRACEDUMP(FLAG, LABEL, BUF, LEN)
 #endif /* TRACEDUMP */
-#endif
 
 int istgt_set_log_facility(const char *facility);
 int istgt_set_log_priority(const char *priority);

@@ -16,6 +16,7 @@
 #include <syslog.h>
 #include <stdbool.h>
 #include "zrepl_prot.h"
+#include "replication_log.h"
 
 #define MAXREPLICA 5
 #define MAXEVENTS 64
@@ -182,17 +183,6 @@ void destroy_volume(spec_t *spec);
 
 /* Replica default timeout is 200 seconds */
 #define	REPLICA_DEFAULT_TIMEOUT	200
-
-#define REPLICA_LOG(fmt, ...)		fprintf(stderr, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
-#define REPLICA_NOTICELOG(fmt, ...)	fprintf(stderr, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
-#define REPLICA_ERRLOG(fmt, ...)	fprintf(stderr, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
-#define REPLICA_WARNLOG(fmt, ...)	fprintf(stderr, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
-
-#ifdef	DEBUG
-#define REPLICA_DEBUGLOG(fmt, ...)	fprintf(stderr, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
-#else
-#define REPLICA_DEBUGLOG(fmt, ...)
-#endif
 
 #define DECREMENT_INFLIGHT_REPLICA_IO_CNT(_r, _opcode)			\
 	do {								\
