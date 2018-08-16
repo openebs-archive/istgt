@@ -16,8 +16,8 @@ run_istgt ()
 	mkdir -p /tmp/cstor
 	cp istgt.conf istgtcontrol.conf /tmp/cstor/
 	cp istgt.conf istgtcontrol.conf /usr/local/etc/istgt/
-	cp istgt.full /usr/local/bin/istgt
-	cp istgtcontrol.full /usr/local/bin/istgtcontrol
+	cp istgt /usr/local/bin/istgt
+	cp istgtcontrol /usr/local/bin/istgtcontrol
 	ps -aux | grep "\./istgt" | grep -v grep | sudo kill -9 `awk '{print $2}'`
 	./init.sh volname=vol1 portal=127.0.0.1 size=$volume_size externalIP=127.0.0.1 replication_factor=3 consistency_factor=2
 }

@@ -102,29 +102,34 @@ DISTFILES = Makefile.in config.h.in build.h.in \
 default: all;
 
 istgt: $(ISTGT)
-	$(CC) $(LDFLAGS) -o ${@}.full $(ISTGT) $(LIBS)
-	objcopy --only-keep-debug ${@}.full ${@}.debug
-	objcopy --strip-debug --add-gnu-debuglink=${@}.debug ${@}.full ${@}
+	$(CC) $(LDFLAGS) -o ${@} $(ISTGT) $(LIBS)
+	objcopy --only-keep-debug ${@} ${@}.debug
+	objcopy --strip-debug --strip-unneeded ${@} ${@}
+	objcopy --add-gnu-debuglink=${@}.debug ${@}
 
 istgtcontrol: $(ISTGTCONTROL)
-	$(CC) $(LDFLAGS) -o ${@}.full $(ISTGTCONTROL) $(LIBS)
-	objcopy --only-keep-debug ${@}.full ${@}.debug
-	objcopy --strip-debug --add-gnu-debuglink=${@}.debug ${@}.full ${@}
+	$(CC) $(LDFLAGS) -o ${@} $(ISTGTCONTROL) $(LIBS)
+	objcopy --only-keep-debug ${@} ${@}.debug
+	objcopy --strip-debug --strip-unneeded ${@} ${@}
+	objcopy --add-gnu-debuglink=${@}.debug ${@}
 
 replication_test: $(REPLICATION_TEST)
-	$(CC) $(LDFLAGS) -o ${@}.full $(REPLICATION_TEST) $(LIBS)
-	objcopy --only-keep-debug ${@}.full ${@}.debug
-	objcopy --strip-debug --add-gnu-debuglink=${@}.debug ${@}.full ${@}
+	$(CC) $(LDFLAGS) -o ${@} $(REPLICATION_TEST) $(LIBS)
+	objcopy --only-keep-debug ${@} ${@}.debug
+	objcopy --strip-debug --strip-unneeded ${@} ${@}
+	objcopy --add-gnu-debuglink=${@}.debug ${@}
 
 istgt_integration: $(ISTGT_INTEGRATION)
-	$(CC) $(LDFLAGS) -o ${@}.full $(ISTGT_INTEGRATION) $(LIBS)
-	objcopy --only-keep-debug ${@}.full ${@}.debug
-	objcopy --strip-debug --add-gnu-debuglink=${@}.debug ${@}.full ${@}
+	$(CC) $(LDFLAGS) -o ${@} $(ISTGT_INTEGRATION) $(LIBS)
+	objcopy --only-keep-debug ${@} ${@}.debug
+	objcopy --strip-debug --strip-unneeded ${@} ${@}
+	objcopy --add-gnu-debuglink=${@}.debug ${@}
 
 mempool_test: $(MEMPOOL_TEST)
-	$(CC) $(LDFLAGS) -o ${@}.full $(MEMPOOL_TEST) $(LIBS)
-	objcopy --only-keep-debug ${@}.full ${@}.debug
-	objcopy --strip-debug --add-gnu-debuglink=${@}.debug ${@}.full ${@}
+	$(CC) $(LDFLAGS) -o ${@} $(MEMPOOL_TEST) $(LIBS)
+	objcopy --only-keep-debug ${@} ${@}.debug
+	objcopy --strip-debug --strip-unneeded ${@} ${@}
+	objcopy --add-gnu-debuglink=${@}.debug ${@}
 
 build_image:
 	sh ./package.sh
@@ -160,10 +165,9 @@ clean:
 	-rm -f *~
 	-rm -f istgt istgtcontrol
 	-rm -f istgt.debug istgtcontrol.debug
-	-rm -f istgt.full istgtcontrol.full
-	-rm -f replication_test replication_test.debug replication_test.full
-	-rm -f mempool_test mempool_test.debug mempool_test.full
-	-rm -f istgt_integration istgt_integration.debug istgt_integration.full
+	-rm -f replication_test replication_test.debug
+	-rm -f mempool_test mempool_test.debug
+	-rm -f istgt_integration istgt_integration.debug
 
 distclean: clean
 	-rm -f stamp-depend .depend
