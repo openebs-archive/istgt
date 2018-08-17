@@ -218,8 +218,10 @@ allocate_rcommon_mgmt_cmd(uint64_t buf_size)
 	rcomm_mgmt->caller_gone = 0;
 	rcomm_mgmt->buf_size = buf_size;
 	rcomm_mgmt->buf = NULL;
-	if (buf_size != 0)
+	if (buf_size != 0) {
 		rcomm_mgmt->buf = malloc(buf_size);
+		memset(rcomm_mgmt->buf, 0, buf_size);
+	}
 	return (rcomm_mgmt);
 }
 
@@ -357,6 +359,7 @@ send_prepare_for_rebuild_or_trigger_rebuild(spec_t *spec,
 
 	spec->target_replica = target_replica;
 	spec->rebuild_in_progress = true;
+	ASSERT(spec->target_replica);
 
 	replica_cnt = count_of_replicas_helping_rebuild(spec, healthy_replica);
 	assert(replica_cnt || (spec->replication_factor ==  1));
