@@ -103,33 +103,18 @@ default: all;
 
 istgt: $(ISTGT)
 	$(CC) $(LDFLAGS) -o ${@} $(ISTGT) $(LIBS)
-	objcopy --only-keep-debug ${@} ${@}.debug
-	objcopy --strip-debug --strip-unneeded ${@} ${@}
-	objcopy --add-gnu-debuglink=${@}.debug ${@}
 
 istgtcontrol: $(ISTGTCONTROL)
 	$(CC) $(LDFLAGS) -o ${@} $(ISTGTCONTROL) $(LIBS)
-	objcopy --only-keep-debug ${@} ${@}.debug
-	objcopy --strip-debug --strip-unneeded ${@} ${@}
-	objcopy --add-gnu-debuglink=${@}.debug ${@}
 
 replication_test: $(REPLICATION_TEST)
 	$(CC) $(LDFLAGS) -o ${@} $(REPLICATION_TEST) $(LIBS)
-	objcopy --only-keep-debug ${@} ${@}.debug
-	objcopy --strip-debug --strip-unneeded ${@} ${@}
-	objcopy --add-gnu-debuglink=${@}.debug ${@}
 
 istgt_integration: $(ISTGT_INTEGRATION)
 	$(CC) $(LDFLAGS) -o ${@} $(ISTGT_INTEGRATION) $(LIBS)
-	objcopy --only-keep-debug ${@} ${@}.debug
-	objcopy --strip-debug --strip-unneeded ${@} ${@}
-	objcopy --add-gnu-debuglink=${@}.debug ${@}
 
 mempool_test: $(MEMPOOL_TEST)
 	$(CC) $(LDFLAGS) -o ${@} $(MEMPOOL_TEST) $(LIBS)
-	objcopy --only-keep-debug ${@} ${@}.debug
-	objcopy --strip-debug --strip-unneeded ${@} ${@}
-	objcopy --add-gnu-debuglink=${@}.debug ${@}
 
 build_image:
 	sh ./package.sh
@@ -164,10 +149,7 @@ clean:
 	-rm -f a.out *.o *.core
 	-rm -f *~
 	-rm -f istgt istgtcontrol
-	-rm -f istgt.debug istgtcontrol.debug
-	-rm -f replication_test replication_test.debug
-	-rm -f mempool_test mempool_test.debug
-	-rm -f istgt_integration istgt_integration.debug
+	-rm -f replication_test istgt_integration mempool_test
 
 distclean: clean
 	-rm -f stamp-depend .depend
