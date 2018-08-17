@@ -15,8 +15,8 @@
 #include <sys/uio.h>
 #include <syslog.h>
 #include <stdbool.h>
-#include "zrepl_prot.h"
 #include "replication_log.h"
+#include "zrepl_prot.h"
 
 #define MAXREPLICA 5
 #define MAXEVENTS 64

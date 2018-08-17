@@ -73,6 +73,7 @@
 #include "istgt_lu.h"
 #include "istgt_proto.h"
 #ifdef	REPLICATION
+#include "replication.h"
 #include "istgt_integration.h"
 #endif
 #include "istgt_misc.h"
