@@ -3774,7 +3774,7 @@ static int
 istgt_iscsi_task_response(CONN_Ptr conn, ISTGT_LU_TASK_Ptr lu_task)
 {
 	ISTGT_LU_CMD_Ptr lu_cmd;
-	ISCSI_PDU rsp_pdu;
+	ISCSI_PDU rsp_pdu = { 0 };
 	uint8_t *rsp;
 	uint32_t task_tag;
 	uint32_t transfer_len;
