@@ -352,7 +352,7 @@ send_mgmt_ack(int fd, zvol_io_hdr_t *mgmt_ack_hdr, void *buf, int *zrepl_status_
 	int rc = 0, start;
 	struct iovec iovec[12];
 	int iovec_count;
-	zrepl_status_ack_t zrepl_status;
+	zrepl_status_ack_t zrepl_status = { 0 };
 	mgmt_ack_t mgmt_ack_data;
 	int ret = -1;
 	zvol_op_stat_t stats;
@@ -565,7 +565,7 @@ send_io_resp(int fd, zvol_io_hdr_t *io_hdr, void *buf)
 static void *
 errored_replica(void *arg)
 {
-	int zrepl_status_msg_cnt = 0;
+	int zrepl_status_msg_cnt = -1;
 	int ctrl_port = 6060;
 	int replica_port = *(int *)arg;
 	int replica_mgmt_sport = 0;
@@ -630,7 +630,7 @@ try_again:
 	iofd = rdata->datafd = -1;
 	read_rem_data = false;
 	read_rem_hdr = false;
-	zrepl_status_msg_cnt = 0;
+	zrepl_status_msg_cnt = -1;
 	replica_mgmt_sport = 0;
 
 	//Connect to controller to start handshake and connect to epoll
