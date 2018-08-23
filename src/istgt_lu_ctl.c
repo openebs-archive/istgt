@@ -578,6 +578,34 @@ error_return:
 	}
 	return ret;
 }
+
+static int
+istgt_uctl_cmd_mempoolstats(UCTL_Ptr uctl)
+{
+	ISTGT_LU_DISK *spec = NULL;
+	int rc = 0;
+	char *response = NULL;
+
+	istgt_lu_mempool_stats(&response);
+	istgt_uctl_snprintf(uctl, "%s  %s\n", uctl->cmd, response);
+	rc = istgt_uctl_writeline(uctl);
+	if (rc != UCTL_CMD_OK){
+		if (response)
+			free(response);
+		return rc;
+	}
+
+	if (response)
+		free(response);
+
+	istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
+	rc = istgt_uctl_writeline(uctl);
+	if (rc != UCTL_CMD_OK) {
+		return rc;
+	}
+
+	return UCTL_CMD_OK;
+}
 #endif
 
 static int
@@ -3227,6 +3255,7 @@ static ISTGT_UCTL_CMD_TABLE istgt_uctl_cmd_table[] =
 	{ "STATS", istgt_uctl_cmd_stats},
 #ifdef REPLICATION
 	{ "IOSTATS", istgt_uctl_cmd_iostats},
+	{ "MEMPOOL", istgt_uctl_cmd_mempoolstats},
 #endif
 	{ "SET", istgt_uctl_cmd_set},
 	{ "MAXTIME", istgt_uctl_cmd_maxtime},
