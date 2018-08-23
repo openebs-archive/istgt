@@ -116,6 +116,9 @@ get_from_mempool(rte_smempool_t *obj)
 		if (rc)
 			count++;
 
+		// sleep for 100usec to avoid busy looping
+		usleep(100);
+
 		if (count == 10) {
 			REPLICA_ERRLOG("mempool(%s) is empty\n",
 			    obj->ring->name);
