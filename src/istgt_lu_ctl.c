@@ -606,6 +606,40 @@ istgt_uctl_cmd_mempoolstats(UCTL_Ptr uctl)
 
 	return UCTL_CMD_OK;
 }
+
+static int
+istgt_uctl_cmd_replica_stats(UCTL_Ptr uctl)
+{
+	ISTGT_LU_Ptr lu = NULL;
+	const char *delim = ARGS_DELIM;
+	int rc = 0;
+	char *arg;
+	char *response = NULL;
+	char *volname = NULL;
+	arg = uctl->arg;
+
+	if (arg)
+		volname = strsepq(&arg, delim);
+
+	istgt_lu_replica_stats(volname, &response);
+	istgt_uctl_snprintf(uctl, "%s  %s\n", uctl->cmd, response);
+	rc = istgt_uctl_writeline(uctl);
+	if (rc != UCTL_CMD_OK){
+		if (response)
+			free(response);
+		return rc;
+	}
+
+	if (response)
+		free(response);
+
+	istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
+	rc = istgt_uctl_writeline(uctl);
+	if (rc != UCTL_CMD_OK) {
+		return rc;
+	}
+	return UCTL_CMD_OK;
+}
 #endif
 
 static int
@@ -3262,6 +3296,7 @@ static ISTGT_UCTL_CMD_TABLE istgt_uctl_cmd_table[] =
 #ifdef	REPLICATION
 	{ "SNAPCREATE", istgt_uctl_cmd_snap},
 	{ "SNAPDESTROY", istgt_uctl_cmd_snap},
+	{ "REPLICA", istgt_uctl_cmd_replica_stats},
 #endif
 	{ NULL,      NULL },
 };

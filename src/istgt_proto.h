@@ -93,6 +93,7 @@ ISTGT_LU_Ptr istgt_lu_find_target_by_volname(ISTGT_Ptr istgt, const char *target
 int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int, int);
 int istgt_lu_destroy_snapshot(spec_t *spec, char *snapname);
 void istgt_lu_mempool_stats(char **resp);
+void istgt_lu_replica_stats(char *volname, char **resp);
 #endif
 int istgt_lu_add_nexus(ISTGT_LU_Ptr lu, char *initiator_port);
 int istgt_lu_remove_nexus(ISTGT_LU_Ptr lu, char *initiator_port);

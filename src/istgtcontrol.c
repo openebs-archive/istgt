@@ -1151,6 +1151,7 @@ exec_stats(UCTL_Ptr uctl)
 	return UCTL_CMD_OK;
 }
 
+#ifdef	REPLICATION
 static int
 exec_snap(UCTL_Ptr uctl)
 {
@@ -1240,6 +1241,57 @@ exec_mempool_stats(UCTL_Ptr uctl)
 	}
 	return UCTL_CMD_OK;
 }
+
+static int
+exec_replica(UCTL_Ptr uctl)
+{
+	const char *delim = ARGS_DELIM;
+	char *arg;
+	char *result;
+	int rc = 0;
+	char *volname;
+
+	if (uctl->setargcnt >= 1)
+		volname = uctl->setargv[0];
+	else
+		volname = NULL;
+
+	if (volname)
+		uctl_snprintf(uctl, "%s \"%s\" \n", uctl->cmd, volname);
+	else
+		uctl_snprintf(uctl, "%s\n", uctl->cmd);
+
+	rc = uctl_writeline(uctl);
+	if (rc != UCTL_CMD_OK) {
+		return rc;
+	}
+
+	/* receive result */
+	while (1) {
+		rc = uctl_readline(uctl);
+		if (rc != UCTL_CMD_OK) {
+			return rc;
+		}
+		arg = trim_string(uctl->recvbuf);
+		result = strsepq(&arg, delim);
+		strupr(result);
+		if (strcmp(result, uctl->cmd) != 0)
+			break;
+		if (uctl->iqn != NULL) {
+			printf("%s\n", arg);
+		} else {
+			printf("%s\n", arg);
+		}
+	}
+	if (strcmp(result, "OK") != 0) {
+		if (is_err_req_auth(uctl, arg))
+			return UCTL_CMD_REQAUTH;
+		fprintf(stderr, "ERROR %s\n", arg);
+		return UCTL_CMD_ERR;
+	}
+	return UCTL_CMD_OK;
+}
+#endif
 
 static int
 exec_maxtime(UCTL_Ptr uctl)
@@ -1483,8 +1535,11 @@ static EXEC_TABLE exec_table[] =
 #endif
 	{"SET", exec_set, 0, 1},
 	{"MAXTIME", exec_maxtime, 0, 0},
+#ifdef	REPLICATION
 	{"SNAPCREATE", exec_snap, 2, 0},
 	{"SNAPDESTROY", exec_snap, 2, 0},
+	{"REPLICA", exec_replica, 0, 0},
+#endif
 	{ NULL,      NULL,          0, 0 },
 };
 
@@ -1963,10 +2018,11 @@ usage(void)
 	printf(" info       show connections of target\n");
 	printf(" iostats    displays iostats of volume\n");
 	printf(" maxtime    list the IOs which took maximum time to process\n");
-	printf(" set        set values for variables:\n");
 #ifdef	REPLICATION
+	printf(" replica    list replica and its stats\n");
 	printf(" mempool    get mempool details\n");
 #endif
+	printf(" set        set values for variables:\n");
 	printf("            Syntax: istgtcontrol -t <iqn(ALL to set globally)> set <variable number> <value>\n");
 	printf("            Variables :\n");
 	printf("            1\tsend_abrt_resp(Yes->1 No->0)\n");
@@ -2235,7 +2291,8 @@ main(int argc, char *argv[])
 		uctl->setargcnt = argc;
 	}
 	
-	if ((strcmp(cmd, "SNAPCREATE") == 0) || (strcmp(cmd, "SNAPDESTROY") == 0)) {
+	if ((strcmp(cmd, "SNAPCREATE") == 0) || (strcmp(cmd, "SNAPDESTROY") == 0) ||
+	    (strcmp(cmd, "REPLICA") == 0)) {
 		uctl->setargv = argv;
 		uctl->setargcnt = argc;
 	}

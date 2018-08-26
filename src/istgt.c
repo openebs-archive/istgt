@@ -94,6 +94,8 @@
 ISTGT g_istgt;
 #ifdef	REPLICATION
 extern int replica_timeout;
+extern rte_smempool_t rcmd_mempool;
+extern rte_smempool_t rcommon_cmd_mempool;
 #endif
 
 /*
@@ -2653,6 +2655,7 @@ void *timerfn(void *ptr __attribute__((__unused__)))
 	int ms;
 	struct timespec now, diff, last_check;
 	int check_interval = (replica_timeout / 4) * 1000;
+	unsigned count = 0;
 	clock_gettime(clockid, &last_check);
 #endif
 
@@ -2708,6 +2711,19 @@ void *timerfn(void *ptr __attribute__((__unused__)))
 			MTX_UNLOCK(&specq_mtx);
 			clock_gettime(clockid, &last_check);
 		}
+
+		/*
+		 * Check mempool stats. If 80% of mempool is consumed
+		 * then print a warning message.
+		 */
+		count = get_num_entries_from_mempool(&rcommon_cmd_mempool);
+		if (((rcommon_cmd_mempool.length * 20)/ 100) >= count)
+			ISTGT_NOTICELOG("mempool(%s) is 80%% used (available nodes %u)\n", rcommon_cmd_mempool.ring->name, count);
+
+		count = get_num_entries_from_mempool(&rcmd_mempool);
+		if (((rcmd_mempool.length * 20)/ 100) >= count)
+			ISTGT_NOTICELOG("mempool(%s) is 80%% used (available nodes %u)\n", rcmd_mempool.ring->name, count);
+
 #endif
 
 		sleep(60);
