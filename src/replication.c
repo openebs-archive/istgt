@@ -923,7 +923,9 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	strcpy(replica->ip, ack_data->ip);
 	replica->port = ack_data->port;
 	replica->state = ZVOL_STATUS_DEGRADED;
-	replica->initial_checkpointed_io_seq = ack_hdr->checkpointed_io_seq;
+	replica->initial_checkpointed_io_seq =
+	    MAX(ack_hdr->checkpointed_io_seq,
+	    ack_hdr->checkpointed_degraded_io_seq);
 
 	replica->pool_guid = ack_data->pool_guid;
 	replica->zvol_guid = ack_data->zvol_guid;
