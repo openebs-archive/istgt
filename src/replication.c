@@ -13,6 +13,7 @@
 #include <istgt_proto.h>
 #include <sys/prctl.h>
 #include <sys/eventfd.h>
+#include <json-c/json_object.h>
 #include "zrepl_prot.h"
 #include "replication.h"
 #include "istgt_integration.h"
@@ -1370,6 +1371,101 @@ done:
 	if (free_rcomm_mgmt == 1)
 		free(rcomm_mgmt);
 	return r;
+}
+
+static void
+get_replica_stats_json(replica_t *replica, struct json_object **jobj)
+{
+	struct json_object *j_stats;
+	struct timespec now;
+
+	j_stats = json_object_new_object();
+	json_object_object_add(j_stats, "replica",
+	    json_object_new_int64(replica->zvol_guid));
+
+	json_object_object_add(j_stats, "status",
+	    json_object_new_string((replica->state == ZVOL_STATUS_HEALTHY) ?
+	    "HEALTHY" : "DEGRADED"));
+
+	json_object_object_add(j_stats, "checkpointed_io_seq",
+	    json_object_new_int64(replica->initial_checkpointed_io_seq));
+
+	json_object_object_add(j_stats, "inflight_read",
+	    json_object_new_int64(replica->replica_inflight_read_io_cnt));
+
+	json_object_object_add(j_stats, "inflight_write",
+	    json_object_new_int64(replica->replica_inflight_write_io_cnt));
+
+	json_object_object_add(j_stats, "inflight_sync",
+	    json_object_new_int64(replica->replica_inflight_sync_io_cnt));
+
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	json_object_object_add(j_stats, "connected since(in seconds)",
+	    json_object_new_int64(now.tv_sec - replica->create_time.tv_sec));
+
+	*jobj = j_stats;
+}
+
+void
+istgt_lu_replica_stats(char *volname, char **resp)
+{
+	bool r;
+	replica_t *replica;
+	int rc;
+	spec_t *spec = NULL;
+	struct json_object *j_stats, *j_replica, *j_spec, *j_obj;
+	const char *json_string = NULL;
+	uint64_t resp_len = 0;
+
+	j_stats = json_object_new_array();
+
+	MTX_LOCK(&specq_mtx);
+
+	TAILQ_FOREACH(spec, &spec_q, spec_next) {
+		if (volname) {
+			if(!strncmp(spec->volname, volname, strlen(volname))) {
+				j_spec = json_object_new_object();
+				j_replica = json_object_new_array();
+
+				TAILQ_FOREACH(replica, &spec->rq, r_next) {
+					MTX_LOCK(&replica->r_mtx);
+					get_replica_stats_json(replica, &j_obj);
+					MTX_UNLOCK(&replica->r_mtx);
+
+					json_object_array_add(j_replica, j_obj);
+				}
+				json_object_object_add(j_spec,
+				    spec->volname, j_replica);
+				json_object_array_add(j_stats, j_spec);
+				break;
+			}
+		} else {
+			j_spec = json_object_new_object();
+			j_replica = json_object_new_array();
+
+			TAILQ_FOREACH(replica, &spec->rq, r_next) {
+				MTX_LOCK(&replica->r_mtx);
+				get_replica_stats_json(replica, &j_obj);
+				MTX_UNLOCK(&replica->r_mtx);
+
+				json_object_array_add(j_replica, j_obj);
+			}
+			json_object_object_add(j_spec, spec->volname, j_replica);
+			json_object_array_add(j_stats, j_spec);
+		}
+	}
+
+	MTX_UNLOCK(&specq_mtx);
+
+	j_obj = json_object_new_object();
+	json_object_object_add(j_obj, "Replica status", j_stats);
+	json_string = json_object_to_json_string_ext(j_obj,
+	    JSON_C_TO_STRING_PLAIN);
+	resp_len = strlen(json_string);
+	*resp = malloc(resp_len);
+	memset(*resp, 0, resp_len);
+	strncpy(*resp, json_string, resp_len);
+	json_object_put(j_obj);
 }
 
 /*
