@@ -2232,6 +2232,13 @@ istgt_pg_update(ISTGT_Ptr istgt)
 	return 0;
 }
 
+static void
+exit_handler(int sig)
+{
+        ISTGT_LOG("Caught SIGTERM. Exiting...");
+        exit(0);
+}
+
 /*
  * Print a stack trace before program exits.
  */
@@ -2391,10 +2398,13 @@ reload:
 	kqsocks[nidx] = istgt->sig_pipe[0];
 	nidx++;
 	*/
-
-//	signal(SIGTERM, SIG_IGN);
-//	signal(SIGINT, SIG_IGN);
-	signal(SIGPIPE, fatal_handler);
+	signal(SIGPIPE, SIG_IGN);
+	signal(SIGTERM, exit_handler);
+	signal(SIGABRT, fatal_handler);
+	signal(SIGFPE, fatal_handler);
+	signal(SIGSEGV, fatal_handler);
+	signal(SIGBUS, fatal_handler);
+	signal(SIGILL, fatal_handler);
 //	if (!istgt->daemon)
 //TODO
 /*	
@@ -2765,6 +2775,14 @@ main(int argc, char **argv)
 	const char *logfacility = NULL;
 	const char *logpriority = NULL;
 	CONFIG *config;
+
+	signal(SIGPIPE, SIG_IGN);
+	signal(SIGTERM, exit_handler);
+	signal(SIGABRT, fatal_handler);
+	signal(SIGFPE, fatal_handler);
+	signal(SIGSEGV, fatal_handler);
+	signal(SIGBUS, fatal_handler);
+	signal(SIGILL, fatal_handler);
 #if 0
 	pthread_t sigthread;
 	struct sigaction sigact, sigoldact_pipe, sigoldact_int, sigoldact_term;
@@ -3058,8 +3076,6 @@ initialize_error:
 		}
 	}
 */
-	/* setup signal handler thread */
-	signal(SIGPIPE, SIG_IGN);
 
 #if 0
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "setup signal handler\n");
