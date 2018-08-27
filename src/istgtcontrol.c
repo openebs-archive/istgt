@@ -1203,6 +1203,46 @@ exec_snap(UCTL_Ptr uctl)
 }
 
 static int
+exec_mempool_stats(UCTL_Ptr uctl)
+{
+	const char *delim = ARGS_DELIM;
+	char *arg;
+	char *result;
+	int rc = 0;
+
+	uctl_snprintf(uctl, "%s\n", uctl->cmd);
+	rc = uctl_writeline(uctl);
+	if (rc != UCTL_CMD_OK) {
+		return rc;
+	}
+
+	/* receive result */
+	while (1) {
+		rc = uctl_readline(uctl);
+		if (rc != UCTL_CMD_OK) {
+			return rc;
+		}
+		arg = trim_string(uctl->recvbuf);
+		result = strsepq(&arg, delim);
+		strupr(result);
+		if (strcmp(result, uctl->cmd) != 0)
+			break;
+		if (uctl->iqn != NULL) {
+			printf("%s\n", arg);
+		} else {
+			printf("%s\n", arg);
+		}
+	}
+	if (strcmp(result, "OK") != 0) {
+		if (is_err_req_auth(uctl, arg))
+			return UCTL_CMD_REQAUTH;
+		fprintf(stderr, "ERROR %s\n", arg);
+		return UCTL_CMD_ERR;
+	}
+	return UCTL_CMD_OK;
+}
+
+static int
 exec_replica(UCTL_Ptr uctl)
 {
 	const char *delim = ARGS_DELIM;
@@ -1491,6 +1531,7 @@ static EXEC_TABLE exec_table[] =
 	{"STATS", exec_stats, 0, 0 },
 #ifdef REPLICATION
 	{"IOSTATS", exec_iostats, 0, 0 },
+	{"MEMPOOL", exec_mempool_stats, 0, 0 },
 #endif
 	{"SET", exec_set, 0, 1},
 	{"MAXTIME", exec_maxtime, 0, 0},
@@ -1979,6 +2020,7 @@ usage(void)
 	printf(" maxtime    list the IOs which took maximum time to process\n");
 #ifdef	REPLICATION
 	printf(" replica    list replica and its stats\n");
+	printf(" mempool    get mempool details\n");
 #endif
 	printf(" set        set values for variables:\n");
 	printf("            Syntax: istgtcontrol -t <iqn(ALL to set globally)> set <variable number> <value>\n");

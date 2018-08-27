@@ -766,9 +766,11 @@ typedef struct istgt_lu_disk_t {
 	uint32_t rshiftreal;
 
 #ifdef	REPLICATION
-	/* inflight write IOs in replication layer */
+	/* inflight write IOs at spec layer */
 	uint64_t inflight_write_io_cnt;
-	/* inflight sync IOs in replication layer */
+	/* inflight read IOs at spec layer*/
+	uint64_t inflight_read_io_cnt;
+	/* inflight sync IOs at spec layer */
 	uint64_t inflight_sync_io_cnt;
 #endif
 
