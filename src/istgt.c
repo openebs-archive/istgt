@@ -77,6 +77,7 @@
 #include "istgt_integration.h"
 #endif
 #include "istgt_misc.h"
+#include <execinfo.h>
 
 #include <sys/time.h>
 
@@ -2231,6 +2232,36 @@ istgt_pg_update(ISTGT_Ptr istgt)
 	return 0;
 }
 
+static void
+exit_handler(int sig)
+{
+        ISTGT_LOG("Caught SIGTERM. Exiting...");
+        exit(0);
+}
+
+/*
+ * Print a stack trace before program exits.
+ */
+static void
+fatal_handler(int sig)
+{
+        void *array[20];
+        size_t size;
+
+        fprintf(stderr, "Fatal signal received: %d\n", sig);
+        fprintf(stderr, "Stack trace:\n");
+
+        size = backtrace(array, 20);
+        backtrace_symbols_fd(array, size, STDERR_FILENO);
+
+        /*  
+         * Hand over the sig for default processing to system to generate
+         * a coredump
+         */
+        signal(sig, SIG_DFL);
+        kill(getpid(), sig);
+}
+
 static int
 istgt_acceptor(ISTGT_Ptr istgt)
 {
@@ -2367,10 +2398,6 @@ reload:
 	kqsocks[nidx] = istgt->sig_pipe[0];
 	nidx++;
 	*/
-
-//	signal(SIGTERM, SIG_IGN);
-//	signal(SIGINT, SIG_IGN);
-	signal(SIGPIPE, SIG_IGN);
 //	if (!istgt->daemon)
 //TODO
 /*	
@@ -2741,6 +2768,14 @@ main(int argc, char **argv)
 	const char *logfacility = NULL;
 	const char *logpriority = NULL;
 	CONFIG *config;
+
+	signal(SIGPIPE, SIG_IGN);
+	signal(SIGTERM, exit_handler);
+	signal(SIGABRT, fatal_handler);
+	signal(SIGFPE, fatal_handler);
+	signal(SIGSEGV, fatal_handler);
+	signal(SIGBUS, fatal_handler);
+	signal(SIGILL, fatal_handler);
 #if 0
 	pthread_t sigthread;
 	struct sigaction sigact, sigoldact_pipe, sigoldact_int, sigoldact_term;
@@ -3034,8 +3069,6 @@ initialize_error:
 		}
 	}
 */
-	/* setup signal handler thread */
-	signal(SIGPIPE, SIG_IGN);
 
 #if 0
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "setup signal handler\n");
