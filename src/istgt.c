@@ -77,6 +77,7 @@
 #include "istgt_integration.h"
 #endif
 #include "istgt_misc.h"
+#include <execinfo.h>
 
 #include <sys/time.h>
 
@@ -2231,6 +2232,29 @@ istgt_pg_update(ISTGT_Ptr istgt)
 	return 0;
 }
 
+/*
+ * Print a stack trace before program exits.
+ */
+static void
+fatal_handler(int sig)
+{
+        void *array[20];
+        size_t size;
+
+        fprintf(stderr, "Fatal signal received: %d\n", sig);
+        fprintf(stderr, "Stack trace:\n");
+
+        size = backtrace(array, 20);
+        backtrace_symbols_fd(array, size, STDERR_FILENO);
+
+        /*  
+         * Hand over the sig for default processing to system to generate
+         * a coredump
+         */
+        signal(sig, SIG_DFL);
+        kill(getpid(), sig);
+}
+
 static int
 istgt_acceptor(ISTGT_Ptr istgt)
 {
@@ -2370,7 +2394,7 @@ reload:
 
 //	signal(SIGTERM, SIG_IGN);
 //	signal(SIGINT, SIG_IGN);
-	signal(SIGPIPE, SIG_IGN);
+	signal(SIGPIPE, fatal_handler);
 //	if (!istgt->daemon)
 //TODO
 /*	
