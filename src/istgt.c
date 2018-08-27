@@ -2398,13 +2398,6 @@ reload:
 	kqsocks[nidx] = istgt->sig_pipe[0];
 	nidx++;
 	*/
-	signal(SIGPIPE, SIG_IGN);
-	signal(SIGTERM, exit_handler);
-	signal(SIGABRT, fatal_handler);
-	signal(SIGFPE, fatal_handler);
-	signal(SIGSEGV, fatal_handler);
-	signal(SIGBUS, fatal_handler);
-	signal(SIGILL, fatal_handler);
 //	if (!istgt->daemon)
 //TODO
 /*	
