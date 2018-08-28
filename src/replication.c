@@ -146,6 +146,14 @@ do {									\
 				    (_value);				\
 				break;					\
 									\
+			case SBC_READ_6:				\
+			case SBC_READ_10:				\
+			case SBC_READ_12:				\
+			case SBC_READ_16:				\
+				_spec->inflight_read_io_cnt +=		\
+				    (_value);				\
+				break;					\
+									\
 			case SBC_SYNCHRONIZE_CACHE_10:			\
 			case SBC_SYNCHRONIZE_CACHE_16:			\
 				_spec->inflight_sync_io_cnt +=		\
@@ -3063,6 +3071,96 @@ destroy_replication_mempool(void)
 
 exit:
 	return rc;
+}
+
+void
+istgt_lu_mempool_stats(char **resp)
+{
+	struct json_object *j_resp, *j_obj, *j_array;
+	struct json_object *j_spec, *j_replica;
+	spec_t *spec;
+	replica_t *r;
+	uint64_t resp_len;
+	const char *json_string = NULL;
+
+	j_resp = json_object_new_array();
+
+	/* rcommon_cmd_mempool */
+	j_obj = json_object_new_object();
+	json_object_object_add(j_obj, "MEMPOOL",
+	    json_object_new_string(rcommon_cmd_mempool.ring->name));
+	json_object_object_add(j_obj, "Size",
+	    json_object_new_int64(rcommon_cmd_mempool.length));
+	json_object_object_add(j_obj, "Free",
+	    json_object_new_int64(get_num_entries_from_mempool(
+	    &rcommon_cmd_mempool)));
+
+	j_array = json_object_new_array();
+
+	MTX_LOCK(&specq_mtx);
+	TAILQ_FOREACH(spec, &spec_q, spec_next) {
+		j_spec = json_object_new_object();
+		json_object_object_add(j_spec, "volume",
+		    json_object_new_string(spec->volname));
+		json_object_object_add(j_spec, "in-flight read",
+		    json_object_new_int64(spec->inflight_read_io_cnt));
+		json_object_object_add(j_spec, "in-flight write",
+		    json_object_new_int64(spec->inflight_write_io_cnt));
+		json_object_object_add(j_spec, "in-flight sync",
+		    json_object_new_int64(spec->inflight_sync_io_cnt));
+		json_object_array_add(j_array, j_spec);
+	}
+	MTX_UNLOCK(&specq_mtx);
+	json_object_object_add(j_obj, "volume usage", j_array);
+	json_object_array_add(j_resp, j_obj);
+
+	/* rcommon_cmd_mempool end */
+
+	/* rcmd_mempool */
+	j_obj = json_object_new_object();
+	json_object_object_add(j_obj, "MEMPOOL",
+	    json_object_new_string(rcommon_cmd_mempool.ring->name));
+	json_object_object_add(j_obj, "Size",
+	    json_object_new_int64(rcmd_mempool.length));
+	json_object_object_add(j_obj, "Free",
+	    json_object_new_int64(get_num_entries_from_mempool(&rcmd_mempool)));
+
+	j_array = json_object_new_array();
+
+	MTX_LOCK(&specq_mtx);
+	TAILQ_FOREACH(spec, &spec_q, spec_next) {
+		TAILQ_FOREACH(r, &spec->rq, r_next) {
+			j_replica = json_object_new_object();
+			json_object_object_add(j_replica, "replica",
+			    json_object_new_int64(r->zvol_guid));
+			json_object_object_add(j_replica, "in-flight read",
+			    json_object_new_int64(
+			    r->replica_inflight_read_io_cnt));
+			json_object_object_add(j_replica, "in-flight write",
+			    json_object_new_int64(
+			    r->replica_inflight_write_io_cnt));
+			json_object_object_add(j_replica, "in-flight sync",
+			    json_object_new_int64(
+			    r->replica_inflight_sync_io_cnt));
+			json_object_array_add(j_array, j_replica);
+		}
+	}
+	MTX_UNLOCK(&specq_mtx);
+	json_object_object_add(j_obj, "replica usage", j_array);
+	json_object_array_add(j_resp, j_obj);
+
+	/* rcmd_mempool end */
+
+	j_obj = json_object_new_object();
+	json_object_object_add(j_obj, "mempool list", j_resp);
+
+	json_string = json_object_to_json_string_ext(j_obj,
+	    JSON_C_TO_STRING_PLAIN);
+	resp_len = strlen(json_string);
+	*resp = malloc(resp_len);
+	memset(*resp, 0, resp_len);
+	strncpy(*resp, json_string, resp_len);
+	json_object_put(j_obj);
 }
 
 /*
