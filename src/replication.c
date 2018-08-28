@@ -323,8 +323,9 @@ enqueue_prepare_for_rebuild(spec_t *spec, replica_t *replica,
 	rcomm_mgmt->cmds_sent++;
 
 	if (write(replica->mgmt_eventfd1, &num, sizeof (num)) != sizeof (num)) {
-		REPLICA_NOTICELOG("Failed to inform to mgmt_eventfd "
-		    "for replica(%p)\n", replica);
+		REPLICA_NOTICELOG("Failed to inform to mgmt_eventfd for "
+		    "replica(%lu) (%s:%d) mgmt_fd:%d\n", replica->zvol_guid,
+		    replica->ip, replica->port, replica->mgmt_fd);
 		ret = -1;
 		rcomm_mgmt->cmds_failed++;
 		/*
@@ -457,8 +458,9 @@ start_rebuild(void *buf, replica_t *replica, uint64_t data_len)
 
 	if (write(replica->mgmt_eventfd1, &num, sizeof (num)) !=
 	    sizeof (num)) {
-		REPLICA_NOTICELOG("Failed to inform to mgmt_eventfd "
-		    "for replica(%lu)\n", replica->zvol_guid);
+		REPLICA_NOTICELOG("Failed to inform to mgmt_eventfd for "
+		    "replica(%lu) (%s:%d) mgmt_fd:%d\n", replica->zvol_guid,
+		    replica->ip, replica->port, replica->mgmt_fd);
 		MTX_LOCK(&replica->r_mtx);
 		clear_mgmt_cmd(replica, mgmt_cmd);
 		MTX_UNLOCK(&replica->r_mtx);
@@ -1102,7 +1104,9 @@ send_replica_handshake_query(replica_t *replica, spec_t *spec)
 	TAILQ_INSERT_TAIL(&replica->mgmt_cmd_queue, mgmt_cmd, mgmt_cmd_next);
 	MTX_UNLOCK(&replica->r_mtx);
 	if (write(replica->mgmt_eventfd1, &num, sizeof (num)) != sizeof (num)) {
-		REPLICA_NOTICELOG("Failed to inform to mgmt_eventfd for replica(%p)\n", replica);
+		REPLICA_NOTICELOG("Failed to inform to mgmt_eventfd for "
+		    "replica(%lu) (%s:%d) mgmt_fd:%d\n", replica->zvol_guid,
+		    replica->ip, replica->port, replica->mgmt_fd);
 		ret = -1;
 		MTX_LOCK(&replica->r_mtx);
 		clear_mgmt_cmd(replica, mgmt_cmd);
@@ -1659,8 +1663,9 @@ update_replica_status(spec_t *spec, replica_t *replica)
 	MTX_UNLOCK(&replica->r_mtx);
 
 	if(last_state != repl_status->state) {
-		REPLICA_NOTICELOG("Replica(%lu) state changed from %s to %s\n",
-		    replica->zvol_guid,
+		REPLICA_NOTICELOG("Replica(%lu) (%s:%d) mgmt_fd:%d state "
+		    "changed from %s to %s\n", replica->zvol_guid, replica->ip,
+		    replica->port, replica->mgmt_fd,
 		    (last_state == ZVOL_STATUS_HEALTHY) ? "healthy" :
 		    "degraded",
 		    (repl_status->state == ZVOL_STATUS_HEALTHY) ? "healthy" :
@@ -2131,7 +2136,8 @@ inform_data_conn(replica_t *r)
 	r->disconnect_conn = 1;
 	if (write(r->mgmt_eventfd2, &num, sizeof (num)) != sizeof (num))
 		REPLICA_NOTICELOG("Failed to inform err to data_conn for "
-		    "replica(%s:%d)\n", r->ip, r->port);
+		    "replica(%lu) (%s:%d) mgmt_fd:%d\n", r->zvol_guid, r->ip,
+		    r->port, r->mgmt_fd);
 }
 
 /*
@@ -2201,8 +2207,10 @@ empty_mgmt_q_of_replica(replica_t *r)
 				default:
 					break;
 			}
-			REPLICA_NOTICELOG("mgmt command(%d) failed for replica(%lu)\n",
-			    mgmt_cmd->io_hdr->opcode, r->zvol_guid);
+			REPLICA_NOTICELOG("mgmt command(%d) failed for "
+			    "replica(%lu) (%s:%d) mgmt_fd:%d\n",
+			    mgmt_cmd->io_hdr->opcode, r->zvol_guid, r->ip,
+			    r->port, r->mgmt_fd);
 		}
 		clear_mgmt_cmd(r, mgmt_cmd);
 	}
@@ -2626,8 +2634,8 @@ handle_mgmt_conn_error(replica_t *r, int sfd, struct epoll_event *events, int ev
 	r->mgmt_eventfd1 = -1;
 	close_fd(epollfd, mgmt_eventfd1);
 
-	REPLICA_NOTICELOG("Replica(%lu) got disconnected from %s:%d\n",
-	    r->zvol_guid, r->ip, r->port);
+	REPLICA_NOTICELOG("Replica(%lu) got disconnected from %s:%d "
+	    "mgmt_fd:%d\n", r->zvol_guid, r->ip, r->port, r->mgmt_fd);
 
 	for (i = 0; i < ev_count; i++) {
 		if (events[i].data.fd == sfd) {
