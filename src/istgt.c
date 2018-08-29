@@ -2235,7 +2235,7 @@ istgt_pg_update(ISTGT_Ptr istgt)
 static void
 exit_handler(int sig)
 {
-        ISTGT_LOG("Caught SIGTERM. Exiting...");
+        ISTGT_LOG("Caught SIGTERM(%d). Exiting...", sig);
         exit(0);
 }
 
@@ -2682,7 +2682,6 @@ void *timerfn(void *ptr __attribute__((__unused__)))
 	int ms;
 	struct timespec now, diff, last_check;
 	int check_interval = (replica_timeout / 4) * 1000;
-	unsigned count = 0;
 	clock_gettime(clockid, &last_check);
 #endif
 
@@ -2738,19 +2737,6 @@ void *timerfn(void *ptr __attribute__((__unused__)))
 			MTX_UNLOCK(&specq_mtx);
 			clock_gettime(clockid, &last_check);
 		}
-
-		/*
-		 * Check mempool stats. If 80% of mempool is consumed
-		 * then print a warning message.
-		 */
-		count = get_num_entries_from_mempool(&rcommon_cmd_mempool);
-		if (((rcommon_cmd_mempool.length * 20)/ 100) >= count)
-			ISTGT_NOTICELOG("mempool(%s) is 80%% used (available nodes %u)\n", rcommon_cmd_mempool.ring->name, count);
-
-		count = get_num_entries_from_mempool(&rcmd_mempool);
-		if (((rcmd_mempool.length * 20)/ 100) >= count)
-			ISTGT_NOTICELOG("mempool(%s) is 80%% used (available nodes %u)\n", rcmd_mempool.ring->name, count);
-
 #endif
 
 		sleep(60);
@@ -2950,19 +2936,25 @@ main(int argc, char **argv)
 	}
 
 	ISTGT_NOTICELOG("%s: starting\n", istgtvers);
+#ifndef	REPLICATION
 	poolinit();
+#endif
 	/* read config files */
 	config = istgt_allocate_config();
 	rc = istgt_read_config(config, config_file);
 	if (rc < 0) {
 		fprintf(stderr, "config error\n");
+#ifndef	REPLICATION
 		poolfini();
+#endif
 		exit(EXIT_FAILURE);
 	}
 	if (config->section == NULL) {
 		fprintf(stderr, "empty config\n");
 		istgt_free_config(config);
+#ifndef	REPLICATION
 		poolfini();
+#endif
 		exit(EXIT_FAILURE);
 	}
 	istgt->config = config;
@@ -3014,17 +3006,13 @@ main(int argc, char **argv)
 initialize_error:
 		istgt_close_log();
 		istgt_free_config(config);
+#ifndef	REPLICATION
 		poolfini();
+#endif
 		exit(EXIT_FAILURE);
 	}
 
 #ifdef	REPLICATION
-	/* Initialize mempool needed for replication*/
-	if (initialize_replication_mempool(false)) {
-		ISTGT_ERRLOG("Failed to initialize mempool\n");
-		goto initialize_error;
-	}
-
 	/* Initialize replication library */
 	rc = initialize_replication();
 	if(rc != 0) {
@@ -3227,7 +3215,9 @@ initialize_error:
 		config = istgt->config;
 		istgt->config = NULL;
 		istgt_free_config(config);
+#ifndef	REPLICATION
 		poolfini();
+#endif
 		exit(EXIT_FAILURE);
 	}
 
@@ -3247,14 +3237,16 @@ initialize_error:
 	ISTGT_NOTICELOG("%s exiting", istgtvers);
 
 	/* stop signal thread */
-	#if 0
+#if 0
 	rc = pthread_join(sigthread, NULL);
 	if (rc != 0) {
 		ISTGT_ERRLOG("pthread_join() failed\n");
+#ifndef	REPLICATION
 		poolfini();
+#endif
 		exit (EXIT_FAILURE);
 	}
-	#endif
+#endif
 
 	/* cleanup */
 	istgt_close_all_portals(istgt);
@@ -3264,15 +3256,12 @@ initialize_error:
 	istgt_shutdown(istgt);
 	istgt_close_log();
 
-#ifdef	REPLICATION
-	/* Destroy mempool created for replication */
-	(void)destroy_replication_mempool();
-#endif
-
 	config = istgt->config;
 	istgt->config = NULL;
 	istgt_free_config(config);
 	istgt->state = ISTGT_STATE_SHUTDOWN;
+#ifndef	REPLICATION
 	poolfini();
+#endif
 	return 0;
 }

@@ -24,14 +24,14 @@
 #define MAXIPLEN 56
 #define MAXNAMELEN 256
 
-#define RCOMMON_CMD_MEMPOOL_ENTRIES     100000
-
 #include "istgt_lu.h"
 
 /*
  * NOTE : RCMD_MEMPOOL_ENTRIES depends on number of replicas ISGT can support
+ * current limit is 524288 per replica. Replica will be able to serve
+ * 524288 in-flight IOs.
  */
-#define RCMD_MEMPOOL_ENTRIES    (3 * RCOMMON_CMD_MEMPOOL_ENTRIES)
+#define RCMD_MEMPOOL_ENTRIES    (1 << 19)
 
 #define MAX(a,b) (((a)>(b))?(a):(b))
 
@@ -169,8 +169,6 @@ int make_socket_non_blocking(int);
 int send_mgmtack(int, zvol_op_code_t, void *, char *, int);
 int zvol_handshake(spec_t *, replica_t *);
 void accept_mgmt_conns(int, int);
-int initialize_replication_mempool(bool should_fail);
-int destroy_replication_mempool(void);
 void clear_rcomm_cmd(rcommon_cmd_t *);
 void ask_replica_status(spec_t *spec, replica_t *replica);
 extern void * replica_thread(void *);

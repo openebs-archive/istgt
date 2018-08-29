@@ -607,7 +607,7 @@ again:
 					if (count < 0) {
 						rc = -1;
 						goto error;
-					} else if (count != mgmtio->len) {
+					} else if ((uint64_t)count != mgmtio->len) {
 						REPLICA_ERRLOG("failed to getch mgmt data.. got only %ld bytes out of %lu\n",
 						    count, mgmtio->len);
 						rc = -1;

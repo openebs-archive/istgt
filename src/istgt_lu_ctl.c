@@ -582,7 +582,6 @@ error_return:
 static int
 istgt_uctl_cmd_mempoolstats(UCTL_Ptr uctl)
 {
-	ISTGT_LU_DISK *spec = NULL;
 	int rc = 0;
 	char *response = NULL;
 
@@ -610,7 +609,6 @@ istgt_uctl_cmd_mempoolstats(UCTL_Ptr uctl)
 static int
 istgt_uctl_cmd_replica_stats(UCTL_Ptr uctl)
 {
-	ISTGT_LU_Ptr lu = NULL;
 	const char *delim = ARGS_DELIM;
 	int rc = 0;
 	char *arg;
@@ -3539,10 +3537,6 @@ istgt_create_uctl(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock, struct sockaddr 
 			goto error_return;
 		}
 	}
-
-	printf("sock=%d, addr=%s, peer=%s\n",
-	    sock, uctl->saddr,
-	    uctl->caddr);
 
 	/* wildcard? */
 	if (uctl->family != AF_UNIX) {

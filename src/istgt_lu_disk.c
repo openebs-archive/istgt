@@ -282,9 +282,9 @@ istgt_lu_disk_open_raw(ISTGT_LU_DISK *spec, int flags, int mode)
 int
 istgt_lu_disk_close_raw(ISTGT_LU_DISK *spec)
 {
+#ifndef	REPLICATION
 	int rc;
 
-#ifndef	REPLICATION
 	if (spec->fd == -1)
 		return 0;
 	rc = close(spec->fd);
@@ -300,8 +300,8 @@ istgt_lu_disk_close_raw(ISTGT_LU_DISK *spec)
 static int64_t
 istgt_lu_disk_seek_raw(ISTGT_LU_DISK *spec, uint64_t offset)
 {
-	off_t rc;
 #ifndef	REPLICATION
+	off_t rc;
 	rc = lseek(spec->fd, (off_t) offset, SEEK_SET);
 	if (rc < 0) {
 		return -1;
@@ -314,7 +314,7 @@ istgt_lu_disk_seek_raw(ISTGT_LU_DISK *spec, uint64_t offset)
 static int64_t
 istgt_lu_disk_sync_raw(ISTGT_LU_DISK *spec, uint64_t offset, uint64_t nbytes)
 {
-	int64_t rc;
+	int64_t rc = 0;
 
 #ifndef	REPLICATION
 	rc = (int64_t) fsync(spec->fd);
@@ -2583,7 +2583,6 @@ istgt_lu_disk_scsi_mode_sense_page(ISTGT_LU_DISK *spec, CONN_Ptr conn, uint8_t *
 	uint8_t *cp;
 	int len = 0;
 	int plen;
-	int rc;
 	int i;
 
 #if 0
@@ -2671,7 +2670,7 @@ istgt_lu_disk_scsi_mode_sense_page(ISTGT_LU_DISK *spec, CONN_Ptr conn, uint8_t *
 		//BDADD8(&cp[2], 1, 0); /* RCD */
 #ifndef	REPLICATION
 		{
-			int fd;
+			int fd, rc;
 			fd = spec->fd;
 			rc = fcntl(fd , F_GETFL, 0);
 			if (rc != -1 && !(rc & O_FSYNC)) {
@@ -3053,6 +3052,7 @@ istgt_lu_disk_scsi_mode_select_page(ISTGT_LU_DISK *spec, CONN_Ptr conn, uint8_t 
 			}
 			wce = BGET8(&data[2], 2); /* WCE */
 			rcd = BGET8(&data[2], 0); /* RCD */
+			(void) wce;
 #ifndef	REPLICATION
 			{
 				int fd;
@@ -3683,6 +3683,7 @@ istgt_lu_parse_transport_id(char **tid, uint8_t *data, int len)
 	return hlen + plen;
 }
 
+#ifndef	REPLICATION
 static int
 istgt_lu_disk_scsi_persistent_reserve_in(ISTGT_LU_DISK *spec, CONN_Ptr conn __attribute__((__unused__)), ISTGT_LU_CMD_Ptr lu_cmd, int sa, uint8_t *data, int alloc_len __attribute__((__unused__)))
 {
@@ -3834,6 +3835,7 @@ istgt_lu_disk_scsi_persistent_reserve_in(ISTGT_LU_DISK *spec, CONN_Ptr conn __at
 	lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
 	return total;
 }
+#endif
 
 static int
 istgt_lu_disk_update_reservation(ISTGT_LU_DISK *spec)
@@ -6057,7 +6059,7 @@ istgt_lu_disk_lbwrite_ats(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr l
 	uint64_t blen;
 	uint64_t offset;
 	uint64_t nbytes;
-	int64_t rc;
+	int64_t rc = 0;
 	int diskIoPendingL = 0, markedForFree = 0;
 	int markedForReturn = 0;
 	int freedata = 0;
@@ -6591,7 +6593,7 @@ istgt_lu_disk_reset(ISTGT_LU_Ptr lu, int lun , istgt_ua_type ua_type)
 {
 	ISTGT_LU_DISK *spec;
 	IT_NEXUS *nexus;
-	int rc, cleared = 0;
+	int cleared = 0;
 
 	if (lu == NULL) {
 		return -1;
@@ -6626,8 +6628,7 @@ istgt_lu_disk_reset(ISTGT_LU_Ptr lu, int lun , istgt_ua_type ua_type)
 #ifndef	REPLICATION
 	/* re-open file */
 	if (!spec->lu->readonly) {
-		rc = spec->sync(spec, 0, spec->size);
-		if (rc < 0) {
+		if (spec->sync(spec, 0, spec->size) < 0) {
 			ISTGT_ERRLOG("LU%d: LUN%d: lu_disk_sync() failed\n",
 			lu->num, lun);
 			/* ignore error */

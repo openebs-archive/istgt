@@ -145,7 +145,6 @@ do {														\
 static void
 exit_errored_replica(void *arg)
 {
-	int rc = 0;
 	errored_replica_data_t *rdata = (errored_replica_data_t *)arg;
 
 	if (rdata->mgmtfd != -1)
@@ -694,7 +693,7 @@ try_again:
 						rc = REPL_TEST_RESTART;
 						goto error;
 					}
-					ASSERT(count == mgmtio->len);
+					ASSERT((uint64_t)count == mgmtio->len);
 
 					CONNECTION_CLOSE_ERROR_EPOLL(mgmtfd, epfd, rc, error, err_freq, ERROR_TYPE_MGMT);
 					CONNECTION_CLOSE_ERROR_EPOLL(iofd, epfd, rc, error, err_freq, ERROR_TYPE_DATA);

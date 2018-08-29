@@ -17,7 +17,6 @@
 #define	WRITE_PARTIAL	1
 #define	WRITE_COMPLETED	2
 
-extern rte_smempool_t rcmd_mempool;
 /* default timeout is set to REPLICA_DEFAULT_TIMEOUT seconds */
 int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 
@@ -91,7 +90,7 @@ int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 			    RECEIVED_ERR;				\
 		}							\
 		free(rcmd->iov_data);					\
-		put_to_mempool(&rcmd_mempool, rcmd);			\
+		free(rcmd);						\
 		rcmd = next_rcmd;					\
 		_cnt++;							\
 	}								\
@@ -563,7 +562,7 @@ start:
 			rcomm_cmd->resp_list[idx].status |= RECEIVED_OK;
 
 		free(r->ongoing_io->iov_data);
-		put_to_mempool(&rcmd_mempool, r->ongoing_io);
+		free(r->ongoing_io);
 		r->ongoing_io = NULL;
 		r->io_read = 0;
 		r->ongoing_io_buf = NULL;
