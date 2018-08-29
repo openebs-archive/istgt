@@ -30,12 +30,8 @@ cstor_conn_ops_t cstor_ops = {
 	.conn_connect = replication_connect,
 };
 
-rte_smempool_t rcmd_mempool;
-rte_smempool_t rcommon_cmd_mempool;
-size_t rcmd_mempool_count = RCMD_MEMPOOL_ENTRIES;
-size_t rcommon_cmd_mempool_count = RCOMMON_CMD_MEMPOOL_ENTRIES;
-
 int replication_initialized = 0;
+size_t rcmd_mempool_count = RCMD_MEMPOOL_ENTRIES;
 
 static int start_rebuild(void *buf, replica_t *replica, uint64_t data_len);
 static void handle_mgmt_conn_error(replica_t *r, int sfd, struct epoll_event *events,
@@ -48,7 +44,8 @@ static int handle_mgmt_event_fd(replica_t *replica);
 
 #define build_rcomm_cmd(rcomm_cmd, cmd, offset, nbytes) 						\
 	do {								\
-		rcomm_cmd = get_from_mempool(&rcommon_cmd_mempool);	\
+		rcomm_cmd = malloc(sizeof (*rcomm_cmd));		\
+		memset(rcomm_cmd, 0, sizeof (*rcomm_cmd));		\
 		rcomm_cmd->copies_sent = 0;				\
 		rcomm_cmd->total_len = 0;				\
 		rcomm_cmd->offset = offset;				\
@@ -580,7 +577,6 @@ is_replica_newly_connected(spec_t *spec, replica_t *new_replica)
 	known_replica_t *kr = NULL;
 	int familiar_replicas = 0;
 	bool newly_connected = false, found = false;
-	replica_t *old_replica = NULL;
 
 	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 
@@ -1421,9 +1417,7 @@ get_replica_stats_json(replica_t *replica, struct json_object **jobj)
 void
 istgt_lu_replica_stats(char *volname, char **resp)
 {
-	bool r;
 	replica_t *replica;
-	int rc;
 	spec_t *spec = NULL;
 	struct json_object *j_stats, *j_replica, *j_spec, *j_obj;
 	const char *json_string = NULL;
@@ -1473,7 +1467,7 @@ istgt_lu_replica_stats(char *volname, char **resp)
 	json_object_object_add(j_obj, "Replica status", j_stats);
 	json_string = json_object_to_json_string_ext(j_obj,
 	    JSON_C_TO_STRING_PLAIN);
-	resp_len = strlen(json_string);
+	resp_len = strlen(json_string) + 1;
 	*resp = malloc(resp_len);
 	memset(*resp, 0, resp_len);
 	strncpy(*resp, json_string, resp_len);
@@ -2244,8 +2238,8 @@ respond_with_error_for_all_outstanding_mgmt_ios(replica_t *r)
 		    sizeof(zvol_io_hdr_t));				\
 		memset(ldata, 0, sizeof(zvol_io_hdr_t) +		\
 		    sizeof(struct zvol_io_rw_hdr));			\
-		rcmd = get_from_mempool(&rcmd_mempool);			\
-		memset(rcmd, 0, sizeof(*rcmd));				\
+		rcmd = malloc(sizeof(*rcmd));				\
+		memset(rcmd, 0, sizeof (*rcmd));			\
 		rcmd->opcode = rcomm_cmd->opcode;			\
 		rcmd->offset = rcomm_cmd->offset;			\
 		rcmd->data_len = rcomm_cmd->data_len;			\
@@ -2432,6 +2426,7 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	uint64_t num_read_ios = 0;
 	uint64_t inflight_read_ios = 0;
 
+	(void) cmd_read;
 	CHECK_IO_TYPE(cmd, cmd_read, cmd_write, cmd_sync);
 
 again:
@@ -2959,8 +2954,8 @@ initialize_volume(spec_t *spec, int replication_factor, int consistency_factor)
 	VERIFY(replication_factor > 0);
 	VERIFY(consistency_factor > 0);
 
-        init_mempool(&spec->rcommon_deadlist, rcmd_mempool_count, 0, 0,
-            "rcmd_mempool", NULL, NULL, NULL, false);
+	init_mempool(&spec->rcommon_deadlist, rcmd_mempool_count, 0, 0,
+	    "rcmd_mempool", NULL, NULL, NULL, false);
 
 	spec->replication_factor = replication_factor;
 	spec->consistency_factor = consistency_factor;
@@ -2997,87 +2992,11 @@ initialize_volume(spec_t *spec, int replication_factor, int consistency_factor)
 	return 0;
 }
 
-/*
- * This function initializes mempool for replica's command(rcmd_t) and
- * spec's command(rcommon_cmd_t)
- */
-int
-initialize_replication_mempool(bool should_fail)
-{
-	int rc = 0;
-
-	rc = init_mempool(&rcmd_mempool, rcmd_mempool_count, sizeof (rcmd_t), 0,
-	    "rcmd_mempool", NULL, NULL, NULL, true);
-	if (rc == -1) {
-		ISTGT_ERRLOG("Failed to create mempool for command\n");
-		goto error;
-	} else if (rc) {
-		ISTGT_NOTICELOG("rcmd mempool initialized with %u entries\n",
-		    rcmd_mempool.length);
-		if (should_fail) {
-			goto error;
-		}
-		rc = 0;
-	}
-
-	rc = init_mempool(&rcommon_cmd_mempool, rcommon_cmd_mempool_count,
-	    sizeof (rcommon_cmd_t), 0, "rcommon_mempool", NULL, NULL, NULL, true);
-	if (rc == -1) {
-		ISTGT_ERRLOG("Failed to create mempool for command\n");
-		goto error;
-	} else if (rc) {
-		ISTGT_NOTICELOG("rcmd mempool initialized with %u entries\n",
-		    rcommon_cmd_mempool.length);
-		if (should_fail) {
-			goto error;
-		}
-		rc = 0;
-	}
-
-	goto exit;
-
-error:
-	if (rcmd_mempool.ring)
-		destroy_mempool(&rcmd_mempool);
-	if (rcommon_cmd_mempool.ring)
-		destroy_mempool(&rcommon_cmd_mempool);
-
-exit:
-	return rc;
-}
-
-/*
- * This function destroys mempool created for replica's command(rcmd_t)
- * and spec's command(rcommon_cmd_t)
- */
-int
-destroy_replication_mempool(void)
-{
-	int rc = 0;
-
-	rc = destroy_mempool(&rcmd_mempool);
-	if (rc) {
-		ISTGT_ERRLOG("Failed to destroy mempool for rcmd.. err(%d)\n",
-		    rc);
-		goto exit;
-	}
-
-	rc = destroy_mempool(&rcommon_cmd_mempool);
-	if (rc) {
-		ISTGT_ERRLOG("Failed to destroy mempool for rcommon_cmd.."
-		    " err(%d)\n", rc);
-		goto exit;
-	}
-
-exit:
-	return rc;
-}
-
 void
 istgt_lu_mempool_stats(char **resp)
 {
 	struct json_object *j_resp, *j_obj, *j_array;
-	struct json_object *j_spec, *j_replica;
+	struct json_object *j_replica;
 	spec_t *spec;
 	replica_t *r;
 	uint64_t resp_len;
@@ -3085,46 +3004,7 @@ istgt_lu_mempool_stats(char **resp)
 
 	j_resp = json_object_new_array();
 
-	/* rcommon_cmd_mempool */
 	j_obj = json_object_new_object();
-	json_object_object_add(j_obj, "MEMPOOL",
-	    json_object_new_string(rcommon_cmd_mempool.ring->name));
-	json_object_object_add(j_obj, "Size",
-	    json_object_new_int64(rcommon_cmd_mempool.length));
-	json_object_object_add(j_obj, "Free",
-	    json_object_new_int64(get_num_entries_from_mempool(
-	    &rcommon_cmd_mempool)));
-
-	j_array = json_object_new_array();
-
-	MTX_LOCK(&specq_mtx);
-	TAILQ_FOREACH(spec, &spec_q, spec_next) {
-		j_spec = json_object_new_object();
-		json_object_object_add(j_spec, "volume",
-		    json_object_new_string(spec->volname));
-		json_object_object_add(j_spec, "in-flight read",
-		    json_object_new_int64(spec->inflight_read_io_cnt));
-		json_object_object_add(j_spec, "in-flight write",
-		    json_object_new_int64(spec->inflight_write_io_cnt));
-		json_object_object_add(j_spec, "in-flight sync",
-		    json_object_new_int64(spec->inflight_sync_io_cnt));
-		json_object_array_add(j_array, j_spec);
-	}
-	MTX_UNLOCK(&specq_mtx);
-	json_object_object_add(j_obj, "volume usage", j_array);
-	json_object_array_add(j_resp, j_obj);
-
-	/* rcommon_cmd_mempool end */
-
-	/* rcmd_mempool */
-	j_obj = json_object_new_object();
-	json_object_object_add(j_obj, "MEMPOOL",
-	    json_object_new_string(rcommon_cmd_mempool.ring->name));
-	json_object_object_add(j_obj, "Size",
-	    json_object_new_int64(rcmd_mempool.length));
-	json_object_object_add(j_obj, "Free",
-	    json_object_new_int64(get_num_entries_from_mempool(&rcmd_mempool)));
-
 	j_array = json_object_new_array();
 
 	MTX_LOCK(&specq_mtx);
@@ -3142,6 +3022,9 @@ istgt_lu_mempool_stats(char **resp)
 			json_object_object_add(j_replica, "in-flight sync",
 			    json_object_new_int64(
 			    r->replica_inflight_sync_io_cnt));
+			json_object_object_add(j_replica, "in-flight command",
+			    json_object_new_int64(
+			    get_num_entries_from_mempool(&r->cmdq)));
 			json_object_array_add(j_array, j_replica);
 		}
 	}
@@ -3156,7 +3039,7 @@ istgt_lu_mempool_stats(char **resp)
 
 	json_string = json_object_to_json_string_ext(j_obj,
 	    JSON_C_TO_STRING_PLAIN);
-	resp_len = strlen(json_string);
+	resp_len = strlen(json_string) + 1;
 	*resp = malloc(resp_len);
 	memset(*resp, 0, resp_len);
 	strncpy(*resp, json_string, resp_len);
@@ -3209,8 +3092,7 @@ cleanup_deadlist(void *arg)
 				for (i=1; i<rcomm_cmd->iovcnt + 1; i++)
 					xfree(rcomm_cmd->iov[i].iov_base);
 
-				memset(rcomm_cmd, 0, sizeof(rcommon_cmd_t));
-				put_to_mempool(&rcommon_cmd_mempool, rcomm_cmd);
+				free(rcomm_cmd);
 			} else {
 				put_to_mempool(&spec->rcommon_deadlist, rcomm_cmd);
 			}

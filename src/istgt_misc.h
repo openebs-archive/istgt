@@ -143,12 +143,21 @@
 #define BUNSET32(B,N) ((B) &= ((uint32_t)(~((uint32_t)((1) << (N))))))
 
 /* memory allocate */
+#ifdef	REPLICATION
+#define xmalloc(size)		malloc(size)
+#define xfree(p)		free(p)
+#define xstrdup(s)		(s == NULL) ? NULL : strdup(s)
+#define	xmalloci(size, l)	malloc(size)
+#define	xfreei(p, l)		free(p)
+#define	xstrdupi(s, l)		(s == NULL) ? NULL : strdup(s)
+#else
 #define xmalloc(size)  xmalloci((size), __LINE__)
 #define xfree(p)  xfreei((p), __LINE__)
 #define xstrdup(s) xstrdupi((s), __LINE__)
 void *xmalloci(size_t size, uint16_t line);
 void xfreei(void *p, uint16_t line);
 char *xstrdupi(const char *s, uint16_t line);
+#endif
 
 /* string functions */
 char *strlwr(char *s);

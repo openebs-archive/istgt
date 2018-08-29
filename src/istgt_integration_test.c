@@ -10,6 +10,7 @@
 #include <math.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include "config.h"
 #include "istgt_misc.h"
 #include "istgt_proto.h"
 #include "replication.h"
@@ -1257,12 +1258,6 @@ main(int argc, char **argv)
 
 	volsize = sbuf.st_size;
 
-	/* Initialize mempool needed for replication*/
-	if (initialize_replication_mempool(false)) {
-		REPLICA_ERRLOG("Failed to initialize mempool\n");
-		return 1;
-	}
-
 	initialize_replication();
 
 	rc = initialize_spec(spec);
@@ -1326,8 +1321,6 @@ main(int argc, char **argv)
 	}
 	free(all_rargs);
 	free(all_rthrds);
-
-	destroy_replication_mempool();
 
 	return 0;
 }

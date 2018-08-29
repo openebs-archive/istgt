@@ -249,7 +249,6 @@ mgmt_thrd(void *args)
 	int *cnt = cargs->count;
 	struct timespec now, start, prev, p;
 	char *snapname;
-	int ret;
 
 	snprintf(tinfo, 50, "clientmgmt%d", cargs->workerid);
 	prctl(PR_SET_NAME, tinfo, 0, 0, 0);
@@ -264,11 +263,10 @@ mgmt_thrd(void *args)
 	clock_gettime(CLOCK_MONOTONIC, &prev);
 	while (1) {
 		clock_gettime(CLOCK_MONOTONIC, &p);
-		ret = istgt_lu_create_snapshot(spec, snapname, random() % 2 + 2,
+		(void) istgt_lu_create_snapshot(spec, snapname, random() % 2 + 2,
 		    random() % 2 + 4);
 		clock_gettime(CLOCK_MONOTONIC, &now);
 
-		//REPLICA_LOG("snapshot response: %d time: %ld\n", ret, (now.tv_sec - p.tv_sec));
 		sleep(1);
 		count++;
 		clock_gettime(CLOCK_MONOTONIC, &now);

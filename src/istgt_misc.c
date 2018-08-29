@@ -56,6 +56,7 @@
 #define __attribute__(x)
 #endif
 
+#ifndef	REPLICATION
 static void fatal(const char *format, ...) __attribute__((__noreturn__, __format__(__printf__, 1, 2)));
 
 static void
@@ -71,6 +72,7 @@ fatal(const char *format, ...)
 	va_end(ap);
 	exit(EXIT_FAILURE);
 }
+#endif
 
 typedef struct mem_hdr {
 	uint16_t pIdx;
@@ -324,6 +326,7 @@ poolprint(char *inbuf __attribute__((__unused__)), int len __attribute__((__unus
 
 int memdebug = 0;
 
+#ifndef	REPLICATION
 void *
 xmalloci(size_t size, uint16_t line)
 {
@@ -463,6 +466,7 @@ xstrdupi(const char *s, uint16_t line)
 	p[size - 1] = '\0';
 	return p;
 }
+#endif
 
 char *
 strlwr(char *s)

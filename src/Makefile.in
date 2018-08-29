@@ -28,7 +28,7 @@ MKDEP	 = @MKDEP@
 
 CFLAGS  += -fno-strict-aliasing -Wstrict-aliasing
 CFLAGS  += -Wformat=2 -Wreturn-type
-CFLAGS  += -Wbad-function-cast
+CFLAGS  += -Wbad-function-cast -Wuninitialized -Wunused-variable -Wunused-label -Wunused-function -Wsign-compare -Wno-missing-field-initializers -Wno-missing-braces
 CFLAGS  += -Wcast-qual -Wchar-subscripts -Winline
 CFLAGS  += -Wmissing-prototypes -Wnested-externs -Wpointer-arith
 CFLAGS  += -Wredundant-decls -Wshadow -Wstrict-prototypes -Wwrite-strings
