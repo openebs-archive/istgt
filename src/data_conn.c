@@ -195,7 +195,8 @@ inform_mgmt_conn(replica_t *r)
 	r->disconnect_conn = 1;
 	if (write(r->mgmt_eventfd1, &num, sizeof (num)) != sizeof (num))
 		REPLICA_NOTICELOG("Failed to report err to mgmt_conn for "
-		    "replica(%s:%d)\n", r->ip, r->port);
+		    "replica(%lu) (%s:%d) mgmt_fd%d\n", r->zvol_guid, r->ip,
+		    r->port, r->mgmt_fd);
 }
 
 /*
