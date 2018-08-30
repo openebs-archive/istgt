@@ -30,6 +30,11 @@ cstor_conn_ops_t cstor_ops = {
 	.conn_connect = replication_connect,
 };
 
+#ifdef	DEBUG
+spec_io_latency io_arr[MAX_LATENCY_IO];
+uint64_t io_arr_idx;
+#endif
+
 int replication_initialized = 0;
 size_t rcmd_mempool_count = RCMD_MEMPOOL_ENTRIES;
 
@@ -2425,6 +2430,9 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	int skip_count = 0;
 	uint64_t num_read_ios = 0;
 	uint64_t inflight_read_ios = 0;
+#ifdef	DEBUG
+	int64_t latency_idx = 0;
+#endif
 
 	(void) cmd_read;
 	CHECK_IO_TYPE(cmd, cmd_read, cmd_write, cmd_sync);
@@ -2445,6 +2453,16 @@ again:
 	}
 
 	UPDATE_INFLIGHT_SPEC_IO_CNT(spec, cmd, 1);
+
+#ifdef DEBUG
+	latency_idx = cmd->io_arr_idx;
+	if (latency_idx >= 0) {
+		io_arr[latency_idx].type = cmd->cdb0;
+		io_arr[latency_idx].size = nbytes;
+		io_arr[latency_idx].offset = offset;
+		io_arr[latency_idx].lu_idx = cmd->luworkerindx;
+	}
+#endif
 
 	ASSERT(spec->io_seq);
 	build_rcomm_cmd(rcomm_cmd, cmd, offset, nbytes);
@@ -2501,6 +2519,14 @@ retry_read:
 		rcomm_cmd->copies_sent++;
 
 		build_rcmd();
+
+#ifdef	DEBUG
+		clock_gettime(CLOCK_MONOTONIC, &rcmd->l_queued_time);
+                if (latency_idx >= 0)
+			rcmd->r_io = &io_arr[latency_idx].r_io[rcmd->idx];
+                else
+			rcmd->r_io = NULL;
+#endif
 
 		INCREMENT_INFLIGHT_REPLICA_IO_CNT(replica, rcmd->opcode);
 

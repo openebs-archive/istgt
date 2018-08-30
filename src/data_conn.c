@@ -532,6 +532,9 @@ handle_epoll_in_event(replica_t *r)
 	bool task_completed = false;
 	bool unblocked = false;
 	pthread_cond_t *cond_var;
+#ifdef	DEBUG
+	struct timespec now;
+#endif
 
 start:
 	ret = read_cmd(r);
@@ -549,7 +552,12 @@ start:
 		rcomm_cmd->resp_list[idx].data_ptr = r->ongoing_io_buf;
 
 		DECREMENT_INFLIGHT_REPLICA_IO_CNT(r, rcomm_cmd->opcode);
-
+#ifdef	DEBUG
+		if (r->ongoing_io->r_io) {
+			r->ongoing_io->r_io->zvol_guid = r->zvol_guid;
+			timesdiff(CLOCK_MONOTONIC, r->ongoing_io->l_queued_time, now, r->ongoing_io->r_io->diff);
+		}
+#endif
 		/*
 		 * cleanup_deadlist thread performs cleanup of rcomm_cmd.
 		 * if the response from all replica is received. Since we are

@@ -34,6 +34,26 @@
 #define RCMD_MEMPOOL_ENTRIES    (1 << 19)
 
 #define MAX(a,b) (((a)>(b))?(a):(b))
+#define	ARRAY_SIZE(x)	(sizeof(x)/sizeof(x[0]))
+
+#ifdef	DEBUG
+#define	MAX_LATENCY_IO	(1 << 18)
+uint32_t is_io_arr_full;
+typedef struct {
+	uint64_t zvol_guid;
+	struct timespec diff;
+} r_io_latency;
+
+typedef struct {
+	uint8_t type;
+	size_t size;
+	off_t offset;
+	int lu_idx;
+	r_io_latency r_io[MAXREPLICA];
+	struct timespec diff;
+	struct timespec queued_time;
+} spec_io_latency;
+#endif
 
 typedef enum zvol_cmd_type_e {
 	CMD_IO = 1,
@@ -102,6 +122,10 @@ typedef struct rcmd_s {
 	uint64_t data_len;
 	struct iovec iov[41];
 	struct timespec queued_time;
+#ifdef	DEBUG
+	struct timespec l_queued_time;
+	r_io_latency *r_io;
+#endif
 } rcmd_t;
 
 typedef struct replica_s replica_t;

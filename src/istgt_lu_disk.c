@@ -86,6 +86,11 @@
 #endif
 
 extern clockid_t clockid;
+#if defined(REPLICATION) && defined(DEBUG)
+extern spec_io_latency io_arr[MAX_LATENCY_IO];
+extern uint64_t io_arr_idx;
+extern uint32_t is_io_arr_full;
+#endif
 
 //#define ISTGT_TRACE_DISK
 
@@ -8468,7 +8473,17 @@ error_return_no_dequeue:
 		}
 	}
 	MTX_UNLOCK(&spec->complete_queue_mutex);
-
+#if defined(REPLICATION) && defined(DEBUG)
+	uint64_t latency_idx = 0;
+	latency_idx = __sync_fetch_and_add(&io_arr_idx, 1);
+	if (latency_idx >= ARRAY_SIZE(io_arr)) {
+		io_arr_idx = 0;
+		is_io_arr_full++;
+	}
+	memset(&io_arr[latency_idx], 0, sizeof(spec_io_latency));
+	clock_gettime(CLOCK_MONOTONIC, &io_arr[latency_idx].queued_time);
+	lu_task->lu_cmd.io_arr_idx = latency_idx;
+#endif
 	return ISTGT_LU_TASK_RESULT_QUEUE_OK;
 }
 /*

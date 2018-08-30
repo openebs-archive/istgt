@@ -430,6 +430,10 @@ typedef struct istgt_lu_cmd_t {
 #ifdef REPLICATION
 	uint32_t   luworkerindx;
 #endif
+
+#if defined(REPLICATION) && defined(DEBUG)
+	int32_t io_arr_idx;
+#endif
 } ISTGT_LU_CMD;
 typedef ISTGT_LU_CMD *ISTGT_LU_CMD_Ptr;
 

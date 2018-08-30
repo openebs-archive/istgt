@@ -58,6 +58,13 @@
 #include "istgt_integration.h"
 #endif
 
+#if defined(REPLICATION) && defined(DEBUG)
+#include "istgt_scsi.h"
+extern uint64_t io_arr_idx;
+extern uint32_t is_io_arr_full;
+extern spec_io_latency io_arr[MAX_LATENCY_IO];
+#endif
+
 #if !defined(__GNUC__)
 #undef __attribute__
 #define __attribute__(x)
@@ -2493,6 +2500,7 @@ istgt_uctl_cmd_maxtime(UCTL_Ptr uctl)
 	}
 	return UCTL_CMD_OK;
 }
+
 static int
 istgt_uctl_cmd_dump(UCTL_Ptr uctl)
 {
@@ -2530,6 +2538,54 @@ istgt_uctl_cmd_dump(UCTL_Ptr uctl)
 		}
 		return UCTL_CMD_ERR;
 	}
+
+#if defined(REPLICATION) && defined(DEBUG)
+	int8_t cmd_type = 0;
+	uint64_t max_idx = __sync_fetch_and_add(&io_arr_idx, 0);
+	printf("cmd type read:1 write:2 sync:3\n");
+	spec_io_latency *cmd;
+
+	if (is_io_arr_full > 0)
+		max_idx = ARRAY_SIZE(io_arr);
+
+	for (i = 0; (unsigned)i < max_idx; i++) {
+		cmd = &io_arr[i];
+		switch (cmd->type) {
+			case SBC_WRITE_6:
+			case SBC_WRITE_10:
+			case SBC_WRITE_12:
+			case SBC_WRITE_16:
+				cmd_type = 2;
+				break;
+			case SBC_READ_6:
+			case SBC_READ_10:
+			case SBC_READ_12:
+			case SBC_READ_16:
+				cmd_type = 1;
+				break;
+			case SBC_SYNCHRONIZE_CACHE_10:
+			case SBC_SYNCHRONIZE_CACHE_16:
+				cmd_type = 3;
+				break;
+			default:
+				cmd_type = -1;
+				break;
+		}
+
+		if (cmd_type == -1)
+			continue;
+
+		printf("idx:%d type:%d size:%lu off:%lu lu_idx:%d total_time:%lu.%lu ",
+		    i, cmd_type, cmd->size, cmd->offset, cmd->lu_idx, cmd->diff.tv_sec, cmd->diff.tv_nsec);
+		for (j = 0; j < MAXREPLICA; j++) {
+			if (cmd->r_io[j].zvol_guid) {
+				printf("zvol:%lu time : %lu.%lu ", cmd->r_io[j].zvol_guid, cmd->r_io[j].diff.tv_sec, cmd->r_io[j].diff.tv_nsec);
+			}
+		}
+		printf("\n");
+	}
+	io_arr_idx = 0;
+#endif
 
 	MTX_LOCK(&uctl->istgt->mutex);
 	for (i = 0; i < MAX_LOGICAL_UNIT; i++) {

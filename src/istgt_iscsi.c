@@ -80,6 +80,12 @@
 #include "istgt_scsi.h"
 #include "istgt_queue.h"
 
+#if defined(REPLICATION) && defined(DEBUG)
+#include "replication.h"
+extern spec_io_latency io_arr[MAX_LATENCY_IO];
+extern uint64_t io_arr_idx;
+#endif
+
 #include <netinet/in.h>
 
 #if !defined(__GNUC__)
@@ -5692,6 +5698,15 @@ sender(void *arg)
 				goto dequeue_result_queue;
 			}
 		}
+#if defined(REPLICATION) && defined(DEBUG)
+		int64_t latency_idx;
+		struct timespec l_now;
+
+		latency_idx = lu_task->lu_cmd.io_arr_idx;
+		if (latency_idx >= 0) {
+			timesdiff(CLOCK_MONOTONIC, io_arr[latency_idx].queued_time, l_now, io_arr[latency_idx].diff);
+		}
+#endif
 		if(lu_task->lu_cmd.aborted == 1 || lu_task->lu_cmd.release_aborted == 1)
 		{
 			ISTGT_LOG("Aborted from result queue\n");
