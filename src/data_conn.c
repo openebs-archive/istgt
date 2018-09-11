@@ -148,10 +148,10 @@ unblock_cmds(replica_t *r)
 		cmd_blocked = false;
 		CHECK_BLOCKAGE_IN_Q(&r->readyq, next);
 		if (cmd_blocked == true)
-			continue;
+			break;
 		CHECK_BLOCKAGE_IN_Q(&r->waitq, next);
 		if (cmd_blocked == true)
-			continue;
+			break;
 		TAILQ_REMOVE(&r->blockedq, cmd, next);
 		TAILQ_INSERT_TAIL(&r->readyq, cmd, next);
 		unblocked = true;
