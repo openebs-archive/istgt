@@ -5386,6 +5386,7 @@ istgt_lu_disk_unmap(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd,
 	int markedForFree = 0, diskIoPendingL = 0, lerr = 0;
 	int len = 8, ret = 0; //actual block starts with offset 8
 	off_t unmbd[2];
+	off_t rc = 0;
 	int markedForReturn = 0;
 	uint64_t lba = 0, lblen = 0;
 	timediffw(lu_cmd, 'w');
@@ -5420,7 +5421,15 @@ istgt_lu_disk_unmap(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd,
 				return -1;
 			}
 
-#ifndef	REPLICATION
+#ifdef REPLICATION
+			rc = replicate(spec, lu_cmd, unmbd[0], unmbd[1]);
+			if (rc == unmbd[1]) {
+				ret = 0;
+			} else {
+				ISTGT_ERRLOG("(0x%x) c#%d replicate returned error\n", lu_cmd->CmdSN, conn->id);
+				errno = ISTGT_SCSI_STATUS_BUSY;
+			}
+#else
 			//TODO
 			#ifdef __FreeBSD__
 			ret = ioctl(spec->fd, DIOCGDELETE, unmbd);

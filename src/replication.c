@@ -90,6 +90,9 @@ static int handle_mgmt_event_fd(replica_t *replica);
 				rcomm_cmd->opcode = ZVOL_OPCODE_SYNC;	\
 				rcomm_cmd->iovcnt = 0;			\
 				rcomm_cmd->data_len = 0;		\
+			case SBC_UNMAP:					\
+				rcomm_cmd->opcode = ZVOL_OPCODE_UNMAP;	\
+				rcomm_cmd->iovcnt = 0;			\
 				break;					\
 			default:					\
 				break;					\
@@ -2384,7 +2387,8 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 			rc = -1;
 		}
 	} else if ((rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) ||
-		   (rcomm_cmd->opcode == ZVOL_OPCODE_SYNC)) {
+		   (rcomm_cmd->opcode == ZVOL_OPCODE_SYNC) ||
+		   (rcomm_cmd->opcode == ZVOL_OPCODE_UNMAP)) {
 		if (healthy_response >= rcomm_cmd->consistency_factor) {
 			/*
 			 * We got the successful response from required healthy

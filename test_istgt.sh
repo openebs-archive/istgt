@@ -11,9 +11,31 @@ ISTGTCONTROL=istgtcontrol
 SETUP_PID=-1
 device_name=""
 LOGFILE="/tmp/istgt.log"
-
+UNMAP=sg_unmap
 CONTROLLER_IP="127.0.0.1"
 CONTROLLER_PORT="6060"
+VOL_SIZE="5G"
+BLOCK_LEN=4096
+
+parse_size() {
+	size=$1
+	local rc
+
+	offA=`echo $size | tr -d '[A-Z]'`
+	offB=`echo $size | tr -d '[0-9]'`
+	case $offB in
+		B) rc=$(( $offA )) ;;
+		K) rc=$(( $offA * 1 << 10 )) ;;
+		M) rc=$(( $offA * 1 << 20 )) ;;
+		G) rc=$(( $offA * 1 << 30 )) ;;
+		T) rc=$(( $offA * 1 << 40 )) ;;
+		*)
+			echo "Invalid size $size"
+			exit 1
+			;;
+	esac
+	echo $rc
+}
 
 CURDIR=$PWD
 
@@ -190,12 +212,12 @@ write_data()
 setup_test_env() {
 	rm -f /tmp/test_vol*
 	mkdir -p /mnt/store
-	truncate -s 5G /tmp/test_vol1 /tmp/test_vol2 /tmp/test_vol3
+	truncate -s $VOL_SIZE /tmp/test_vol1 /tmp/test_vol2 /tmp/test_vol3
 	logout_of_volume
 	sudo killall -9 istgt
 	sudo killall -9 replication_test
 
-	start_istgt 5G
+	start_istgt $VOL_SIZE
 }
 
 cleanup_test_env() {
@@ -227,6 +249,50 @@ list_descendants ()
 	echo "$children"
 }
 
+run_unmap_test() {
+	max_len=$( parse_size $VOL_SIZE )
+	blk_len=$BLOCK_LEN
+	max_lba=$(( $max_len / $blk_len ))
+	unmap_lba=$(( $RANDOM % $max_lba ))
+	max_try=10
+	while [ $unmap_lba -eq 0 ]; do
+		if [ $max_try -eq 0 ]; then
+			echo "failed to derive unmap LBA"
+			unmap_lba=$(( ($max_len / $blk_len) - 1000 ))
+			break
+		fi
+		$unmap_lba=$(( $RANDOM % $max_lba ))
+		max_try=$(( $max_try - 1 ))
+	done
+	unmap_num=$(( $RANDOM / $blk_len ))
+	if [ $unmap_num -gt $(( $max_lba - $unmap_lba )) ]; then
+		unmap_num=$(( $max_lba - $unmap_lba ))
+	fi
+
+	login_to_volume "$CONTROLLER_IP:3260"
+	get_scsi_disk
+	if [ "$device_name"!="" ]; then
+		unmap_lba=$( echo "obase=16; $unmap_lba" | bc )
+		sudo sg_unmap -vvvvvvvv  --lba=0x$unmap_lba --num=$unmap_num /dev/$device_name
+		if [ $? -ne 0 ]; then
+			echo "Unmap test failed"
+			exit 1
+		fi
+
+		unmap_lba=$(( $max_lba + 10 ))
+		unmap_lba=$( echo "obase=16; $unmap_lba" | bc )
+		sudo sg_unmap -vvvvvvvv  --lba=0x$unmap_lba --num=$unmap_num /dev/$device_name
+		if [ $? -eq 0 ]; then
+			echo "Unmap test failed"
+			exit 1
+		fi
+	else
+		echo "Unmap test failed... no disk found"
+		exit 1
+	fi
+	logout_of_volume
+}
+
 run_data_integrity_test() {
 	local replica1_port="6161"
 	local replica2_port="6162"
@@ -252,6 +318,8 @@ run_data_integrity_test() {
 
 	$TEST_SNAPSHOT 1 &
 	test_snapshot_pid=$!
+
+	run_unmap_test
 
 	write_and_verify_data
 	wait_for_pids $test_snapshot_pid
@@ -469,13 +537,13 @@ run_lu_rf_test ()
   ConsistencyFactor 2
   UnitType Disk
   UnitOnline Yes
-  BlockLength 512
+  BlockLength $BLOCK_LEN
   QueueDepth 32
   Luworkers 6
   UnitInquiry "CloudByte" "iscsi" "0" "4059aab98f093c5d95207f7af09d1413"
   PhysRecordLength 4096
-  LUN0 Storage 5G 32k
-  LUN0 Option Unmap Disable
+  LUN0 Storage $VOL_SIZE 32k
+  LUN0 Option Unmap Enable
   LUN0 Option WZero Disable
   LUN0 Option ATS Disable
   LUN0 Option XCOPY Disable"	>> /usr/local/etc/istgt/istgt.conf
