@@ -1389,10 +1389,17 @@ get_replica_stats_json(replica_t *replica, struct json_object **jobj)
 {
 	struct json_object *j_stats;
 	struct timespec now;
+	char *zvol_guid;
+	size_t zvol_guid_len;
 
 	j_stats = json_object_new_object();
+
+	zvol_guid_len = snprintf(NULL, 0, "%lu", replica->zvol_guid) + 1;
+	zvol_guid = calloc(1, zvol_guid_len);
+	snprintf(zvol_guid, zvol_guid_len, "%lu", replica->zvol_guid);
 	json_object_object_add(j_stats, "replica",
-	    json_object_new_int64(replica->zvol_guid));
+	    json_object_new_string(zvol_guid));
+	free(zvol_guid);
 
 	json_object_object_add(j_stats, "status",
 	    json_object_new_string((replica->state == ZVOL_STATUS_HEALTHY) ?
