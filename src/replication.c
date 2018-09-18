@@ -1189,6 +1189,24 @@ send_replica_snapshot(spec_t *spec, replica_t *replica, uint64_t io_seq,
 	return ret;
 }
 
+static void
+disconnect_pending_replica(replica_t *replica, uint64_t io_seq,
+    zvol_op_code_t opcode)
+{
+	mgmt_cmd_t *mgmt_cmd;
+
+	MTX_LOCK(&replica->r_mtx);
+	TAILQ_FOREACH(mgmt_cmd, &replica->mgmt_cmd_queue, mgmt_cmd_next) {
+		if (mgmt_cmd->io_hdr->io_seq == io_seq &&
+		    mgmt_cmd->io_hdr->opcode == opcode) {
+			inform_mgmt_conn(replica);
+			break;
+		}
+	}
+
+	MTX_UNLOCK(&replica->r_mtx);
+}
+
 /*
 static bool
 any_ongoing_snapshot_command(spec_t *spec)
@@ -1213,9 +1231,9 @@ any_ongoing_snapshot_command(spec_t *spec)
 */
 
 static int
-is_volume_healthy(spec_t *spec)
+can_take_snapshot(spec_t *spec)
 {
-	if (spec->healthy_rcount != spec->replication_factor)
+	if (spec->healthy_rcount < spec->consistency_factor)
 		return false;
 	return true;
 }
@@ -1243,7 +1261,7 @@ pause_and_timed_wait_for_ongoing_ios(spec_t *spec, int sec)
 	clock_gettime(CLOCK_MONOTONIC, &last);
 	timesdiff(CLOCK_MONOTONIC, last, now, diff);
 
-	while ((diff.tv_sec < sec) && (is_volume_healthy(spec) == true)) {
+	while ((diff.tv_sec < sec) && (can_take_snapshot(spec) == true)) {
 		io_found = false;
 		if (spec->inflight_write_io_cnt != 0 ||
 		    spec->inflight_sync_io_cnt != 0)
@@ -1312,7 +1330,7 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 		MTX_LOCK(&spec->rq_mtx);
 	}
 
-	if (is_volume_healthy(spec) == false) {
+	if (can_take_snapshot(spec) == false) {
 		MTX_UNLOCK(&spec->rq_mtx);
 		REPLICA_ERRLOG("volume is not healthy..\n");
 		return false;
@@ -1339,16 +1357,10 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 		}
 	}
 
+	uint8_t cf = spec->consistency_factor;
+
 	timesdiff(CLOCK_MONOTONIC, last, now, diff);
 	MTX_LOCK(&rcomm_mgmt->mtx);
-
-	if (rcomm_mgmt->cmds_sent != spec->replication_factor) {
-		rcomm_mgmt->caller_gone = 1;
-		MTX_UNLOCK(&rcomm_mgmt->mtx);
-		REPLICA_ERRLOG("cmds sent %d not eq repl factor %d..\n",
-		    rcomm_mgmt->cmds_sent, spec->replication_factor);
-		goto done;
-	}
 
 	while (diff.tv_sec < wait_time) {
 		if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed))
@@ -1363,12 +1375,21 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	rcomm_mgmt->caller_gone = 1;
 	if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed)) {
 		free_rcomm_mgmt = 1;
-		if ((rcomm_mgmt->cmds_succeeded == spec->replication_factor) && (rcomm_mgmt->cmds_failed == 0)) {
+		if (rcomm_mgmt->cmds_succeeded >= cf) {
 			r = true;
 		}
 	}
 	MTX_UNLOCK(&rcomm_mgmt->mtx);
 done:
+	/*
+	 * disconnect the replica from which we have
+	 * not received the response yet. As a part the
+	 * reconnecting, it will start the rebuild process
+	 * and resync the snapshot.
+	 */
+	TAILQ_FOREACH(replica, &spec->rq, r_next)
+		disconnect_pending_replica(replica, io_seq,
+		    ZVOL_OPCODE_SNAP_CREATE);
 	spec->quiesce = 0;
 	if (r == false)
 		TAILQ_FOREACH(replica, &spec->rq, r_next)

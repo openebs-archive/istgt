@@ -277,7 +277,7 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 			(*zrepl_status_msg_cnt) = 0;
 		}
 
-		if (zrepl_status->rebuild_status == ZVOL_REBUILDING_IN_PROGRESS) {
+		if (zrepl_status->rebuild_status == ZVOL_REBUILDING_SNAP) {
 			(*zrepl_status_msg_cnt) += 1;
 		}
 
@@ -286,7 +286,7 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 		iovec[3].iov_base = zrepl_status;
 		iovec[3].iov_len = sizeof (zrepl_status_ack_t);
 	} else if (opcode == ZVOL_OPCODE_START_REBUILD) {
-		zrepl_status->rebuild_status = ZVOL_REBUILDING_IN_PROGRESS;
+		zrepl_status->rebuild_status = ZVOL_REBUILDING_SNAP;
 		mgmt_ack_hdr->len = 0;
 		iovec_count = 3;
 	} else if (opcode == ZVOL_OPCODE_STATS) {

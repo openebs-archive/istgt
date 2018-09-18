@@ -203,7 +203,7 @@ handle_replica_start_rebuild(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 		rargs->zrepl_status = ZVOL_STATUS_HEALTHY;
 		rargs->zrepl_rebuild_status = ZVOL_REBUILDING_DONE;
 	} else {
-		rargs->zrepl_rebuild_status = ZVOL_REBUILDING_IN_PROGRESS;
+		rargs->zrepl_rebuild_status = ZVOL_REBUILDING_SNAP;
 	}
 
 	if (zio_cmd->buf)
@@ -322,7 +322,7 @@ handle_replica_status(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 		rargs->rebuild_status_enquiry = 0;
 	}
 
-	if (rargs->zrepl_rebuild_status == ZVOL_REBUILDING_IN_PROGRESS)
+	if (rargs->zrepl_rebuild_status == ZVOL_REBUILDING_SNAP)
 		rargs->rebuild_status_enquiry++;
 	zrepl_status->state = rargs->zrepl_status;
 	zrepl_status->rebuild_status = rargs->zrepl_rebuild_status;

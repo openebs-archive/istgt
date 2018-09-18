@@ -188,7 +188,7 @@ done:
  * inform replica's management interface regarding error in
  * replica_thread
  */
-static void
+void
 inform_mgmt_conn(replica_t *r)
 {
 	uint64_t num = 1;
@@ -711,6 +711,7 @@ initialize_error:
 			ret = -1;
 			goto exit;
 		}
+
 		for (i = 0; i < nfds; i++) {
 			fd = events[i].data.fd;
 			if ((fd == r_data_eventfd) || (fd == r_mgmt_eventfd)) {
@@ -730,6 +731,13 @@ initialize_error:
 			ptr = events[i].data.ptr;
 			if (ptr != NULL)
 				goto exit;
+
+			MTX_LOCK(&r->r_mtx);
+			if (r->disconnect_conn) {
+				MTX_UNLOCK(&r->r_mtx);
+				goto exit;
+			}
+			MTX_UNLOCK(&r->r_mtx);
 
 			if (events[i].events & (EPOLLERR | EPOLLRDHUP | EPOLLHUP))
 				goto exit;
