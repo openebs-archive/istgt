@@ -1375,9 +1375,9 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	rcomm_mgmt->caller_gone = 1;
 	if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed)) {
 		free_rcomm_mgmt = 1;
-		if (rcomm_mgmt->cmds_succeeded >= cf) {
-			r = true;
-		}
+	}
+	if (rcomm_mgmt->cmds_succeeded >= cf) {
+		r = true;
 	}
 	MTX_UNLOCK(&rcomm_mgmt->mtx);
 done:

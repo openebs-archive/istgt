@@ -732,12 +732,8 @@ initialize_error:
 			if (ptr != NULL)
 				goto exit;
 
-			MTX_LOCK(&r->r_mtx);
-			if (r->disconnect_conn) {
-				MTX_UNLOCK(&r->r_mtx);
+			if (r->disconnect_conn)
 				goto exit;
-			}
-			MTX_UNLOCK(&r->r_mtx);
 
 			if (events[i].events & (EPOLLERR | EPOLLRDHUP | EPOLLHUP))
 				goto exit;
