@@ -351,10 +351,10 @@ handle_handshake(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 	mgmt_ack->pool_guid = 5000;
 	mgmt_ack->zvol_guid = rargs->replica_port;
 	mgmt_ack->port = rargs->replica_port;
+	mgmt_ack->checkpointed_io_seq = 10000;
 	strncpy(mgmt_ack->ip, rargs->replica_ip, sizeof (mgmt_ack->ip));
 	strncpy(mgmt_ack->volname, rargs->volname, sizeof (mgmt_ack->volname));
 	hdr->status = ZVOL_OP_STATUS_OK;
-	hdr->checkpointed_io_seq = 10000;
 	hdr->len = sizeof (mgmt_ack_t);
 
 	if (zio_cmd->buf != NULL)

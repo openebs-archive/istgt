@@ -26,7 +26,6 @@ __thread char  tinfo[50] =  {0};
 	mgmt_ack_hdr->version = REPLICA_VERSION;\
 	mgmt_ack_hdr->len = sizeof (mgmt_ack_data_t);\
 	mgmt_ack_hdr->status = ZVOL_OP_STATUS_OK;\
-	mgmt_ack_hdr->checkpointed_io_seq = 1000;\
 }
 
 #define build_mgmt_ack_data {\
@@ -35,6 +34,7 @@ __thread char  tinfo[50] =  {0};
 	strcpy(mgmt_ack_data->volname, buf);\
 	mgmt_ack_data->port = replica_port;\
 	mgmt_ack_data->pool_guid = replica_port;\
+	mgmt_ack_data->checkpointed_io_seq = 1000;\
 	mgmt_ack_data->zvol_guid = replica_port;\
 }
 

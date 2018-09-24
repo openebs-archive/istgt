@@ -931,8 +931,8 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	replica->port = ack_data->port;
 	replica->state = ZVOL_STATUS_DEGRADED;
 	replica->initial_checkpointed_io_seq =
-	    MAX(ack_hdr->checkpointed_io_seq,
-	    ack_hdr->checkpointed_degraded_io_seq);
+	    MAX(ack_data->checkpointed_io_seq,
+	    ack_data->checkpointed_degraded_io_seq);
 
 	replica->pool_guid = ack_data->pool_guid;
 	replica->zvol_guid = ack_data->zvol_guid;
@@ -2285,7 +2285,6 @@ respond_with_error_for_all_outstanding_mgmt_ios(replica_t *r)
 		if (rcmd->opcode == ZVOL_OPCODE_WRITE) {		\
 			rio->len = rcmd->data_len +			\
 			    sizeof(struct zvol_io_rw_hdr);		\
-			rio->checkpointed_io_seq = 0;			\
 		} else {						\
 			if (!spec->healthy_rcount)			\
 				rio->flags |=				\
