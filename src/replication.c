@@ -1317,7 +1317,6 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	int free_rcomm_mgmt = 0;
 	struct timespec last, now, diff;
 	rcommon_mgmt_cmd_t *rcomm_mgmt;
-	int rc;
 	uint64_t io_seq;
 
 	clock_gettime(CLOCK_MONOTONIC, &last);
@@ -1349,12 +1348,7 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	r = false;
 	io_seq = ++spec->io_seq;
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
-		rc = send_replica_snapshot(spec, replica, io_seq, snapname, ZVOL_OPCODE_SNAP_CREATE, rcomm_mgmt);
-		if (rc < 0) {
-			rcomm_mgmt->caller_gone = 1;
-			REPLICA_ERRLOG("caller gone..\n");
-			goto done;
-		}
+		(void) send_replica_snapshot(spec, replica, io_seq, snapname, ZVOL_OPCODE_SNAP_CREATE, rcomm_mgmt);
 	}
 
 	uint8_t cf = spec->consistency_factor;
@@ -1380,20 +1374,23 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 		r = true;
 	}
 	MTX_UNLOCK(&rcomm_mgmt->mtx);
-done:
-	/*
-	 * disconnect the replica from which we have
-	 * not received the response yet. As a part the
-	 * reconnecting, it will start the rebuild process
-	 * and resync the snapshot.
-	 */
-	TAILQ_FOREACH(replica, &spec->rq, r_next)
-		disconnect_pending_replica(replica, io_seq,
-		    ZVOL_OPCODE_SNAP_CREATE);
+
 	spec->quiesce = 0;
-	if (r == false)
+	if (r == false) {
 		TAILQ_FOREACH(replica, &spec->rq, r_next)
 			send_replica_snapshot(spec, replica, io_seq, snapname, ZVOL_OPCODE_SNAP_DESTROY, NULL);
+	} else {
+		/*
+		 * disconnect the replica from which we have
+		 * not received the response yet. As a part the
+		 * reconnecting, it will start the rebuild process
+		 * and resync the snapshot.
+		 * Snapshot failure will be handled by zrepl.
+		 */
+		TAILQ_FOREACH(replica, &spec->rq, r_next)
+			disconnect_pending_replica(replica, io_seq,
+			    ZVOL_OPCODE_SNAP_CREATE);
+	}
 	MTX_UNLOCK(&spec->rq_mtx);
 	if (r == false)
 		REPLICA_ERRLOG("snap create ioseq: %lu resp: %d\n", io_seq, r);

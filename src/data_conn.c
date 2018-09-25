@@ -712,6 +712,12 @@ initialize_error:
 			goto exit;
 		}
 
+		if (r->disconnect_conn) {
+			ret = -1;
+			REPLICA_ERRLOG("replica disconnected(%s:%d)\n", r->ip, r->port);
+			goto exit;
+		}
+
 		for (i = 0; i < nfds; i++) {
 			fd = events[i].data.fd;
 			if ((fd == r_data_eventfd) || (fd == r_mgmt_eventfd)) {
@@ -730,9 +736,6 @@ initialize_error:
 			ret = -1;
 			ptr = events[i].data.ptr;
 			if (ptr != NULL)
-				goto exit;
-
-			if (r->disconnect_conn)
 				goto exit;
 
 			if (events[i].events & (EPOLLERR | EPOLLRDHUP | EPOLLHUP))
