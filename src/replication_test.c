@@ -26,7 +26,6 @@ __thread char  tinfo[50] =  {0};
 	mgmt_ack_hdr->version = REPLICA_VERSION;\
 	mgmt_ack_hdr->len = sizeof (mgmt_ack_data_t);\
 	mgmt_ack_hdr->status = ZVOL_OP_STATUS_OK;\
-	mgmt_ack_hdr->checkpointed_io_seq = 1000;\
 }
 
 #define build_mgmt_ack_data {\
@@ -35,6 +34,7 @@ __thread char  tinfo[50] =  {0};
 	strcpy(mgmt_ack_data->volname, buf);\
 	mgmt_ack_data->port = replica_port;\
 	mgmt_ack_data->pool_guid = replica_port;\
+	mgmt_ack_data->checkpointed_io_seq = 1000;\
 	mgmt_ack_data->zvol_guid = replica_port;\
 }
 
@@ -277,7 +277,7 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 			(*zrepl_status_msg_cnt) = 0;
 		}
 
-		if (zrepl_status->rebuild_status == ZVOL_REBUILDING_IN_PROGRESS) {
+		if (zrepl_status->rebuild_status == ZVOL_REBUILDING_SNAP) {
 			(*zrepl_status_msg_cnt) += 1;
 		}
 
@@ -286,7 +286,7 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 		iovec[3].iov_base = zrepl_status;
 		iovec[3].iov_len = sizeof (zrepl_status_ack_t);
 	} else if (opcode == ZVOL_OPCODE_START_REBUILD) {
-		zrepl_status->rebuild_status = ZVOL_REBUILDING_IN_PROGRESS;
+		zrepl_status->rebuild_status = ZVOL_REBUILDING_SNAP;
 		mgmt_ack_hdr->len = 0;
 		iovec_count = 3;
 	} else if (opcode == ZVOL_OPCODE_STATS) {
