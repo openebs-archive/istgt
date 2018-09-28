@@ -148,10 +148,10 @@ unblock_cmds(replica_t *r)
 		cmd_blocked = false;
 		CHECK_BLOCKAGE_IN_Q(&r->readyq, next);
 		if (cmd_blocked == true)
-			continue;
+			break;
 		CHECK_BLOCKAGE_IN_Q(&r->waitq, next);
 		if (cmd_blocked == true)
-			continue;
+			break;
 		TAILQ_REMOVE(&r->blockedq, cmd, next);
 		TAILQ_INSERT_TAIL(&r->readyq, cmd, next);
 		unblocked = true;
@@ -188,7 +188,7 @@ done:
  * inform replica's management interface regarding error in
  * replica_thread
  */
-static void
+void
 inform_mgmt_conn(replica_t *r)
 {
 	uint64_t num = 1;
@@ -711,6 +711,13 @@ initialize_error:
 			ret = -1;
 			goto exit;
 		}
+
+		if (r->disconnect_conn) {
+			ret = -1;
+			REPLICA_ERRLOG("replica disconnected(%s:%d)\n", r->ip, r->port);
+			goto exit;
+		}
+
 		for (i = 0; i < nfds; i++) {
 			fd = events[i].data.fd;
 			if ((fd == r_data_eventfd) || (fd == r_mgmt_eventfd)) {

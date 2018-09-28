@@ -187,7 +187,7 @@ AC_ARG_ENABLE([replication],
   AC_SUBST([target_header_files], ['${istgt_header} ${replication_header}'])
   AC_MSG_NOTICE([fetching zrepl_prot.h file...])
   AC_SUBST([replication_bin], ['istgt_integration replication_test mempool_test'])
-  AS_IF([$( wget -O src/zrepl_prot.h https://raw.githubusercontent.com/openebs/zfs/zfs-0.7-release/include/zrepl_prot.h >> /dev/null 2>&1 )], , [AC_MSG_ERROR([failed to fetch zrepl_prot.h])]),
+  AS_IF([$( cp /tmp/zrepl_prot.h src/zrepl_prot.h )], , [AC_MSG_ERROR([failed to fetch zrepl_prot.h])]),
   AC_MSG_RESULT(no)
   AC_SUBST([replication_bin], ['']))
 AC_SUBST([REPLICATION])

@@ -395,10 +395,10 @@ send_mgmt_ack(int fd, zvol_io_hdr_t *mgmt_ack_hdr, void *buf, int *zrepl_status_
 				zrepl_status.rebuild_status = ZVOL_REBUILDING_DONE;
 				(*zrepl_status_msg_cnt) = 0;
 			} else if ((*zrepl_status_msg_cnt) >= 1) {
-				zrepl_status.rebuild_status = ZVOL_REBUILDING_IN_PROGRESS;
+				zrepl_status.rebuild_status = ZVOL_REBUILDING_SNAP;
 			}
 
-			if (zrepl_status.rebuild_status == ZVOL_REBUILDING_IN_PROGRESS) {
+			if (zrepl_status.rebuild_status == ZVOL_REBUILDING_SNAP) {
 				(*zrepl_status_msg_cnt) += 1;
 			}
 
@@ -411,7 +411,7 @@ send_mgmt_ack(int fd, zvol_io_hdr_t *mgmt_ack_hdr, void *buf, int *zrepl_status_
 
 		case ZVOL_OPCODE_START_REBUILD:
 			*zrepl_status_msg_cnt = 1;
-			zrepl_status.rebuild_status = ZVOL_REBUILDING_IN_PROGRESS;
+			zrepl_status.rebuild_status = ZVOL_REBUILDING_SNAP;
 			iovec_count = 3;
 			mgmt_ack_hdr->len = 0;
 			break;

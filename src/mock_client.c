@@ -116,8 +116,9 @@ writer(void *args)
 	lu_cmd  = (ISTGT_LU_CMD_Ptr)malloc(sizeof (ISTGT_LU_CMD));
 	memset(lu_cmd, 0, sizeof (ISTGT_LU_CMD));
 
+	check_settings(spec);
+
 	while (1) {
-		check_settings(spec);
 
 		opcode = SBC_WRITE_16; 
 		blk_offset = random() % num_blocks;
@@ -194,8 +195,9 @@ reader(void *args)
 	lu_cmd  = malloc(sizeof (ISTGT_LU_CMD));
 	memset(lu_cmd, 0, sizeof (ISTGT_LU_CMD));
 
+	check_settings(spec);
+
 	while (1) {
-		check_settings(spec);
 
 		blk_offset = random() % num_blocks;
 		offset = blk_offset * blklen;
