@@ -1,5 +1,4 @@
 # top Makefile
-
 top_srcdir = .
 srcdir   = .
 
