@@ -44,7 +44,6 @@
 #endif
 #endif /* USE_ATOMIC */
 
-
 #include <stdint.h>
 #include <signal.h>
 #include <sys/socket.h>
@@ -60,10 +59,11 @@
 #define __attribute__(x)
 #endif
 #if defined(__GNUC__) && defined(__GNUC_MINOR__)
-#define ISTGT_GNUC_PREREQ(ma,mi) \
+#define ISTGT_GNUC_PREREQ(ma, mi) \
 	(__GNUC__ > (ma) || (__GNUC__ == (ma) && __GNUC_MINOR__ >= (mi)))
+
 #else
-#define ISTGT_GNUC_PREREQ(ma,mi) 0
+#define ISTGT_GNUC_PREREQ(ma, mi) 0
 #endif
 
 /* istgt_iscsi.c */
@@ -89,7 +89,7 @@ int istgt_lu_visible(ISTGT_Ptr istgt, ISTGT_LU_Ptr lu, const char *iqn, int pg_t
 int istgt_lu_sendtargets(CONN_Ptr conn, const char *iiqn, const char *iaddr, const char *tiqn, uint8_t *data, int alloc_len, int data_len);
 ISTGT_LU_Ptr istgt_lu_find_target(ISTGT_Ptr istgt, const char *target_name);
 ISTGT_LU_Ptr istgt_lu_find_target_by_volname(ISTGT_Ptr istgt, const char *target_name);
-#ifdef	REPLICATION
+#ifdef REPLICATION
 int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int, int);
 int istgt_lu_destroy_snapshot(spec_t *spec, char *snapname);
 void istgt_lu_mempool_stats(char **resp);
@@ -118,7 +118,7 @@ int istgt_lu_islun2lun(uint64_t islun);
 uint64_t istgt_lu_lun2islun(int lun, int maxlun);
 int istgt_lu_reset(ISTGT_LU_Ptr lu, uint64_t lun, istgt_ua_type ua_type);
 int istgt_lu_reset_all(ISTGT_Ptr istgt, istgt_ua_type ua_type);
-ISTGT_LU_TASK_Ptr istgt_lu_create_task(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, int lun, ISTGT_LU_DISK * spec);
+ISTGT_LU_TASK_Ptr istgt_lu_create_task(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, int lun, ISTGT_LU_DISK *spec);
 int istgt_lu_destroy_task(ISTGT_LU_TASK_Ptr lu_task);
 int istgt_lu_clear_task_IT(CONN_Ptr conn, ISTGT_LU_Ptr lu);
 int istgt_lu_clear_task_ITL(CONN_Ptr conn, ISTGT_LU_Ptr lu, uint64_t lun);
@@ -175,12 +175,11 @@ int istgt_lu_disk_signal_worker(ISTGT_LU_Ptr lu);
 void istgt_lu_disk_aio_done(siginfo_t *info);
 int istgt_lu_disk_build_sense_data(ISTGT_LU_DISK *spec, uint8_t *data, int sk, int asc, int ascq);
 
-int istgt_lu_disk_add_nexus(ISTGT_LU_Ptr lu, int lun, const char * initiator_port);
-int istgt_lu_disk_remove_nexus(ISTGT_LU_Ptr lu, int lun, const char * initiator_port);
+int istgt_lu_disk_add_nexus(ISTGT_LU_Ptr lu, int lun, const char *initiator_port);
+int istgt_lu_disk_remove_nexus(ISTGT_LU_Ptr lu, int lun, const char *initiator_port);
 int istgt_lu_disk_build_ua(istgt_ua_type ua_pending, int *sk, int *asc, int *ascq);
 int istgt_lu_disk_busy_excused(int opcode);
-IT_NEXUS * istgt_lu_disk_get_nexus(ISTGT_LU_DISK *spec, const char * initiator_port);
-
+IT_NEXUS *istgt_lu_disk_get_nexus(ISTGT_LU_DISK *spec, const char *initiator_port);
 
 /* istgt_lu_disk_vbox.c */
 int istgt_lu_disk_vbox_lun_init(ISTGT_LU_DISK *spec, ISTGT_Ptr istgt, ISTGT_LU_Ptr lu);
@@ -189,8 +188,7 @@ int istgt_lu_disk_vbox_lun_shutdown(ISTGT_LU_DISK *spec, ISTGT_Ptr istgt, ISTGT_
 int istgt_lu_disk_transfer_data(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, size_t len);
 int istgt_lu_disk_check_pr(ISTGT_LU_DISK *spec, CONN_Ptr conn, int pr_allow);
 
-int64_t  istgt_lu_disk_read_raw(ISTGT_LU_DISK *spec, void *buf, uint64_t nbytes);
-
+int64_t istgt_lu_disk_read_raw(ISTGT_LU_DISK *spec, void *buf, uint64_t nbytes);
 
 /* istgt_lu_dvd.c */
 struct istgt_lu_dvd_t;
@@ -250,7 +248,7 @@ istgt_lu_set_state(ISTGT_LU_Ptr lu, ISTGT_STATE state)
 #error "no atomic operation"
 #endif
 }
-#elif defined (USE_GCC_ATOMIC)
+#elif defined(USE_GCC_ATOMIC)
 /* gcc >= 4.1 builtin functions */
 static inline __attribute__((__always_inline__)) int
 istgt_lu_get_state(ISTGT_LU_Ptr lu)
@@ -263,11 +261,12 @@ static inline __attribute__((__always_inline__)) void
 istgt_lu_set_state(ISTGT_LU_Ptr lu, ISTGT_STATE state)
 {
 	ISTGT_STATE state_old;
-	do {
+	do
+	{
 		state_old = __sync_fetch_and_add((unsigned int *)&lu->state, 0);
 	} while (__sync_val_compare_and_swap((unsigned int *)&lu->state,
-		state_old, state) != state_old);
-#if defined (HAVE_GCC_ATOMIC_SYNCHRONIZE)
+										 state_old, state) != state_old);
+#if defined(HAVE_GCC_ATOMIC_SYNCHRONIZE)
 	__sync_synchronize();
 #endif
 }
@@ -297,4 +296,3 @@ int initialize_volume(spec_t *, int, int);
 #endif /* USE_ATOMIC */
 
 #endif /* ISTGT_PROTO_H */
-
