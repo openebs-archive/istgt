@@ -49,11 +49,11 @@
 
 #if !defined(__GNUC__)
 #undef __attribute__
-#define __attribute__(x)
+#define	__attribute__(x)
 #endif
 
 #ifdef USE_VBOXVD
-#define IN_RING3
+#define	IN_RING3
 #include "iprt/buildconfig.h"
 #include "VBox/vd.h"
 
@@ -68,23 +68,28 @@ typedef struct istgt_lu_disk_vbox_t {
 } ISTGT_LU_DISK_VBOX;
 
 #ifndef O_ACCMODE
-#define O_ACCMODE (O_RDONLY|O_WRONLY|O_RDWR)
+#define	O_ACCMODE (O_RDONLY|O_WRONLY|O_RDWR)
 #endif
 
-static void istgt_lu_disk_vbox_error(void *pvUser, int rc, const char *pszFile, unsigned iLine, const char *pszFunction, const char *pszFormat, va_list va) __attribute__((__format__(__printf__, 6, 0)));
+static void istgt_lu_disk_vbox_error(void *pvUser, int rc, const char *pszFile,
+	unsigned iLine, const char *pszFunction,
+	const char *pszFormat, va_list va)
+	__attribute__((__format__(__printf__, 6, 0)));
 
-static void istgt_lu_disk_vbox_error(void *pvUser, int rc, const char *pszFile, unsigned iLine, const char *pszFunction, const char *pszFormat, va_list va)
+static void istgt_lu_disk_vbox_error(void *pvUser, int rc,
+	const char *pszFile, unsigned iLine, const char *pszFunction,
+	const char *pszFormat, va_list va)
 {
 	ISTGT_LU_DISK *spec = (ISTGT_LU_DISK*)pvUser;
 	char buf[MAX_TMPBUF*2];
 
-	vsnprintf(buf, sizeof buf, pszFormat, va);
+	vsnprintf(buf, sizeof (buf), pszFormat, va);
 	ISTGT_ERRLOG("LU%d: LUN%d: rc=%d, %s:%u:%s: %s", spec->num, spec->lun,
 	    rc, pszFile, iLine, pszFunction, buf);
 }
 
-static int
-istgt_lu_disk_open_vbox(ISTGT_LU_DISK *spec, int flags, int mode __attribute__((__unused__)))
+static int istgt_lu_disk_open_vbox(ISTGT_LU_DISK *spec, int flags,
+	int mode __attribute__((__unused__)))
 {
 	ISTGT_LU_DISK_VBOX *exspec = (ISTGT_LU_DISK_VBOX *)spec->exspec;
 	PVDINTERFACE pIf;
@@ -98,23 +103,26 @@ istgt_lu_disk_open_vbox(ISTGT_LU_DISK *spec, int flags, int mode __attribute__((
 	if (major > 4 || (major == 4 && minor >= 2)) {
 		// VBoxDDU >= 4.2
 		if (ISTGT_VBOXINC_VERSION_MAJOR < 4 ||
-		    (ISTGT_VBOXINC_VERSION_MAJOR == 4 && ISTGT_VBOXINC_VERSION_MINOR < 2)) {
+				(ISTGT_VBOXINC_VERSION_MAJOR == 4 &&
+				ISTGT_VBOXINC_VERSION_MINOR < 2)) {
 			ISTGT_ERRLOG("VBox library is newer than istgt\n");
-			return -1;
+			return (-1);
 		}
 	} else {
 		// VBoxDDU < 4.2
 		if (ISTGT_VBOXINC_VERSION_MAJOR > 4 ||
-		    (ISTGT_VBOXINC_VERSION_MAJOR == 4 && ISTGT_VBOXINC_VERSION_MINOR >= 2)) {
+		    (ISTGT_VBOXINC_VERSION_MAJOR == 4 &&
+				ISTGT_VBOXINC_VERSION_MINOR >= 2)) {
 			ISTGT_ERRLOG("VBox library is older than istgt\n");
-			return -1;
+			return (-1);
 		}
-		if (strcasecmp(spec->disktype, "QCOW") == 0
-		    || strcasecmp(spec->disktype, "QED") == 0
-		    || strcasecmp(spec->disktype, "VHDX") == 0) {
-			ISTGT_ERRLOG("VD format(%s) is not supported in this version.\n",
+		if (strcasecmp(spec->disktype, "QCOW") == 0 ||
+			strcasecmp(spec->disktype, "QED") == 0 ||
+			strcasecmp(spec->disktype, "VHDX") == 0) {
+			ISTGT_ERRLOG("VD format(%s) is not supported
+				in this version.\n",
 			    spec->disktype);
-			return -1;
+			return (-1);
 		}
 	}
 
@@ -124,7 +132,7 @@ istgt_lu_disk_open_vbox(ISTGT_LU_DISK *spec, int flags, int mode __attribute__((
 		uOpenFlags = VD_OPEN_FLAGS_NORMAL;
 	} else {
 		ISTGT_ERRLOG("not supported mode %x\n", (flags & O_ACCMODE));
-		return -1;
+		return (-1);
 	}
 
 	exspec->pDisk = NULL;
@@ -132,15 +140,16 @@ istgt_lu_disk_open_vbox(ISTGT_LU_DISK *spec, int flags, int mode __attribute__((
 	exspec->pVDIfsImage = NULL;
 	exspec->enmType = VDTYPE_HDD;
 
-#if ((ISTGT_VBOXINC_VERSION_MAJOR > 4) || (ISTGT_VBOXINC_VERSION_MAJOR == 4 && ISTGT_VBOXINC_VERSION_MINOR >= 2))
+#if ((ISTGT_VBOXINC_VERSION_MAJOR > 4) || (ISTGT_VBOXINC_VERSION_MAJOR == 4 &&
+		ISTGT_VBOXINC_VERSION_MINOR >= 2))
 	exspec->VDIfError.pfnError = istgt_lu_disk_vbox_error;
 	exspec->VDIfError.pfnMessage = NULL;
 	pIf = (PVDINTERFACE)&exspec->VDIfError;
 
 	rc = VDInterfaceAdd(pIf, "VD interface error", VDINTERFACETYPE_ERROR,
-	    spec, sizeof(VDINTERFACEERROR), &exspec->pVDIfs);
+	    spec, sizeof (VDINTERFACEERROR), &exspec->pVDIfs);
 #else /* VBox < 4.2 */
-	exspec->VDIfError.cbSize = sizeof(VDINTERFACEERROR);
+	exspec->VDIfError.cbSize = sizeof (VDINTERFACEERROR);
 	exspec->VDIfError.enmInterface = VDINTERFACETYPE_ERROR;
 	exspec->VDIfError.pfnError = istgt_lu_disk_vbox_error;
 	exspec->VDIfError.pfnMessage = NULL;
@@ -151,7 +160,7 @@ istgt_lu_disk_open_vbox(ISTGT_LU_DISK *spec, int flags, int mode __attribute__((
 #endif /* VBox >= 4.2 */
 	if (RT_FAILURE(rc)) {
 		ISTGT_ERRLOG("VDInterfaceAdd error\n");
-		return -1;
+		return (-1);
 	}
 
 	rc = VDCreate(exspec->pVDIfs, exspec->enmType, &exspec->pDisk);
@@ -161,7 +170,7 @@ istgt_lu_disk_open_vbox(ISTGT_LU_DISK *spec, int flags, int mode __attribute__((
 		exspec->pDisk = NULL;
 		exspec->pVDIfs = NULL;
 		exspec->pVDIfsImage = NULL;
-		return -1;
+		return (-1);
 	}
 	rc = VDOpen(exspec->pDisk, spec->disktype, spec->file, uOpenFlags,
 	    exspec->pVDIfsImage);
@@ -172,9 +181,9 @@ istgt_lu_disk_open_vbox(ISTGT_LU_DISK *spec, int flags, int mode __attribute__((
 		exspec->pDisk = NULL;
 		exspec->pVDIfs = NULL;
 		exspec->pVDIfsImage = NULL;
-		return -1;
+		return (-1);
 	}
-	return 0;
+	return (0);
 }
 
 static int
@@ -185,7 +194,8 @@ istgt_lu_disk_close_vbox(ISTGT_LU_DISK *spec)
 	bool fDelete = false;
 	int rc;
 
-#if ((ISTGT_VBOXINC_VERSION_MAJOR > 4) || (ISTGT_VBOXINC_VERSION_MAJOR == 4 && ISTGT_VBOXINC_VERSION_MINOR >= 2))
+#if ((ISTGT_VBOXINC_VERSION_MAJOR > 4) || (ISTGT_VBOXINC_VERSION_MAJOR == 4 &&
+		ISTGT_VBOXINC_VERSION_MINOR >= 2))
 	pIf = (PVDINTERFACE)&exspec->VDIfError;
 #else /* VBox < 4.2 */
 	pIf = &exspec->VDIfsDisk;
@@ -198,23 +208,23 @@ istgt_lu_disk_close_vbox(ISTGT_LU_DISK *spec)
 		exspec->pDisk = NULL;
 		exspec->pVDIfs = NULL;
 		exspec->pVDIfsImage = NULL;
-		return -1;
+		return (-1);
 	}
 	VDDestroy(exspec->pDisk);
 	VDInterfaceRemove(pIf, &exspec->pVDIfs);
 	exspec->pDisk = NULL;
 	exspec->pVDIfs = NULL;
 	exspec->pVDIfsImage = NULL;
-	return 0;
+	return (0);
 }
 
 static int64_t
 istgt_lu_disk_seek_vbox(ISTGT_LU_DISK *spec, uint64_t offset)
 {
-	//ISTGT_LU_DISK_VBOX *exspec = (ISTGT_LU_DISK_VBOX *)spec->exspec;
+	// ISTGT_LU_DISK_VBOX *exspec = (ISTGT_LU_DISK_VBOX *)spec->exspec;
 
 	spec->foffset = offset;
-	return 0;
+	return (0);
 }
 
 static int64_t
@@ -228,10 +238,10 @@ istgt_lu_disk_read_vbox(ISTGT_LU_DISK *spec, void *buf, uint64_t nbytes)
 	rc = VDRead(exspec->pDisk, offset, buf, (size_t)nbytes);
 	if (RT_FAILURE(rc)) {
 		ISTGT_ERRLOG("VDRead error\n");
-		return -1;
+		return (-1);
 	}
 	spec->foffset += nbytes;
-	return (int64_t)nbytes;
+	return ((int64_t)nbytes);
 }
 
 static int64_t
@@ -245,14 +255,16 @@ istgt_lu_disk_write_vbox(ISTGT_LU_DISK *spec, const void *buf, uint64_t nbytes)
 	rc = VDWrite(exspec->pDisk, offset, buf, (size_t)nbytes);
 	if (RT_FAILURE(rc)) {
 		ISTGT_ERRLOG("VDWrite error\n");
-		return -1;
+		return (-1);
 	}
 	spec->foffset += nbytes;
-	return (int64_t)nbytes;
+	return ((int64_t)nbytes);
 }
 
 static int64_t
-istgt_lu_disk_sync_vbox(ISTGT_LU_DISK *spec, uint64_t offset __attribute__((__unused__)), uint64_t nbytes __attribute__((__unused__)))
+istgt_lu_disk_sync_vbox(ISTGT_LU_DISK *spec, uint64_t offset
+	__attribute__((__unused__)), uint64_t nbytes
+	__attribute__((__unused__)))
 {
 	ISTGT_LU_DISK_VBOX *exspec = (ISTGT_LU_DISK_VBOX *)spec->exspec;
 	int rc;
@@ -260,33 +272,34 @@ istgt_lu_disk_sync_vbox(ISTGT_LU_DISK *spec, uint64_t offset __attribute__((__un
 	rc = VDFlush(exspec->pDisk);
 	if (RT_FAILURE(rc)) {
 		ISTGT_ERRLOG("VDFlush error\n");
-		return -1;
+		return (-1);
 	}
-	return 0;
+	return (0);
 }
 
 static int
 istgt_lu_disk_allocate_vbox(ISTGT_LU_DISK *spec __attribute__((__unused__)))
 {
-	//ISTGT_LU_DISK_VBOX *exspec = (ISTGT_LU_DISK_VBOX *)spec->exspec;
+	// ISTGT_LU_DISK_VBOX *exspec = (ISTGT_LU_DISK_VBOX *)spec->exspec;
 
-	return 0;
+	return (0);
 }
 
 static int
 istgt_lu_disk_setcache_vbox(ISTGT_LU_DISK *spec)
 {
-	//ISTGT_LU_DISK_VBOX *exspec = (ISTGT_LU_DISK_VBOX *)spec->exspec;
+	// ISTGT_LU_DISK_VBOX *exspec = (ISTGT_LU_DISK_VBOX *)spec->exspec;
 
 	if (spec->read_cache) {
 	}
 	if (spec->write_cache) {
 	}
-	return 0;
+	return (0);
 }
 
 int
-istgt_lu_disk_vbox_lun_init(ISTGT_LU_DISK *spec, ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
+istgt_lu_disk_vbox_lun_init(ISTGT_LU_DISK *spec, ISTGT_Ptr istgt
+	__attribute__((__unused__)), ISTGT_LU_Ptr lu)
 {
 	ISTGT_LU_DISK_VBOX *exspec;
 	uint64_t capacity;
@@ -308,8 +321,8 @@ istgt_lu_disk_vbox_lun_init(ISTGT_LU_DISK *spec, ISTGT_Ptr istgt __attribute__((
 	spec->allocate = istgt_lu_disk_allocate_vbox;
 	spec->setcache = istgt_lu_disk_setcache_vbox;
 
-	exspec = xmalloc(sizeof *exspec);
-	memset(exspec, 0, sizeof *exspec);
+	exspec = xmalloc(sizeof (*exspec));
+	memset(exspec, 0, sizeof (*exspec));
 	spec->exspec = exspec;
 
 	flags = lu->readonly ? O_RDONLY : O_RDWR;
@@ -317,7 +330,7 @@ istgt_lu_disk_vbox_lun_init(ISTGT_LU_DISK *spec, ISTGT_Ptr istgt __attribute__((
 	if (rc < 0) {
 		ISTGT_ERRLOG("LU%d: LUN%d: open error(rc=%d)\n",
 		    spec->num, spec->lun, rc);
-		return -1;
+		return (-1);
 	}
 
 	capacity = VDGetSize(exspec->pDisk, 0);
@@ -329,7 +342,7 @@ istgt_lu_disk_vbox_lun_init(ISTGT_LU_DISK *spec, ISTGT_Ptr istgt __attribute__((
 	if (spec->blockcnt == 0) {
 		ISTGT_ERRLOG("LU%d: LUN%d: size zero\n", spec->num, spec->lun);
 		spec->close(spec);
-		return -1;
+		return (-1);
 	}
 
 #if 0
@@ -347,17 +360,19 @@ istgt_lu_disk_vbox_lun_init(ISTGT_LU_DISK *spec, ISTGT_Ptr istgt __attribute__((
 	printf("LU%d: LUN%d %"PRIu64" blocks, %"PRIu64" bytes/block\n",
 	    spec->num, spec->lun, spec->blockcnt, spec->blocklen);
 
-	if (strcasecmp(spec->disktype, "VDI") == 0
-	    || strcasecmp(spec->disktype, "VHD") == 0
-	    || strcasecmp(spec->disktype, "VMDK") == 0) {
+	if (strcasecmp(spec->disktype, "VDI") == 0 ||
+		strcasecmp(spec->disktype, "VHD") == 0 ||
+		strcasecmp(spec->disktype, "VMDK") == 0) {
 		rc = VDGetUuid(exspec->pDisk, 0, &exspec->uuid);
 		if (RT_FAILURE(rc)) {
-			ISTGT_ERRLOG("LU%d: LUN%d: uuid error\n", spec->num, spec->lun);
+			ISTGT_ERRLOG("LU%d: LUN%d: uuid error\n",
+				spec->num, spec->lun);
 			spec->close(spec);
-			return -1;
+			return (-1);
 		}
-		printf("LU%d: LUN%d UUID="
-		    "%8.8x-%4.4x-%4.4x-%2.2x%2.2x-%2.2x%2.2x%2.2x%2.2x%2.2x%2.2x\n",
+		printf("LU%d: LUN%d UUID=""
+			%8.8x-%4.4x-%4.4x-%2.2x%2.2x-
+			%2.2x%2.2x%2.2x%2.2x%2.2x%2.2x\n",
 		    spec->num, spec->lun,
 		    exspec->uuid.Gen.u32TimeLow,
 		    exspec->uuid.Gen.u16TimeMid,
@@ -371,11 +386,13 @@ istgt_lu_disk_vbox_lun_init(ISTGT_LU_DISK *spec, ISTGT_Ptr istgt __attribute__((
 		    exspec->uuid.Gen.au8Node[4],
 		    exspec->uuid.Gen.au8Node[5]);
 	}
-	return 0;
+	return (0);
 }
 
 int
-istgt_lu_disk_vbox_lun_shutdown(ISTGT_LU_DISK *spec, ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu __attribute__((__unused__)))
+istgt_lu_disk_vbox_lun_shutdown(ISTGT_LU_DISK *spec, ISTGT_Ptr istgt
+	__attribute__((__unused__)), ISTGT_LU_Ptr lu
+	__attribute__((__unused__)))
 {
 	ISTGT_LU_DISK_VBOX *exspec = (ISTGT_LU_DISK_VBOX *)spec->exspec;
 	int rc;
@@ -388,34 +405,41 @@ istgt_lu_disk_vbox_lun_shutdown(ISTGT_LU_DISK *spec, ISTGT_Ptr istgt __attribute
 	if (!spec->lu->readonly) {
 		rc = spec->sync(spec, 0, spec->size);
 		if (rc < 0) {
-			//ISTGT_ERRLOG("LU%d: lu_disk_sync() failed\n", lu->num);
+			// ISTGT_ERRLOG("LU%d:
+			// lu_disk_sync() failed\n", lu->num);
 			/* ignore error */
 		}
 	}
 	rc = spec->close(spec);
 	if (rc < 0) {
-		//ISTGT_ERRLOG("LU%d: lu_disk_close() failed\n", lu->num);
+		// ISTGT_ERRLOG("LU%d: lu_disk_close() failed\n", lu->num);
 		/* ignore error */
 	}
 
 	xfree(exspec);
 	spec->exspec = NULL;
-	return 0;
+	return (0);
 }
 #else /* USE_VBOXVD */
 int
-istgt_lu_disk_vbox_lun_init(ISTGT_LU_DISK *spec, ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu __attribute__((__unused__)))
+istgt_lu_disk_vbox_lun_init(ISTGT_LU_DISK *spec, ISTGT_Ptr istgt
+	__attribute__((__unused__)), ISTGT_LU_Ptr lu
+	__attribute__((__unused__)))
 {
-	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "LU%d: LUN%d unsupported virtual disk\n",
+	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG,
+		"LU%d: LUN%d unsupported virtual disk\n",
 	    spec->num, spec->lun);
-	return -1;
+	return (-1);
 }
 
 int
-istgt_lu_disk_vbox_lun_shutdown(ISTGT_LU_DISK *spec, ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu __attribute__((__unused__)))
+istgt_lu_disk_vbox_lun_shutdown(ISTGT_LU_DISK *spec, ISTGT_Ptr istgt
+	__attribute__((__unused__)), ISTGT_LU_Ptr lu
+	__attribute__((__unused__)))
 {
-	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "LU%d: LUN%d unsupported virtual disk\n",
+	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG,
+		"LU%d: LUN%d unsupported virtual disk\n",
 	    spec->num, spec->lun);
-	return -1;
+	return (-1);
 }
 #endif /* USE_VBOXVD */
