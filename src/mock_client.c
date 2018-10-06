@@ -37,7 +37,7 @@ static void build_cmd(cargs_t *cargs, ISTGT_LU_CMD_Ptr lu_cmd,
 cargs_t *all_cargs = NULL;
 pthread_t *all_cthreads = NULL;
 
-	static void
+static void
 build_cmd(cargs_t *cargs, ISTGT_LU_CMD_Ptr cmd, SBC_OPCODE opcode,
 		int len)
 {
@@ -85,7 +85,7 @@ check_settings(spec_t *spec)
  * Adds write IOs to replication module
  * Increments '*count' variable to set the completion of writer thread
  */
-	void *
+void *
 writer(void *args)
 {
 	cargs_t *cargs = (cargs_t *)args;
@@ -164,7 +164,7 @@ end:
  * Adds read IOs to replication module
  * Increments '*count' variable to set the completion of reader thread
  */
-	void *
+void *
 reader(void *args)
 {
 	cargs_t *cargs = (cargs_t *)args;
@@ -239,7 +239,7 @@ end:
 	return (NULL);
 }
 
-	void *
+void *
 mgmt_thrd(void *args)
 {
 	cargs_t *cargs = (cargs_t *)args;
@@ -296,7 +296,7 @@ mgmt_thrd(void *args)
  * isends IOs to replication module.
  */
 
-	void
+void
 create_mock_client(spec_t *spec)
 {
 	int num_threads = 6;
@@ -362,7 +362,7 @@ create_mock_client(spec_t *spec)
 	all_cargs = NULL;
 }
 
-	void
+void
 wait_for_mock_clients()
 {
 	int count = 10;
