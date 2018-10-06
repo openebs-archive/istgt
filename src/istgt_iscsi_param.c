@@ -64,14 +64,14 @@ istgt_iscsi_param_find(ISCSI_PARAM *params, const char *key)
 	ISCSI_PARAM *param;
 
 	if (params == NULL || key == NULL)
-		return NULL;
+		return (NULL);
 	for (param = params; param != NULL; param = param->next) {
 		if (param->key != NULL && param->key[0] == key[0]
-			&& strcasecmp(param->key, key) == 0) {
-			return param;
+            && strcasecmp(param->key, key) == 0) {
+			return (param);
 		}
 	}
-	return NULL;
+	return (NULL);
 }
 
 int
@@ -81,10 +81,10 @@ istgt_iscsi_param_del(ISCSI_PARAM **params, const char *key)
 
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "del %s\n", key);
 	if (params == NULL || key == NULL)
-		return 0;
+		return (0);
 	for (param = *params; param != NULL; param = param->next) {
 		if (param->key != NULL && param->key[0] == key[0]
-			&& strcasecmp(param->key, key) == 0) {
+            && strcasecmp(param->key, key) == 0) {
 			if (prev_param != NULL) {
 				prev_param->next = param->next;
 			} else {
@@ -92,28 +92,29 @@ istgt_iscsi_param_del(ISCSI_PARAM **params, const char *key)
 			}
 			param->next = NULL;
 			istgt_iscsi_param_free(param);
-			return 0;
+			return (0);
 		}
 		prev_param = param;
 	}
-	return -1;
+	return (-1);
 }
 
 int
-istgt_iscsi_param_add(ISCSI_PARAM **params, const char *key, const char *val, const char *list, int type)
+istgt_iscsi_param_add(ISCSI_PARAM **params, const char *key, const char *val,
+    const char *list, int type)
 {
 	ISCSI_PARAM *param, *last_param;
 
-	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "add %s=%s, list=[%s], type=%d\n",
-				   key, val, list, type);
+    ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "add %s=%s, list=[%s], type=%d\n",
+    key, val, list, type);
 	if (key == NULL)
-		return -1;
+		return (-1);
 	param = istgt_iscsi_param_find(*params, key);
 	if (param != NULL) {
 		istgt_iscsi_param_del(params, key);
 	}
-	param = xmalloc(sizeof *param);
-	memset(param, 0, sizeof *param);
+	param = xmalloc(sizeof (*param));
+	memset(param, 0, sizeof (*param));
 	param->next = NULL;
 	param->key = xstrdup(key);
 	param->val = xstrdup(val);
@@ -130,7 +131,7 @@ istgt_iscsi_param_add(ISCSI_PARAM **params, const char *key, const char *val, co
 		*params = param;
 	}
 
-	return 0;
+	return (0);
 }
 
 int
@@ -142,13 +143,13 @@ istgt_iscsi_param_set(ISCSI_PARAM *params, const char *key, const char *val)
 	param = istgt_iscsi_param_find(params, key);
 	if (param == NULL) {
 		ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "no key %s\n", key);
-		return -1;
+		return (-1);
 	}
 
 	xfree(param->val);
 	param->val = xstrdup(val);
 
-	return 0;
+	return (0);
 }
 
 int
@@ -161,14 +162,14 @@ istgt_iscsi_param_set_int(ISCSI_PARAM *params, const char *key, int val)
 	param = istgt_iscsi_param_find(params, key);
 	if (param == NULL) {
 		ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "no key %s\n", key);
-		return -1;
+		return (-1);
 	}
 
 	xfree(param->val);
 	snprintf(buf, sizeof buf, "%d", val);
 	param->val = xstrdup(buf);
 
-	return 0;
+	return (0);
 }
 
 int
@@ -202,7 +203,7 @@ istgt_iscsi_parse_params(ISCSI_PARAM **params, const uint8_t *data, int len)
 		error_return:
 			xfree(key);
 			xfree(val);
-			return -1;
+			return (-1);
 		}
 		n = q - p;
 		if (n > ISCSI_TEXT_MAX_KEY_LEN) {
@@ -240,5 +241,5 @@ istgt_iscsi_parse_params(ISCSI_PARAM **params, const uint8_t *data, int len)
 
 	xfree(key);
 	xfree(val);
-	return 0;
+	return (0);
 }
