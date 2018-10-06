@@ -35,39 +35,39 @@ do {									\
 									\
 	snprintf(_l + _off, sizeof (_l) - _off, fmt, ##__VA_ARGS__);	\
 	fprintf(stderr, "%s\n", _l);					\
-}while(0);
+} while (0);
 
-#define REPLICA_LOG(fmt, ...)						\
+#define	REPLICA_LOG(fmt, ...)						\
 {									\
 	repl_log(LOG_LEVEL_INFO, "%-18.18s:%4d: %-20.20s: " fmt,	\
 		    __func__, __LINE__, tinfo, ##__VA_ARGS__);		\
 }
 
-#define REPLICA_NOTICELOG(fmt, ...)					\
+#define	REPLICA_NOTICELOG(fmt, ...)					\
 {									\
 	repl_log(LOG_LEVEL_INFO, "%-18.18s:%4d: %-20.20s: " fmt,	\
 		    __func__, __LINE__, tinfo, ##__VA_ARGS__);		\
 }
 
-#define REPLICA_ERRLOG(fmt, ...)					\
+#define	REPLICA_ERRLOG(fmt, ...)					\
 {									\
 	repl_log(LOG_LEVEL_ERR, "%-18.18s:%4d: %-20.20s: " fmt,		\
 		    __func__, __LINE__, tinfo, ##__VA_ARGS__);		\
 }
-#define REPLICA_WARNLOG(fmt, ...)					\
+#define	REPLICA_WARNLOG(fmt, ...)					\
 {									\
 	repl_log(LOG_LEVEL_ERR, "%-18.18s:%4d: %-20.20s: " fmt,		\
 		    __func__, __LINE__, tinfo, ##__VA_ARGS__);		\
 }
 
 #ifdef	DEBUG
-#define REPLICA_DEBUGLOG(fmt, ...)					\
+#define	REPLICA_DEBUGLOG(fmt, ...)					\
 {									\
 	repl_log(LOG_LEVEL_DEBUG, "%-18.18s:%4d: %-20.20s: " fmt,	\
 		    __func__, __LINE__, tinfo, ##__VA_ARGS__);		\
 }
 #else
-#define REPLICA_DEBUGLOG(fmt, ...)
+#define	REPLICA_DEBUGLOG(fmt, ...)
 #endif
 
 #endif /* REPLICATION_LOG_H */
