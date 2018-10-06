@@ -32,7 +32,7 @@ void *writer(void *args);
 void check_settings(spec_t *spec);
 void wait_for_mock_clients(void);
 static void build_cmd(cargs_t *cargs, ISTGT_LU_CMD_Ptr lu_cmd,
-    opcode, int len);
+    SBC_OPCODE opcode, int len);
 
 cargs_t *all_cargs = NULL;
 pthread_t *all_cthreads = NULL;
