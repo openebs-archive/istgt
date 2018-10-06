@@ -82,7 +82,8 @@ init_mdlist(char *vol_name)
 
 	if (create) {
 		if (truncate(mdpath, mdlist_size)) {
-			REPLICA_ERRLOG("Failed to create %s err(%d)\n", mdpath, errno);
+			REPLICA_ERRLOG("Failed to"
+				" create %s err(%d)\n", mdpath, errno);
 			return (-1);
 		}
 	}
@@ -212,11 +213,13 @@ test_read_data(int fd, uint8_t *data, uint64_t len)
 			else if (errno == EAGAIN || errno == EWOULDBLOCK) {
 				break;
 			} else {
-				REPLICA_ERRLOG("received err(%d) on fd(%d)\n", errno, fd);
+				REPLICA_ERRLOG("received err(%d) on"
+					" fd(%d)\n", errno, fd);
 				return (-1);
 			}
 		} else if (rc == 0) {
-			REPLICA_ERRLOG("received EOF on fd(%d)\n", fd);
+			REPLICA_ERRLOG("received EOF"
+				" on fd(%d)\n", fd);
 			return (-1);
 		}
 
@@ -378,7 +381,8 @@ send_io_resp(int fd, zvol_io_hdr_t *io_hdr, void *buf)
 	while (nbytes) {
 		rc = writev(fd, iovec, iovcnt); // Review iovec in this line
 		if (rc < 0) {
-			REPLICA_ERRLOG("failed to write on fd errno(%d)\n", errno);
+			REPLICA_ERRLOG("failed to write on"
+				" fd errno(%d)\n", errno);
 			return (-1);
 		}
 		nbytes -= rc;
@@ -512,7 +516,8 @@ main(int argc, char **argv)
 	zrepl_status->state = ZVOL_STATUS_DEGRADED;
 	zrepl_status->rebuild_status = ZVOL_REBUILDING_INIT;
 	if (init_mdlist(test_vol)) {
-		REPLICA_ERRLOG("Failed to initialize mdlist for replica(%d)\n", ctrl_port);
+		REPLICA_ERRLOG("Failed to initialize "
+			"mdlist for replica(%d)\n", ctrl_port);
 		close(vol_fd);
 		exit(EXIT_FAILURE);
 	}
@@ -525,7 +530,8 @@ main(int argc, char **argv)
 	
 	// Create listener for io connections from controller and add to epoll
 	if ((sfd = cstor_ops.conn_listen(replica_ip, replica_port, 32, 1)) < 0) {
-        		REPLICA_LOG("conn_listen() failed, err:%d replica(%d)", errno, ctrl_port);
+        		REPLICA_LOG("conn_listen() failed,"
+        			" err:%d replica(%d)", errno, ctrl_port);
 		close(vol_fd);
 		destroy_mdlist();
         		exit(EXIT_FAILURE);
@@ -534,7 +540,8 @@ main(int argc, char **argv)
 	event.events = EPOLLIN | EPOLLET;
 	rc = epoll_ctl(epfd, EPOLL_CTL_ADD, sfd, &event);
 	if (rc == -1) {
-		REPLICA_ERRLOG("epoll_ctl() failed, err:%d replica(%d)", errno, ctrl_port);
+		REPLICA_ERRLOG("epoll_ctl() failed, err:%d"
+			" replica(%d)", errno, ctrl_port);
 		close(vol_fd);
 		destroy_mdlist();
 		exit(EXIT_FAILURE);
@@ -560,7 +567,8 @@ again:
 	event.events = EPOLLIN | EPOLLET;
 	rc = epoll_ctl(epfd, EPOLL_CTL_ADD, mgmtfd, &event);
 	if (rc == -1) {
-		REPLICA_ERRLOG("epoll_ctl() failed, err:%d replica(%d)", errno, ctrl_port);
+		REPLICA_ERRLOG("epoll_ctl() failed,"
+			" err:%d replica(%d)", errno, ctrl_port);
 		exit(EXIT_FAILURE);
 	}
 
@@ -595,7 +603,8 @@ again:
 					retry = false;
 				}
 				if (count != sizeof (zvol_io_hdr_t)) {
-					REPLICA_ERRLOG("Failed to read complete header.. got only %ld bytes out of %lu\n",
+					REPLICA_ERRLOG("Failed to read complete"
+						" header.. got only %ld bytes out of %lu\n",
 					    count, sizeof (zvol_io_hdr_t));
 					rc = -1;
 					goto error;
@@ -608,7 +617,8 @@ again:
 						rc = -1;
 						goto error;
 					} else if ((uint64_t)count != mgmtio->len) {
-						REPLICA_ERRLOG("failed to getch mgmt data.. got only %ld bytes out of %lu\n",
+						REPLICA_ERRLOG("failed to getch mgmt"
+							" data.. got only %ld bytes out of %lu\n",
 						    count, mgmtio->len);
 						rc = -1;
 						goto error;
@@ -794,7 +804,8 @@ execute_io:
 						}
 
 						if (nbytes != io_hdr->len) {
-							REPLICA_ERRLOG("failed to read completed data from %s off:%lu "
+							REPLICA_ERRLOG("failed to read completed"
+								" data from %s off:%lu "
 							    "req:%lu read:%lu replica(%d)\n",
 							    test_vol, io_hdr->offset, io_hdr->len, nbytes, ctrl_port);
 							free(user_data);
@@ -810,7 +821,8 @@ execute_io:
 
 					rc = send_io_resp(iofd, io_hdr, data);
 					if (rc) {
-						REPLICA_ERRLOG("Failed to send response replica(%d)\n", ctrl_port);
+						REPLICA_ERRLOG("Failed to send response"
+							" replica(%d)\n", ctrl_port);
 						goto error;
 					}
 
