@@ -106,7 +106,7 @@ istgt_iscsi_param_add(ISCSI_PARAM **params, const char *key, const char *val,
 	ISCSI_PARAM *param, *last_param;
 
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "add %s=%s, list=[%s], type=%d\n",
-			key, val, list, type);
+                      key, val, list, type);
 	if (key == NULL)
 		return (-1);
 	param = istgt_iscsi_param_find(*params, key);
