@@ -27,7 +27,7 @@
 
 #ifndef ISTGT_H
 #define ISTGT_H
-#define CLOCK_UPTIME_FAST       8
+#define CLOCK_UPTIME_FAST 8
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
@@ -59,10 +59,10 @@
 #define __attribute__(x)
 #endif
 #if defined(__GNUC__) && defined(__GNUC_MINOR__)
-#define ISTGT_GNUC_PREREQ(ma,mi) \
+#define ISTGT_GNUC_PREREQ(ma,mi),\
 	(__GNUC__ > (ma) || (__GNUC__ == (ma) && __GNUC_MINOR__ >= (mi)))
 #else
-#define ISTGT_GNUC_PREREQ(ma,mi) 0
+#define ISTGT_GNUC_PREREQ(ma,mi), 0
 #endif
 
 #define MAX_TMPBUF 1024
@@ -110,7 +110,7 @@
 #define DEFAULT_TIMEOUT 60
 #define DEFAULT_NOPININTERVAL 20
 #define DEFAULT_MAXR2T 16
-#define TMF_TIMEOUT 2 
+#define TMF_TIMEOUT 2  
 
 #define ISTGT_PG_TAG_MAX 0x0000ffff
 #define ISTGT_LU_TAG_MAX 0x0000ffff
@@ -124,60 +124,60 @@
 #define ISTGT_CONDWAIT_MINS (5) /* s */
 #define ISTGT_STACKSIZE (2 * 1024 * 1024)
 
-#if defined (SIGRTMIN)
+#if defined(SIGRTMIN)
 #define ISTGT_SIGWAKEUP (SIGRTMIN + 1)
 #define ISTGT_USE_SIGRT
-#elif defined (SIGIO)
+#elif defined(SIGIO)
 #define ISTGT_SIGWAKEUP (SIGIO)
 #else
 #error "no signal for internal"
 #endif
-#if defined (__FreeBSD__) || (__linux__) || defined (__NetBSD__) || defined (__OpenBSD__)
+#if defined(__FreeBSD__) || (__linux__) || defined(__NetBSD__) || defined(__OpenBSD__)
 #define ISTGT_USE_KQUEUE
-#if defined (__linux__) || (__FreeBSD__)
-#define ISTGT_EV_SET(kevp,a,b,c,d,e,f) EV_SET((kevp),(a),(b),(c),(d),(e),(void *)(f))
+#if defined(__linux__) || (__FreeBSD__)
+#define ISTGT_EV_SET(kevp,a,b,c,d,e,f),EV_SET((kevp),(a),(b),(c),(d),(e),(void *)(f))
 #elif defined (__NetBSD__)
-#define ISTGT_EV_SET(kevp,a,b,c,d,e,f) EV_SET((kevp),(a),(b),(c),(d),(e),(intptr_t)(f))
+#define ISTGT_EV_SET(kevp,a,b,c,d,e,f),EV_SET((kevp),(a),(b),(c),(d),(e),(intptr_t)(f))
 #else
-#define ISTGT_EV_SET(kevp,a,b,c,d,e,f) EV_SET((kevp),(a),(b),(c),(d),(e),(f))
+#define ISTGT_EV_SET(kevp,a,b,c,d,e,f),EV_SET((kevp),(a),(b),(c),(d),(e),(f))
 #endif
 #endif
 
 #ifdef __linux__
-#define fls(lbPerRecord) (sizeof(int)*8 - __builtin_clz(lbPerRecord))
+#define fls(lbPerRecord) (sizeof (int)*8 - __builtin_clz(lbPerRecord))
 #endif
 
 #define ISTGT_UCTL_UNXPATH "/var/run/istgt_ctl_sock"
 
 #define MTX_LOCK(MTX) \
 	do {								\
-		int _rc_;							\
-		if ((_rc_ = pthread_mutex_lock((MTX))) != 0) {	\
-			ISTGT_ERRLOG("lock error:%d", _rc_);			\
+	int _rc_;							\
+	if ((_rc_ = pthread_mutex_lock((MTX))) != 0) {	\
+		ISTGT_ERRLOG("lock error:%d", _rc_);			\
 			pthread_exit(NULL);				\
 		}							\
 	} while (0)
 #define MTX_UNLOCK(MTX) \
 	do {								\
-		int _rc_;							\
-		if ((_rc_ = pthread_mutex_unlock((MTX))) != 0) {			\
-			ISTGT_ERRLOG("unlock error:%d", _rc_);			\
+	int _rc_;							\
+	if ((_rc_ = pthread_mutex_unlock((MTX))) != 0) {			\
+		ISTGT_ERRLOG("unlock error:%d", _rc_);			\
 			pthread_exit(NULL);				\
 		}							\
 	} while (0)
 #define SPIN_LOCK(SPIN) \
 	do {								\
-		int _rc_;							\
-		if ((_rc_ = pthread_spin_lock((SPIN))) != 0) {			\
-			ISTGT_ERRLOG("lock error:%d", _rc_);			\
+	int _rc_;							\
+	if ((_rc_ = pthread_spin_lock((SPIN))) != 0) {			\
+		ISTGT_ERRLOG("lock error:%d", _rc_);			\
 			pthread_exit(NULL);				\
 		}							\
 	} while (0)
 #define SPIN_UNLOCK(SPIN) \
 	do {								\
-		int _rc_;							\
-		if ((_rc_ = pthread_spin_unlock((SPIN))) != 0) {			\
-			ISTGT_ERRLOG("unlock error:%d", _rc_);			\
+	int _rc_;							\
+	if ((_rc_ = pthread_spin_unlock((SPIN))) != 0) {			\
+		ISTGT_ERRLOG("unlock error:%d", _rc_);			\
 			pthread_exit(NULL);				\
 		}							\
 	} while (0)
@@ -326,7 +326,7 @@ istgt_get_state(ISTGT_Ptr istgt)
 #else
 #error "no atomic operation"
 #endif
-	return state;
+	return (state);
 }
 static inline __attribute__((__always_inline__)) void
 istgt_set_state(ISTGT_Ptr istgt, ISTGT_STATE state)
@@ -334,7 +334,7 @@ istgt_set_state(ISTGT_Ptr istgt, ISTGT_STATE state)
 #if defined HAVE_ATOMIC_STORE_REL_INT
 	atomic_store_rel_int((unsigned int *)&istgt->state, state);
 #elif defined HAVE_ATOMIC_SWAP_UINT
-	(void)atomic_swap_uint((unsigned int *)&istgt->state, state);
+	(void)atomic_swap_uint ((unsigned int *)&istgt->state, state);
 #if defined HAVE_MEMBAR_PRODUCER
 	membar_producer();
 #endif
@@ -342,24 +342,24 @@ istgt_set_state(ISTGT_Ptr istgt, ISTGT_STATE state)
 #error "no atomic operation"
 #endif
 }
-#elif defined (USE_GCC_ATOMIC)
+#elif defined(USE_GCC_ATOMIC)
 /* gcc >= 4.1 builtin functions */
 static inline __attribute__((__always_inline__)) int
 istgt_get_state(ISTGT_Ptr istgt)
 {
 	ISTGT_STATE state;
 	state = __sync_fetch_and_add((unsigned int *)&istgt->state, 0);
-	return state;
+	return (state);
 }
 static inline __attribute__((__always_inline__)) void
 istgt_set_state(ISTGT_Ptr istgt, ISTGT_STATE state)
 {
 	ISTGT_STATE state_old;
 	do {
-		state_old = __sync_fetch_and_add((unsigned int *)&istgt->state, 0);
+	state_old = __sync_fetch_and_add((unsigned int *)&istgt->state, 0);
 	} while (__sync_val_compare_and_swap((unsigned int *)&istgt->state,
-		state_old, state) != state_old);
-#if defined (HAVE_GCC_ATOMIC_SYNCHRONIZE)
+    state_old, state) != state_old);
+#if defined(HAVE_GCC_ATOMIC_SYNCHRONIZE)
 	__sync_synchronize();
 #endif
 }
@@ -371,7 +371,7 @@ istgt_get_state(ISTGT_Ptr istgt)
 	MTX_LOCK(&istgt->state_mutex);
 	state = istgt->state;
 	MTX_UNLOCK(&istgt->state_mutex);
-	return state;
+	return (state);
 }
 
 static inline __attribute__((__always_inline__)) void
