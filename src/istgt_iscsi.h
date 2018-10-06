@@ -51,47 +51,47 @@
 	do {								\
 		int _rc_;						\
 		if ((_rc_ = pthread_mutex_lock(&(CONN)->sess->mutex)) != 0) {	\
-			ISTGT_ERRLOG("sess lock error:%d", _rc_);		\
-			pthread_exit(NULL);				\
+		ISTGT_ERRLOG("sess lock error:%d", _rc_);		\
+		pthread_exit(NULL);				\
 		}							\
 	} while (0)
 #define SESS_MTX_UNLOCK(CONN) \
 	do {								\
 		int _rc_;						\
 		if ((_rc_ = pthread_mutex_unlock(&(CONN)->sess->mutex)) != 0) {	\
-			ISTGT_ERRLOG("sess unlock error:%d", _rc_);		\
-			pthread_exit(NULL);				\
+		ISTGT_ERRLOG("sess unlock error:%d", _rc_);		\
+		pthread_exit(NULL);				\
 		}							\
 	} while (0)
 
 typedef enum {
 	/* Initiator opcodes */
-	ISCSI_OP_NOPOUT         = 0x00,
-	ISCSI_OP_SCSI           = 0x01,
-	ISCSI_OP_TASK           = 0x02,
-	ISCSI_OP_LOGIN          = 0x03,
-	ISCSI_OP_TEXT           = 0x04,
-	ISCSI_OP_SCSI_DATAOUT   = 0x05,
-	ISCSI_OP_LOGOUT         = 0x06,
-	ISCSI_OP_SNACK          = 0x10,
-	ISCSI_OP_VENDOR_1C      = 0x1c,
-	ISCSI_OP_VENDOR_1D      = 0x1d,
-	ISCSI_OP_VENDOR_1E      = 0x1e,
+	ISCSI_OP_NOPOUT = 0x00,
+	ISCSI_OP_SCSI = 0x01,
+	ISCSI_OP_TASK = 0x02,
+	ISCSI_OP_LOGIN = 0x03,
+	ISCSI_OP_TEXT = 0x04,
+	ISCSI_OP_SCSI_DATAOUT = 0x05,
+	ISCSI_OP_LOGOUT = 0x06,
+	ISCSI_OP_SNACK = 0x10,
+	ISCSI_OP_VENDOR_1C = 0x1c,
+	ISCSI_OP_VENDOR_1D = 0x1d,
+	ISCSI_OP_VENDOR_1E = 0x1e,
 
 	/* Target opcodes */
-	ISCSI_OP_NOPIN          = 0x20,
-	ISCSI_OP_SCSI_RSP       = 0x21,
-	ISCSI_OP_TASK_RSP       = 0x22,
-	ISCSI_OP_LOGIN_RSP      = 0x23,
-	ISCSI_OP_TEXT_RSP       = 0x24,
-	ISCSI_OP_SCSI_DATAIN    = 0x25,
-	ISCSI_OP_LOGOUT_RSP     = 0x26,
-	ISCSI_OP_R2T            = 0x31,
-	ISCSI_OP_ASYNC          = 0x32,
-	ISCSI_OP_VENDOR_3C      = 0x3c,
-	ISCSI_OP_VENDOR_3D      = 0x3d,
-	ISCSI_OP_VENDOR_3E      = 0x3e,
-	ISCSI_OP_REJECT         = 0x3f,
+	ISCSI_OP_NOPIN = 0x20,
+	ISCSI_OP_SCSI_RSP = 0x21,
+	ISCSI_OP_TASK_RSP = 0x22,
+	ISCSI_OP_LOGIN_RSP = 0x23,
+	ISCSI_OP_TEXT_RSP = 0x24,
+	ISCSI_OP_SCSI_DATAIN = 0x25,
+	ISCSI_OP_LOGOUT_RSP = 0x26,
+	ISCSI_OP_R2T = 0x31,
+	ISCSI_OP_ASYNC = 0x32,
+	ISCSI_OP_VENDOR_3C = 0x3c,
+	ISCSI_OP_VENDOR_3D = 0x3d,
+	ISCSI_OP_VENDOR_3E = 0x3e,
+	ISCSI_OP_REJECT = 0x3f,
 } ISCSI_OP;
 
 typedef enum {
@@ -212,7 +212,7 @@ typedef struct istgt_r2t_task_t {
 	uint64_t iobufsize;
 	int iobufindx;
 	struct iovec iobuf[40];
-	//int iobufoff[20]; int iobufsize[20]; uint8_t *iobuf[20];
+	// int iobufoff[20]; int iobufsize[20]; uint8_t *iobuf[20];
 
 	uint32_t R2TSN;
 	uint32_t DataSN;
@@ -229,9 +229,9 @@ typedef struct istgt_conn_t {
 	int sock;
 	int wsock;
 	int epfd;
-//#ifdef ISTGT_USE_KQUEUE
+// #ifdef ISTGT_USE_KQUEUE
 //	int kq;
-//#endif /* ISTGT_USE_KQUEUE */
+// #endif /* ISTGT_USE_KQUEUE */
 	char thr[20];
 	char sthr[20];
 	pthread_t thread;
