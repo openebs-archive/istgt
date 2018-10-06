@@ -51,95 +51,102 @@ typedef struct {
 	int replica_status;
 } errored_replica_data_t;
 
-#define	CONNECTION_CLOSE_ERROR_EPOLL(_fd, _epoll_fd, rc, _label, _err_freq, _err_type)				\
-do {														\
-	errored_replica_data_t *_repl_data;									\
-	if (_fd == -1)												\
-		break;												\
-														\
-	if (!check_for_error(_err_type))									\
-		break;												\
-														\
-	_repl_data = (errored_replica_data_t *)pthread_getspecific(err_repl_key);				\
-	(void) epoll_ctl(_epoll_fd, EPOLL_CTL_DEL, _fd, NULL);							\
-	close(_fd);												\
-	(_repl_data->mgmtfd == _fd) && (_repl_data->mgmtfd = -1);						\
-	(_repl_data->datafd == _fd) && (_repl_data->datafd = -1);						\
-	_fd = -1;												\
-														\
-	if (_err_type & ERROR_TYPE_MGMT)									\
-		_repl_data->mgmt_err_cnt++;									\
-	if (_err_type & ERROR_TYPE_DATA)									\
-		_repl_data->data_err_cnt++;									\
-														\
-	REPLICA_ERRLOG("Injecting error at %s:%d.. error count.. mgmt(%d) data(%d) replica(%d)\n",		\
-	    __FUNCTION__, __LINE__, _repl_data->mgmt_err_cnt, _repl_data->data_err_cnt,				\
-	    _repl_data->replica_port);										\
-	rc = REPL_TEST_RESTART;											\
-	goto _label;												\
+#define	CONNECTION_CLOSE_ERROR_EPOLL(_fd, _epoll_fd, rc, _label, _err_freq,
+	_err_type)
+do {
+	errored_replica_data_t *_repl_data;
+	if (_fd == -1)
+		break;
+
+	if (!check_for_error(_err_type))
+		break;
+
+	_repl_data = (errored_replica_data_t *)pthread_getspecific(err_repl_key);
+	(void) epoll_ctl(_epoll_fd, EPOLL_CTL_DEL, _fd, NULL);
+	close(_fd);
+	(_repl_data->mgmtfd == _fd) && (_repl_data->mgmtfd = -1);
+	(_repl_data->datafd == _fd) && (_repl_data->datafd = -1);
+	_fd = -1;
+
+	if (_err_type & ERROR_TYPE_MGMT)
+		_repl_data->mgmt_err_cnt++;
+	if (_err_type & ERROR_TYPE_DATA)
+		_repl_data->data_err_cnt++;
+
+	REPLICA_ERRLOG(
+		"Injecting error at %s:%d.. error count.. mgmt(%d) data(%d) replica(%d)\n",
+		__FUNCTION__, __LINE__, _repl_data->mgmt_err_cnt,
+		_repl_data->data_err_cnt,
+		_repl_data->replica_port);
+	rc = REPL_TEST_RESTART;
+	goto _label;
 } while (0);
 
-#define	HEADER_BUF_ERROR(iohdr, _err_freq, _err_type)								\
-do {														\
-	errored_replica_data_t *_repl_data;									\
-	int _count;												\
-	if (!check_for_error(_err_type))									\
-		break;												\
-														\
-	_count = random() % 5;											\
-	iohdr->version = REPLICA_VERSION;									\
-	if (_count == 0) {											\
-		iohdr->status = ZVOL_OP_STATUS_OK;								\
-	} else if (_count == 1) {										\
-		iohdr->status = ZVOL_OP_STATUS_FAILED;								\
-	} else if (_count == 2) {										\
-		iohdr->status = ZVOL_OP_STATUS_VERSION_MISMATCH;						\
-	}													\
-														\
-	if (_count == 3)											\
-		iohdr->io_seq = -1;										\
-	if (_count == 4)											\
-		iohdr->offset = ULONG_MAX;									\
-	if (_count == 5)											\
-		iohdr->len = ULONG_MAX;										\
-														\
-	_repl_data = (errored_replica_data_t *)pthread_getspecific(err_repl_key);				\
-														\
-	if (_err_type & ERROR_TYPE_MGMT)									\
-		_repl_data->mgmt_err_cnt++;									\
-	if (_err_type & ERROR_TYPE_DATA)									\
-		_repl_data->data_err_cnt++;									\
-														\
-	REPLICA_ERRLOG("Injecting error at %s:%d.. error count.. mgmt(%d) data(%d) replica(%d)\n",		\
-	    __FUNCTION__, __LINE__, _repl_data->mgmt_err_cnt, _repl_data->data_err_cnt,				\
-	    _repl_data->replica_port);										\
+#define	HEADER_BUF_ERROR(iohdr, _err_freq, _err_type)
+do {
+	errored_replica_data_t *_repl_data;
+	int _count;
+	if (!check_for_error(_err_type))
+		break;
+
+	_count = random() % 5;
+	iohdr->version = REPLICA_VERSION;
+	if (_count == 0) {
+		iohdr->status = ZVOL_OP_STATUS_OK;
+	} else if (_count == 1) {
+		iohdr->status = ZVOL_OP_STATUS_FAILED;
+	} else if (_count == 2) {
+		iohdr->status = ZVOL_OP_STATUS_VERSION_MISMATCH;
+	}
+
+	if (_count == 3)
+		iohdr->io_seq = -1;
+	if (_count == 4)
+		iohdr->offset = ULONG_MAX;
+	if (_count == 5)
+		iohdr->len = ULONG_MAX;
+
+	_repl_data = (errored_replica_data_t *)pthread_getspecific(err_repl_key);
+
+	if (_err_type & ERROR_TYPE_MGMT)
+		_repl_data->mgmt_err_cnt++;
+	if (_err_type & ERROR_TYPE_DATA)
+		_repl_data->data_err_cnt++;
+
+	REPLICA_ERRLOG(
+		"Injecting error at %s:%d.. error count.. mgmt(%d) data(%d) replica(%d)\n",
+		__FUNCTION__, __LINE__, _repl_data->mgmt_err_cnt,
+		_repl_data->data_err_cnt,
+		_repl_data->replica_port);
 } while (0);
 
-#define	CONNECTION_CLOSE_ERROR(_fd, _rc, _label, _err_freq, _err_type)						\
-do {														\
-	errored_replica_data_t *_repl_data;									\
-	if (_fd == -1)												\
-		break;												\
-														\
-	if (!check_for_error(_err_type))									\
-		break;												\
-														\
-	_repl_data = (errored_replica_data_t *)pthread_getspecific(err_repl_key);				\
-	close(_fd);												\
-	(_repl_data->mgmtfd == _fd) && (_repl_data->mgmtfd = -1);						\
-	(_repl_data->datafd == _fd) && (_repl_data->datafd = -1);						\
-	_fd = -1;												\
-														\
-	_rc = REPL_TEST_RESTART;										\
-	if (_err_type & ERROR_TYPE_MGMT)									\
-		_repl_data->mgmt_err_cnt++;									\
-	if (_err_type & ERROR_TYPE_DATA)									\
-		_repl_data->data_err_cnt++;									\
-														\
-	REPLICA_ERRLOG("Injecting error at %s:%d.. error count.. mgmt(%d) data(%d) replica(%d)\n",		\
-	    __FUNCTION__, __LINE__, _repl_data->mgmt_err_cnt, _repl_data->data_err_cnt,				\
-	    _repl_data->replica_port);										\
-	goto _label;												\
+#define	CONNECTION_CLOSE_ERROR(_fd, _rc, _label, _err_freq, _err_type)
+do {
+	errored_replica_data_t *_repl_data;
+	if (_fd == -1)
+		break;
+
+	if (!check_for_error(_err_type))
+		break;
+
+	_repl_data = (errored_replica_data_t *)pthread_getspecific(err_repl_key);
+	close(_fd);
+	(_repl_data->mgmtfd == _fd) && (_repl_data->mgmtfd = -1);
+	(_repl_data->datafd == _fd) && (_repl_data->datafd = -1);
+	_fd = -1;
+
+	_rc = REPL_TEST_RESTART;
+	if (_err_type & ERROR_TYPE_MGMT)
+		_repl_data->mgmt_err_cnt++;
+	if (_err_type & ERROR_TYPE_DATA)
+		_repl_data->data_err_cnt++;
+
+	REPLICA_ERRLOG(
+		"Injecting error at %s:%d.. error count.. mgmt(%d) data(%d) replica(%d)\n",
+		__FUNCTION__, __LINE__, _repl_data->mgmt_err_cnt,
+		_repl_data->data_err_cnt,
+		_repl_data->replica_port);
+	goto _label;
 } while (0);
 
 static void
@@ -157,14 +164,14 @@ exit_errored_replica(void *arg)
 		close(rdata->sfd);
 
 	REPLICA_LOG("Errored Replica(%d) destroyed.. "
-	    "total injected errors mgmt(%d) data(%d)", rdata->replica_port,
-	    rdata->mgmt_err_cnt, rdata->data_err_cnt);
+		"total injected errors mgmt(%d) data(%d)", rdata->replica_port,
+		rdata->mgmt_err_cnt, rdata->data_err_cnt);
 	free(rdata);
 }
 
 static uint64_t
 fetch_update_io_buf(zvol_io_hdr_t *io_hdr, uint8_t *user_data,
-    uint8_t **resp_data)
+	uint8_t **resp_data)
 {
 	uint32_t count = 0;
 	uint64_t len = io_hdr->len;
@@ -188,7 +195,7 @@ fetch_update_io_buf(zvol_io_hdr_t *io_hdr, uint8_t *user_data,
 	if (!(io_hdr->flags & ZVOL_OP_FLAG_READ_METADATA))
 		count = 1;
 
-	total_payload_len = len + count * sizeof(struct zvol_io_rw_hdr);
+	total_payload_len = len + count * sizeof (struct zvol_io_rw_hdr);
 	*resp_data = malloc(total_payload_len);
 	memset(*resp_data, 0, total_payload_len);
 	start = offset;
@@ -196,7 +203,7 @@ fetch_update_io_buf(zvol_io_hdr_t *io_hdr, uint8_t *user_data,
 	last_md_io_num = md_io_num = random();
 	last_io_rw_hdr = (struct zvol_io_rw_hdr *)*resp_data;
 	last_io_rw_hdr->io_num = (io_hdr->flags & ZVOL_OP_FLAG_READ_METADATA) ?
-	    last_md_io_num : 0;
+		last_md_io_num : 0;
 	resp_index = sizeof (struct zvol_io_rw_hdr);
 	resp = *resp_data;
 	data_index = 0;
@@ -205,7 +212,7 @@ fetch_update_io_buf(zvol_io_hdr_t *io_hdr, uint8_t *user_data,
 		if (md_io_num != last_md_io_num) {
 			last_io_rw_hdr->len = count * 512;
 			memcpy(resp + resp_index, user_data + data_index,
-			    last_io_rw_hdr->len);
+				last_io_rw_hdr->len);
 			data_index += last_io_rw_hdr->len;
 			resp_index += last_io_rw_hdr->len;
 			last_io_rw_hdr = (struct zvol_io_rw_hdr *)(resp + resp_index);
@@ -220,9 +227,9 @@ fetch_update_io_buf(zvol_io_hdr_t *io_hdr, uint8_t *user_data,
 		md_io_num = random();
 	}
 	last_io_rw_hdr->len = (io_hdr->flags & ZVOL_OP_FLAG_READ_METADATA) ?
-	    (count * 512) : len;
+		(count * 512) : len;
 	memcpy(resp + resp_index, user_data + data_index, last_io_rw_hdr->len);
-	return total_payload_len;
+	return (total_payload_len);
 }
 
 static int
@@ -242,7 +249,7 @@ verify_replica_removal(int replica_mgmt_sport)
 	MTX_LOCK(&specq_mtx);
 		TAILQ_FOREACH(spec, &spec_q, spec_next) {
 			// Since we are supporting single spec per controller
-			// we will continue using first spec only       
+			// we will continue using first spec only
 			break;
 		}
 	MTX_UNLOCK(&specq_mtx);
@@ -282,7 +289,7 @@ retry:
 #endif
 
 error:
-	return rc;
+	return (rc);
 }
 
 static inline int
@@ -299,17 +306,16 @@ get_socket_info(int socket)
 	}
 
 	REPLICA_DEBUGLOG("socket(%d) bound to %s:%d\n",
-	    socket, inet_ntoa(addr.sin_addr), (int) ntohs(addr.sin_port));
-	rc = (int) ntohs(addr.sin_port);
+		socket, inet_ntoa(addr.sin_addr), (int)ntohs(addr.sin_port));
+	rc = (int)ntohs(addr.sin_port);
 
 error:
-	return rc;
+	return (rc);
 }
 
 static int
 check_for_error(int err_type)
 {
-	
 	int rc = 0;
 	static int num = 1;
 	static int old_num = 1;
@@ -335,17 +341,17 @@ check_for_error(int err_type)
 		}
 		MTX_UNLOCK(&err_replica_mtx);
 		rc = 1;
-		num = (int) random() % 30;
+		num = (int)random() % 30;
 		old_num++;
 	}
 
 out:
-	return rc;
+	return (rc);
 }
 
 static int
-send_mgmt_ack(int fd, zvol_io_hdr_t *mgmt_ack_hdr, void *buf, int *zrepl_status_msg_cnt,
-    const char *replica_ip, int replica_port)
+send_mgmt_ack(int fd, zvol_io_hdr_t *mgmt_ack_hdr, void *buf,
+	int *zrepl_status_msg_cnt, const char *replica_ip, int replica_port)
 {
 	int i, nbytes = 0;
 	int rc = 0, start;
@@ -374,14 +380,16 @@ send_mgmt_ack(int fd, zvol_io_hdr_t *mgmt_ack_hdr, void *buf, int *zrepl_status_
 			iovec[3].iov_len = sizeof (zvol_io_hdr_t) - 34;
 
 			iovec_count = 4;
-			mgmt_ack_hdr->status = (random() % 2) ? ZVOL_OP_STATUS_FAILED : ZVOL_OP_STATUS_OK;
+			mgmt_ack_hdr->status =
+				(random() % 2) ? ZVOL_OP_STATUS_FAILED : ZVOL_OP_STATUS_OK;
 			mgmt_ack_hdr->len = 0;
 			break;
 
 		case ZVOL_OPCODE_SNAP_CREATE:
 			iovec_count = 3;
 			sleep(random()%3 + 1);
-			mgmt_ack_hdr->status = (random() % 5 == 0) ? ZVOL_OP_STATUS_FAILED : ZVOL_OP_STATUS_OK;
+			mgmt_ack_hdr->status =
+				(random() % 5 == 0) ? ZVOL_OP_STATUS_FAILED : ZVOL_OP_STATUS_OK;
 			mgmt_ack_hdr->len = 0;
 			break;
 
@@ -447,13 +455,14 @@ send_mgmt_ack(int fd, zvol_io_hdr_t *mgmt_ack_hdr, void *buf, int *zrepl_status_
 			break;
 
 		default:
-			REPLICA_ERRLOG("opcode(%d) is not handled.. program is aborting now..",
-			    mgmt_ack_hdr->opcode);
+			REPLICA_ERRLOG(
+				"opcode(%d) is not handled.. program is aborting now..",
+				mgmt_ack_hdr->opcode);
 			abort();
 			break;
 	}
 
-	if(check_for_error(ERROR_TYPE_MGMT)) {
+	if (check_for_error(ERROR_TYPE_MGMT)) {
 		for (i = 0; i < iovec_count; i++) {
 			iovec[iovec_count + i].iov_base = iovec[i].iov_base;
 			iovec[iovec_count + i].iov_len = iovec[i].iov_len;
@@ -472,7 +481,7 @@ send_mgmt_ack(int fd, zvol_io_hdr_t *mgmt_ack_hdr, void *buf, int *zrepl_status_
 	for (start = 0; start < iovec_count; start += 1) {
 		nbytes = iovec[start].iov_len;
 		while (nbytes) {
-			rc = writev(fd, &iovec[start], 1);//Review iovec in this line
+			rc = writev(fd, &iovec[start], 1); // Review iovec in this line
 			if (rc < 0) {
 				goto out;
 			}
@@ -495,7 +504,7 @@ send_mgmt_ack(int fd, zvol_io_hdr_t *mgmt_ack_hdr, void *buf, int *zrepl_status_
 	}
 	ret = 0;
 out:
-	return ret;
+	return (ret);
 }
 
 static int
@@ -507,33 +516,33 @@ send_io_resp(int fd, zvol_io_hdr_t *io_hdr, void *buf)
 
 	if (fd < 0) {
 		REPLICA_ERRLOG("fd is %d!!!\n", fd);
-		return REPL_TEST_ERROR;
+		return (REPL_TEST_ERROR);
 	}
 
 	HEADER_BUF_ERROR(io_hdr, err_freq, ERROR_TYPE_DATA);
 
-	if(io_hdr->opcode == ZVOL_OPCODE_READ) {
+	if (io_hdr->opcode == ZVOL_OPCODE_READ) {
 		iovcnt = 2;
 		iovec[0].iov_base = io_hdr;
-		nbytes = iovec[0].iov_len = sizeof(zvol_io_hdr_t);
+		nbytes = iovec[0].iov_len = sizeof (zvol_io_hdr_t);
 		iovec[1].iov_base = buf;
 		iovec[1].iov_len = io_hdr->len;
 		nbytes += io_hdr->len;
-	} else if(io_hdr->opcode == ZVOL_OPCODE_WRITE) {
+	} else if (io_hdr->opcode == ZVOL_OPCODE_WRITE) {
 		iovcnt = 1;
 		iovec[0].iov_base = io_hdr;
-		nbytes = iovec[0].iov_len = sizeof(zvol_io_hdr_t);
+		nbytes = iovec[0].iov_len = sizeof (zvol_io_hdr_t);
 	} else {
 		iovcnt = 1;
 		iovec[0].iov_base = io_hdr;
-		nbytes = iovec[0].iov_len = sizeof(zvol_io_hdr_t);
+		nbytes = iovec[0].iov_len = sizeof (zvol_io_hdr_t);
 		io_hdr->len = 0;
 	}
 	while (nbytes) {
-		rc = writev(fd, iovec, iovcnt);//Review iovec in this line
+		rc = writev(fd, iovec, iovcnt); // Review iovec in this line
 		if (rc < 0) {
 			REPLICA_ERRLOG("failed to write on fd errno(%d)\n", errno);
-			return REPL_TEST_ERROR;
+			return (REPL_TEST_ERROR);
 		}
 
 		nbytes -= rc;
@@ -558,7 +567,7 @@ send_io_resp(int fd, zvol_io_hdr_t *io_hdr, void *buf)
 		active_replica++;
 	MTX_UNLOCK(&err_replica_mtx);
 
-	return 0;
+	return (0);
 }
 
 static void *
@@ -593,24 +602,25 @@ errored_replica(void *arg)
 	pthread_cleanup_push(exit_errored_replica, rdata);
 	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
 
-	io_hdr = malloc(sizeof(zvol_io_hdr_t));
-	mgmtio = malloc(sizeof(zvol_io_hdr_t));
+	io_hdr = malloc(sizeof (zvol_io_hdr_t));
+	mgmtio = malloc(sizeof (zvol_io_hdr_t));
 
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	srandom(now.tv_sec);
 
 	snprintf(tinfo, 50, "mock_nwrepl%d", replica_port);
-        prctl(PR_SET_NAME, tinfo, 0, 0, 0);
+	prctl(PR_SET_NAME, tinfo, 0, 0, 0);
 
 	data = NULL;
 	epfd = epoll_create1(0);
-	
-	//Create non-blocking listener for io connections from controller and add to epoll
-	if((sfd = replication_listen("127.0.0.1", replica_port, 32, 1)) < 0) {
-               	rc = REPL_TEST_ERROR;
+
+	// Create non-blocking listener for io connections
+	// from controller and add to epoll
+	if ((sfd = replication_listen("127.0.0.1", replica_port, 32, 1)) < 0) {
+		rc = REPL_TEST_ERROR;
 		rdata->sfd = sfd = -1;
 		goto error;
-        }
+	}
 
 	rdata->sfd = sfd;
 
@@ -618,11 +628,11 @@ errored_replica(void *arg)
 	event.events = EPOLLIN | EPOLLET;
 	rc = epoll_ctl(epfd, EPOLL_CTL_ADD, sfd, &event);
 	if (rc == -1) {
-	       	rc = REPL_TEST_ERROR;
+		rc = REPL_TEST_ERROR;
 		goto error;
 	}
 
-	events = calloc(MAXEVENTS, sizeof(event));
+	events = calloc(MAXEVENTS, sizeof (event));
 
 try_again:
 	mgmtfd = rdata->mgmtfd = -1;
@@ -632,8 +642,8 @@ try_again:
 	zrepl_status_msg_cnt = -1;
 	replica_mgmt_sport = 0;
 
-	//Connect to controller to start handshake and connect to epoll
-	if((mgmtfd = replication_connect("127.0.0.1", ctrl_port)) < 0) {
+	// Connect to controller to start handshake and connect to epoll
+	if ((mgmtfd = replication_connect("127.0.0.1", ctrl_port)) < 0) {
 		REPLICA_ERRLOG("conn_connect() failed errno:%d\n", errno);
 		rc = REPL_TEST_ERROR;
 		goto error;
@@ -651,21 +661,23 @@ try_again:
 	event.events = EPOLLIN | EPOLLET;
 	rc = epoll_ctl(epfd, EPOLL_CTL_ADD, mgmtfd, &event);
 	if (rc == -1) {
-		REPLICA_ERRLOG("epoll_ctl() failed.. err(%d) replica(%d)", errno, replica_port);
+		REPLICA_ERRLOG("epoll_ctl() failed.. err(%d) replica(%d)",
+			errno, replica_port);
 		rc = REPL_TEST_ERROR;
 		goto error;
 	}
 
-	CONNECTION_CLOSE_ERROR_EPOLL(mgmtfd, epfd, rc, error, err_freq, ERROR_TYPE_MGMT);
+	CONNECTION_CLOSE_ERROR_EPOLL(mgmtfd, epfd, rc, error, err_freq,
+		ERROR_TYPE_MGMT);
 
 	while (1) {
 		event_count = epoll_wait(epfd, events, MAXEVENTS, -1);
-		for(i=0; i< event_count; i++) {
+		for (i = 0; i < event_count; i++) {
 			if ((events[i].events & EPOLLERR) ||
-					(events[i].events & EPOLLHUP) ||
-					(!(events[i].events & EPOLLIN))) {
+				(events[i].events & EPOLLHUP) ||
+				(!(events[i].events & EPOLLIN))) {
 				REPLICA_ERRLOG("epoll error for replica(%d) event(%d) fd(%d)\n",
-				    replica_port, events[i].events, events[i].data.fd);
+					replica_port, events[i].events, events[i].data.fd);
 				if (events[i].data.fd == mgmtfd || events[i].data.fd == iofd) {
 					rc = REPL_TEST_RESTART;
 					goto error;
@@ -674,34 +686,45 @@ try_again:
 					abort();
 				}
 			} else if (events[i].data.fd == mgmtfd) {
-				count = perform_read_write_on_fd(events[i].data.fd, (uint8_t *)mgmtio, sizeof(zvol_io_hdr_t), READ_IO_RESP_HDR);
+				count = perform_read_write_on_fd(events[i].data.fd,
+					(uint8_t *)mgmtio, sizeof (zvol_io_hdr_t),
+					READ_IO_RESP_HDR);
 				if (count < 0) {
-					REPLICA_ERRLOG("Failed to read from fd(%d)\n", events[i].data.fd);
+					REPLICA_ERRLOG("Failed to read from fd(%d)\n",
+						events[i].data.fd);
 					rc = REPL_TEST_RESTART;
 					goto error;
 				}
 
 				ASSERT(count == sizeof (zvol_io_hdr_t));
 
-				CONNECTION_CLOSE_ERROR_EPOLL(mgmtfd, epfd, rc, error, err_freq, ERROR_TYPE_MGMT);
-				CONNECTION_CLOSE_ERROR_EPOLL(iofd, epfd, rc, error, err_freq, ERROR_TYPE_DATA);
+				CONNECTION_CLOSE_ERROR_EPOLL(mgmtfd, epfd, rc, error, err_freq,
+					ERROR_TYPE_MGMT);
+				CONNECTION_CLOSE_ERROR_EPOLL(iofd, epfd, rc, error, err_freq,
+					ERROR_TYPE_DATA);
 
-				if(mgmtio->len) {
+				if (mgmtio->len) {
 					data = malloc(mgmtio->len);
-					count = perform_read_write_on_fd(events[i].data.fd, (uint8_t *)data, mgmtio->len, READ_IO_RESP_DATA);
+					count = perform_read_write_on_fd(events[i].data.fd,
+						(uint8_t *)data, mgmtio->len, READ_IO_RESP_DATA);
 					if (count < 0) {
 						rc = REPL_TEST_RESTART;
 						goto error;
 					}
 					ASSERT((uint64_t)count == mgmtio->len);
 
-					CONNECTION_CLOSE_ERROR_EPOLL(mgmtfd, epfd, rc, error, err_freq, ERROR_TYPE_MGMT);
-					CONNECTION_CLOSE_ERROR_EPOLL(iofd, epfd, rc, error, err_freq, ERROR_TYPE_DATA);
+					CONNECTION_CLOSE_ERROR_EPOLL(mgmtfd, epfd, rc, error,
+						err_freq, ERROR_TYPE_MGMT);
+					CONNECTION_CLOSE_ERROR_EPOLL(iofd, epfd, rc, error,
+						err_freq, ERROR_TYPE_DATA);
 				}
 
-				rc = send_mgmt_ack(mgmtfd, mgmtio, data, &zrepl_status_msg_cnt, "127.0.0.1", replica_port);
+				rc = send_mgmt_ack(mgmtfd, mgmtio, data, &zrepl_status_msg_cnt,
+					"127.0.0.1", replica_port);
 				if (rc == REPL_TEST_ERROR || rc == REPL_TEST_RESTART) {
-					REPLICA_ERRLOG("failed to send ack for opcode:%d replica(%d)\n", mgmtio->opcode, replica_port);
+					REPLICA_ERRLOG(
+						"failed to send ack for opcode:%d replica(%d)\n",
+						mgmtio->opcode, replica_port);
 					goto error;
 				}
 				if (zrepl_status_msg_cnt == 0)
@@ -709,43 +732,50 @@ try_again:
 			} else if (events[i].data.fd == sfd) {
 				iofd = accept(sfd, NULL, 0);
 				if (iofd == -1) {
-					if((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
+					if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
 						break;
 					} else {
-						REPLICA_ERRLOG("accept() failed, err(%d) replica(%d)", errno, replica_port);
+						REPLICA_ERRLOG("accept() failed, err(%d) replica(%d)",
+							errno, replica_port);
 						break;
 					}
 				}
 
 				rdata->datafd = iofd;
 
-				CONNECTION_CLOSE_ERROR_EPOLL(mgmtfd, epfd, rc, error, err_freq, ERROR_TYPE_MGMT);
+				CONNECTION_CLOSE_ERROR_EPOLL(mgmtfd, epfd, rc, error,
+					err_freq, ERROR_TYPE_MGMT);
 
 				rc = make_socket_non_blocking(iofd);
 				if (rc == -1) {
 					REPLICA_ERRLOG("make_socket_non_blocking() failed, err(%d)"
-					    " replica(%d)", errno, replica_port);
+						" replica(%d)", errno, replica_port);
 					rc = REPL_TEST_ERROR;
 					goto error;
 				}
 
-				CONNECTION_CLOSE_ERROR(iofd, rc, error, err_freq, ERROR_TYPE_DATA);
+				CONNECTION_CLOSE_ERROR(iofd, rc, error, err_freq,
+					ERROR_TYPE_DATA);
 
 				event.data.fd = iofd;
 				event.events = EPOLLIN | EPOLLET;
 				rc = epoll_ctl(epfd, EPOLL_CTL_ADD, iofd, &event);
-				if(rc == -1) {
-					REPLICA_ERRLOG("epoll_ctl() failed, errno:%d replica(%d)", errno, replica_port);
+				if (rc == -1) {
+					REPLICA_ERRLOG("epoll_ctl() failed, errno:%d replica(%d)",
+						errno, replica_port);
 					rc = REPL_TEST_ERROR;
 					goto error;
 				}
-			} else if(events[i].data.fd == iofd) {
-				while(1) {
+			} else if (events[i].data.fd == iofd) {
+				while (1) {
 					if (read_rem_data) {
-						count = perform_read_write_on_fd(events[i].data.fd, (uint8_t *)data + recv_len,
-						    total_len - recv_len, READ_IO_RESP_DATA);
-						CONNECTION_CLOSE_ERROR_EPOLL(iofd, epfd, rc, error, err_freq, ERROR_TYPE_DATA);
-						CONNECTION_CLOSE_ERROR_EPOLL(mgmtfd, epfd, rc, error, err_freq, ERROR_TYPE_MGMT);
+						count = perform_read_write_on_fd(events[i].data.fd,
+							(uint8_t *)data + recv_len,
+							total_len - recv_len, READ_IO_RESP_DATA);
+						CONNECTION_CLOSE_ERROR_EPOLL(iofd, epfd, rc, error,
+							err_freq, ERROR_TYPE_DATA);
+						CONNECTION_CLOSE_ERROR_EPOLL(mgmtfd, epfd, rc, error,
+							err_freq, ERROR_TYPE_MGMT);
 						if (count < 0) {
 							rc = REPL_TEST_RESTART;
 							goto error;
@@ -761,10 +791,13 @@ try_again:
 						}
 
 					} else if (read_rem_hdr) {
-						CONNECTION_CLOSE_ERROR_EPOLL(iofd, epfd, rc, error, err_freq, ERROR_TYPE_DATA);
-						CONNECTION_CLOSE_ERROR_EPOLL(mgmtfd, epfd, rc, error, err_freq, ERROR_TYPE_MGMT);
-						count = perform_read_write_on_fd(events[i].data.fd, (uint8_t *)io_hdr + recv_len,
-						    total_len - recv_len, READ_IO_RESP_HDR);
+						CONNECTION_CLOSE_ERROR_EPOLL(iofd, epfd, rc, error,
+							err_freq, ERROR_TYPE_DATA);
+						CONNECTION_CLOSE_ERROR_EPOLL(mgmtfd, epfd, rc, error,
+							err_freq, ERROR_TYPE_MGMT);
+						count = perform_read_write_on_fd(events[i].data.fd,
+							(uint8_t *)io_hdr + recv_len,
+							total_len - recv_len, READ_IO_RESP_HDR);
 						if (count < 0) {
 							rc = REPL_TEST_RESTART;
 							goto error;
@@ -778,10 +811,13 @@ try_again:
 							total_len = 0;
 						}
 					} else {
-						count = perform_read_write_on_fd(events[i].data.fd, (uint8_t *)io_hdr,
-						    sizeof (zvol_io_hdr_t), READ_IO_RESP_HDR);
-						CONNECTION_CLOSE_ERROR_EPOLL(mgmtfd, epfd, rc, error, err_freq, ERROR_TYPE_MGMT);
-						CONNECTION_CLOSE_ERROR_EPOLL(iofd, epfd, rc, error, err_freq, ERROR_TYPE_DATA);
+						count = perform_read_write_on_fd(events[i].data.fd,
+							(uint8_t *)io_hdr, sizeof (zvol_io_hdr_t),
+							READ_IO_RESP_HDR);
+						CONNECTION_CLOSE_ERROR_EPOLL(mgmtfd, epfd, rc, error,
+							err_freq, ERROR_TYPE_MGMT);
+						CONNECTION_CLOSE_ERROR_EPOLL(iofd, epfd, rc, error,
+							err_freq, ERROR_TYPE_DATA);
 						if (count < 0) {
 							rc = REPL_TEST_RESTART;
 							goto error;
@@ -795,21 +831,26 @@ try_again:
 						}
 					}
 
-					CONNECTION_CLOSE_ERROR_EPOLL(mgmtfd, epfd, rc, error, err_freq, ERROR_TYPE_MGMT);
-					CONNECTION_CLOSE_ERROR_EPOLL(iofd, epfd, rc, error, err_freq, ERROR_TYPE_DATA);
+					CONNECTION_CLOSE_ERROR_EPOLL(mgmtfd, epfd, rc, error,
+						err_freq, ERROR_TYPE_MGMT);
+					CONNECTION_CLOSE_ERROR_EPOLL(iofd, epfd, rc, error,
+						err_freq, ERROR_TYPE_DATA);
 
 					if (io_hdr->opcode == ZVOL_OPCODE_WRITE ||
-					    io_hdr->opcode == ZVOL_OPCODE_HANDSHAKE ||
-					    io_hdr->opcode == ZVOL_OPCODE_OPEN) {
+						io_hdr->opcode == ZVOL_OPCODE_HANDSHAKE ||
+						io_hdr->opcode == ZVOL_OPCODE_OPEN) {
 						if (io_hdr->len) {
 							io_hdr->status = ZVOL_OP_STATUS_OK;
 							data = malloc(io_hdr->len);
 
-							CONNECTION_CLOSE_ERROR_EPOLL(mgmtfd, epfd, rc, error, err_freq, ERROR_TYPE_MGMT);
-							CONNECTION_CLOSE_ERROR_EPOLL(iofd, epfd, rc, error, err_freq, ERROR_TYPE_DATA);
+							CONNECTION_CLOSE_ERROR_EPOLL(mgmtfd, epfd, rc,
+								error, err_freq, ERROR_TYPE_MGMT);
+							CONNECTION_CLOSE_ERROR_EPOLL(iofd, epfd, rc, error,
+								err_freq, ERROR_TYPE_DATA);
 
-							count = perform_read_write_on_fd(events[i].data.fd, (uint8_t *)data,
-							    io_hdr->len, READ_IO_RESP_DATA);
+							count = perform_read_write_on_fd(events[i].data.fd,
+								(uint8_t *)data, io_hdr->len,
+								READ_IO_RESP_DATA);
 							if (count < 0) {
 								rc = REPL_TEST_RESTART;
 								goto error;
@@ -827,36 +868,47 @@ try_again:
 						open_ptr = (zvol_op_open_data_t *)data;
 						io_hdr->status = ZVOL_OP_STATUS_OK;
 
-						REPLICA_LOG("Got volname(%s) blocksize(%d) timeout(%d) for replica(%d)\n",
-						    open_ptr->volname, open_ptr->tgt_block_size, open_ptr->timeout, replica_port);
+						REPLICA_LOG(
+							"Got volname(%s) blocksize(%d) timeout(%d) for replica(%d)\n",
+							open_ptr->volname, open_ptr->tgt_block_size,
+							open_ptr->timeout, replica_port);
 					}
 execute_io:
-					if(io_hdr->opcode == ZVOL_OPCODE_WRITE) {
-						CONNECTION_CLOSE_ERROR_EPOLL(mgmtfd, epfd, rc, error, err_freq, ERROR_TYPE_MGMT);
-						CONNECTION_CLOSE_ERROR_EPOLL(iofd, epfd, rc, error, err_freq, ERROR_TYPE_DATA);
+					if (io_hdr->opcode == ZVOL_OPCODE_WRITE) {
+						CONNECTION_CLOSE_ERROR_EPOLL(mgmtfd, epfd, rc, error,
+							err_freq, ERROR_TYPE_MGMT);
+						CONNECTION_CLOSE_ERROR_EPOLL(iofd, epfd, rc, error,
+							err_freq, ERROR_TYPE_DATA);
 
 						io_hdr->status = ZVOL_OP_STATUS_OK;
-					} else if(io_hdr->opcode == ZVOL_OPCODE_READ) {
+					} else if (io_hdr->opcode == ZVOL_OPCODE_READ) {
 						uint8_t *user_data = NULL;
-						CONNECTION_CLOSE_ERROR_EPOLL(mgmtfd, epfd, rc, error, err_freq, ERROR_TYPE_MGMT);
-						CONNECTION_CLOSE_ERROR_EPOLL(iofd, epfd, rc, error, err_freq, ERROR_TYPE_DATA);
+						CONNECTION_CLOSE_ERROR_EPOLL(mgmtfd, epfd, rc, error,
+							err_freq, ERROR_TYPE_MGMT);
+						CONNECTION_CLOSE_ERROR_EPOLL(iofd, epfd, rc, error,
+							err_freq, ERROR_TYPE_DATA);
 
-						if(io_hdr->len)
+						if (io_hdr->len)
 							user_data = malloc(io_hdr->len);
 
 						io_hdr->status = ZVOL_OP_STATUS_OK;
-						io_hdr->len = fetch_update_io_buf(io_hdr, user_data, &data);
+						io_hdr->len = fetch_update_io_buf(io_hdr, user_data,
+							&data);
 
 						if (user_data)
 							free(user_data);
 					}
 
-					CONNECTION_CLOSE_ERROR_EPOLL(mgmtfd, epfd, rc, error, err_freq, ERROR_TYPE_MGMT);
-					CONNECTION_CLOSE_ERROR_EPOLL(iofd, epfd, rc, error, err_freq, ERROR_TYPE_DATA);
+					CONNECTION_CLOSE_ERROR_EPOLL(mgmtfd, epfd, rc, error,
+						err_freq, ERROR_TYPE_MGMT);
+					CONNECTION_CLOSE_ERROR_EPOLL(iofd, epfd, rc, error,
+						err_freq, ERROR_TYPE_DATA);
 
 					rc = send_io_resp(iofd, io_hdr, data);
 					if (rc == REPL_TEST_ERROR || rc == REPL_TEST_RESTART) {
-						REPLICA_ERRLOG("Failed to send response from replica(%d)\n", replica_port);
+						REPLICA_ERRLOG(
+							"Failed to send response from replica(%d)\n",
+							replica_port);
 						goto error;
 					}
 
@@ -872,7 +924,7 @@ execute_io:
 error:
 	MTX_LOCK(&err_replica_mtx);
 	if ((rdata->replica_status == ZVOL_STATUS_HEALTHY) &&
-	    (error_type == ERROR_TYPE_DATA))
+		(error_type == ERROR_TYPE_DATA))
 		ignore_io_error = 1;
 	MTX_UNLOCK(&err_replica_mtx);
 
@@ -910,7 +962,7 @@ error:
 	free(events);
 	REPLICA_ERRLOG("shutting down replica(%d)... \n", replica_port);
 	pthread_cleanup_pop(0);
-	return NULL;
+	return (NULL);
 }
 
 static void
@@ -953,17 +1005,19 @@ start_errored_replica(int replica_count)
 
 	for (i = 0; i < replica_count; i++) {
 		replica_port_list[i] = 6061 + i;
-		rc = pthread_create(&errored_rthread[i], NULL, &errored_replica, (void *)&replica_port_list[i]);
+		rc = pthread_create(&errored_rthread[i], NULL, &errored_replica,
+			(void *)&replica_port_list[i]);
 		if (rc != 0) {
-			REPLICA_ERRLOG("Failed to create errored replica(%d) err(%d)\n", replica_port_list[i], rc);
+			REPLICA_ERRLOG("Failed to create errored replica(%d) err(%d)\n",
+				replica_port_list[i], rc);
 			goto error;
 		}
-        }
+	}
 
 	REPLICA_NOTICELOG("Total %d errored replica started\n", replica_count);
 
 error:
-	return rc;
+	return (rc);
 }
 
 void
@@ -992,11 +1046,11 @@ wait_for_spec_ready(void)
 {
 	int count = 10;
 	spec_t *spec = NULL;
-	
+
 	MTX_LOCK(&specq_mtx);
 		TAILQ_FOREACH(spec, &spec_q, spec_next) {
 			// Since we are supporting single spec per controller
-			// we will continue using first spec only       
+			// we will continue using first spec only
 			break;
 		}
 	MTX_UNLOCK(&specq_mtx);
