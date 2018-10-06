@@ -14,8 +14,7 @@
 #define POLLWAIT 5000
 #define PORTNUMLEN 32
 
-int
-replication_connect(const char *host, int port)
+int replication_connect(const char *host, int port)
 {
 	char buf[MAX_TMPBUF];
 	char portnum[PORTNUMLEN];
@@ -25,25 +24,31 @@ replication_connect(const char *host, int port)
 	int val = 1;
 	int rc;
 
-	if (host == NULL) {
+	if (host == NULL)
+	{
 		REPLICA_ERRLOG("host is NULL!\n");
 		return -1;
 	}
 
-	if (host[0] == '[') {
+	if (host[0] == '[')
+	{
 		strncpy(buf, host + 1, sizeof buf);
 		p = strchr(buf, ']');
 		if (p != NULL)
 			*p = '\0';
-		host = (const char *) &buf[0];
-		if (strcasecmp(host, "*") == 0) {
+		host = (const char *)&buf[0];
+		if (strcasecmp(host, "*") == 0)
+		{
 			strncpy(buf, "::", sizeof buf);
-			host = (const char *) &buf[0];
+			host = (const char *)&buf[0];
 		}
-	} else {
-		if (strcasecmp(host, "*") == 0) {
+	}
+	else
+	{
+		if (strcasecmp(host, "*") == 0)
+		{
 			strncpy(buf, "0.0.0.0", sizeof buf);
-			host = (const char *) &buf[0];
+			host = (const char *)&buf[0];
 		}
 	}
 	snprintf(portnum, sizeof portnum, "%d", port);
@@ -52,34 +57,40 @@ replication_connect(const char *host, int port)
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_flags = AI_NUMERICSERV;
 	rc = getaddrinfo(host, portnum, &hints, &res0);
-	if (rc != 0) {
+	if (rc != 0)
+	{
 		ISTGT_ERRLOG("getaddrinfo() failed.. err(%d)\n", rc);
 		return -1;
 	}
 
 	/* try connect */
 	sock = -1;
-	for (res = res0; res != NULL; res = res->ai_next) {
-retry:
+	for (res = res0; res != NULL; res = res->ai_next)
+	{
+	retry:
 		sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-		if (sock < 0) {
+		if (sock < 0)
+		{
 			/* error */
 			continue;
 		}
 		rc = setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &val, sizeof val);
-		if (rc != 0) {
+		if (rc != 0)
+		{
 			/* error */
 			continue;
 		}
 		rc = connect(sock, res->ai_addr, res->ai_addrlen);
-		if (rc == -1 && errno == EINTR) {
+		if (rc == -1 && errno == EINTR)
+		{
 			/* interrupted? */
 			ISTGT_ERRLOG("connect() failed .. err(%d)\n", errno);
 			close(sock);
 			sock = -1;
 			goto retry;
 		}
-		if (rc != 0) {
+		if (rc != 0)
+		{
 			/* try next family */
 			ISTGT_ERRLOG("connect() failed .. err(%d)\n", errno);
 			close(sock);
@@ -87,7 +98,8 @@ retry:
 			continue;
 		}
 		rc = set_socket_keepalive(sock);
-		if (rc != 0) {
+		if (rc != 0)
+		{
 			ISTGT_ERRLOG("failed to set keepalive for fd(%d)\n", sock);
 			close(sock);
 			sock = -1;
@@ -99,13 +111,13 @@ retry:
 	}
 	freeaddrinfo(res0);
 
-	if (sock < 0) {
+	if (sock < 0)
+	{
 		return -1;
 	}
 	return sock;
 }
-int
-replication_listen(const char *ip, int port, int que, int non_blocking)
+int replication_listen(const char *ip, int port, int que, int non_blocking)
 {
 	char buf[MAX_TMPBUF];
 	char portnum[PORTNUMLEN];
@@ -117,20 +129,25 @@ replication_listen(const char *ip, int port, int que, int non_blocking)
 
 	if (ip == NULL)
 		return -1;
-	if (ip[0] == '[') {
+	if (ip[0] == '[')
+	{
 		strncpy(buf, ip + 1, sizeof buf);
 		p = strchr(buf, ']');
 		if (p != NULL)
 			*p = '\0';
-		ip = (const char *) &buf[0];
-		if (strcasecmp(ip, "*") == 0) {
+		ip = (const char *)&buf[0];
+		if (strcasecmp(ip, "*") == 0)
+		{
 			strncpy(buf, "::", sizeof buf);
-			ip = (const char *) &buf[0];
+			ip = (const char *)&buf[0];
 		}
-	} else {
-		if (strcasecmp(ip, "*") == 0) {
+	}
+	else
+	{
+		if (strcasecmp(ip, "*") == 0)
+		{
 			strncpy(buf, "0.0.0.0", sizeof buf);
-			ip = (const char *) &buf[0];
+			ip = (const char *)&buf[0];
 		}
 	}
 	snprintf(portnum, sizeof portnum, "%d", port);
@@ -141,7 +158,8 @@ replication_listen(const char *ip, int port, int que, int non_blocking)
 	hints.ai_flags |= AI_PASSIVE;
 	hints.ai_flags |= AI_NUMERICHOST;
 	rc = getaddrinfo(ip, portnum, &hints, &res0);
-	if (rc != 0) {
+	if (rc != 0)
+	{
 		REPLICA_ERRLOG("getaddrinfo() failed err(%d)\n", rc);
 		return -1;
 	}
@@ -151,35 +169,43 @@ replication_listen(const char *ip, int port, int que, int non_blocking)
 		que = 255;
 
 	sock = -1;
-	for (res = res0; res != NULL; res = res->ai_next) {
-retry:
+	for (res = res0; res != NULL; res = res->ai_next)
+	{
+	retry:
 		sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-		if (sock < 0) {
+		if (sock < 0)
+		{
 			REPLICA_ERRLOG("failed to create socket .. err(%d)\n",
-			    errno);
+						   errno);
 			continue;
 		}
 
 		rc = setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &val, sizeof val);
-		if (rc != 0) {
+		if (rc != 0)
+		{
 			REPLICA_ERRLOG("failed to set SO_REUSEADDR for "
-			    "sock(%d).. err(%d)\n", sock, errno);
+						   "sock(%d).. err(%d)\n",
+						   sock, errno);
 			continue;
 		}
 		rc = setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &val, sizeof val);
-		if (rc != 0) {
+		if (rc != 0)
+		{
 			REPLICA_ERRLOG("failed to set TCP_NODELAY for "
-			    "sock(%d).. err(%d)\n", sock, errno);
+						   "sock(%d).. err(%d)\n",
+						   sock, errno);
 			continue;
 		}
 		rc = bind(sock, res->ai_addr, res->ai_addrlen);
-		if (rc == -1 && errno == EINTR) {
+		if (rc == -1 && errno == EINTR)
+		{
 			REPLICA_ERRLOG("bind() failed err(%d)\n", errno);
 			close(sock);
 			sock = -1;
 			goto retry;
 		}
-		if (rc != 0) {
+		if (rc != 0)
+		{
 			REPLICA_ERRLOG("bind() failed err(%d)\n", errno);
 			close(sock);
 			sock = -1;
@@ -188,7 +214,8 @@ retry:
 		if (non_blocking == 1)
 			make_socket_non_blocking(sock);
 		rc = listen(sock, que);
-		if (rc != 0) {
+		if (rc != 0)
+		{
 			REPLICA_ERRLOG("listen() failed err(%d)\n", errno);
 			close(sock);
 			sock = -1;
@@ -197,14 +224,14 @@ retry:
 		break;
 	}
 	freeaddrinfo(res0);
-	if (sock < 0) {
+	if (sock < 0)
+	{
 		return -1;
 	}
 	return sock;
 }
 
-int
-make_socket_non_blocking(int sfd)
+int make_socket_non_blocking(int sfd)
 {
 	int flags, s;
 
@@ -216,7 +243,7 @@ make_socket_non_blocking(int sfd)
 	}
 
 	flags |= O_NONBLOCK;
-	s = fcntl (sfd, F_SETFL, flags);
+	s = fcntl(sfd, F_SETFL, flags);
 	if (s == -1)
 	{
 		REPLICA_ERRLOG("fcntl failed err(%d)\n", errno);
@@ -226,8 +253,7 @@ make_socket_non_blocking(int sfd)
 	return 0;
 }
 
-int
-set_socket_keepalive(int sfd)
+int set_socket_keepalive(int sfd)
 {
 	int val = 1;
 	int ret = 0;
@@ -235,25 +261,29 @@ set_socket_keepalive(int sfd)
 	int max_try = 5;
 	int probe_interval = 5;
 
-	if (setsockopt(sfd, SOL_SOCKET, SO_KEEPALIVE, &val, sizeof (val)) < 0) {
+	if (setsockopt(sfd, SOL_SOCKET, SO_KEEPALIVE, &val, sizeof(val)) < 0)
+	{
 		REPLICA_ERRLOG("Failed to set SO_KEEPALIVE for fd(%d) err(%d)\n", sfd, errno);
 		ret = errno;
 		goto out;
 	}
 
-	if (setsockopt(sfd, SOL_TCP, TCP_KEEPCNT, &max_try, sizeof (max_try))) {
+	if (setsockopt(sfd, SOL_TCP, TCP_KEEPCNT, &max_try, sizeof(max_try)))
+	{
 		REPLICA_ERRLOG("Failed to set TCP_KEEPCNT for fd(%d) err(%d)\n", sfd, errno);
 		ret = errno;
 		goto out;
 	}
 
-	if (setsockopt(sfd, SOL_TCP, TCP_KEEPIDLE, &max_idle_time, sizeof (max_idle_time))) {
+	if (setsockopt(sfd, SOL_TCP, TCP_KEEPIDLE, &max_idle_time, sizeof(max_idle_time)))
+	{
 		REPLICA_ERRLOG("Failed to set TCP_KEEPIDLE for fd(%d) err(%d)\n", sfd, errno);
 		ret = errno;
 		goto out;
 	}
 
-	if (setsockopt(sfd, SOL_TCP, TCP_KEEPINTVL, &probe_interval, sizeof (probe_interval))) {
+	if (setsockopt(sfd, SOL_TCP, TCP_KEEPINTVL, &probe_interval, sizeof(probe_interval)))
+	{
 		REPLICA_ERRLOG("Failed to set TCP_KEEPINTVL for fd(%d) err(%d)\n", sfd, errno);
 		ret = errno;
 	}
