@@ -1,8 +1,16 @@
+### instructions to check cstyle
+```
+Checkout replication branch
+Do ./cstyle.pl <filename with path>
+```
+
 ### Building
 ```bash
+git checkout replication
 sudo apt-get install libssl-dev docker.io
 ./autogen.sh
 ./configure --enable-replication
+make cstyle
 make clean
 make
 ```
