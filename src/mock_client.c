@@ -31,21 +31,21 @@ void *mgmt_thrd(void *args);
 void *writer(void *args);
 void check_settings(spec_t *spec);
 void wait_for_mock_clients(void);
-static void build_cmd(cargs_t *cargs, ISTGT_LU_CMD_Ptr lu_cmd, SBC_OPCODE opcode,
-    int len);
+static void build_cmd(cargs_t *cargs, ISTGT_LU_CMD_Ptr lu_cmd,
+    opcode, int len);
 
 cargs_t *all_cargs = NULL;
 pthread_t *all_cthreads = NULL;
 
-static void
+	static void
 build_cmd(cargs_t *cargs, ISTGT_LU_CMD_Ptr cmd, SBC_OPCODE opcode,
-    int len)
+		int len)
 {
 	char *buf;
 	int i;
 
 	cmd->luworkerindx = cargs->workerid;
-	switch(opcode) {
+	switch (opcode) {
 		case SBC_WRITE_16:
 			buf = xmalloc(len);
 			for (i = 0; i < len; i++)
@@ -74,19 +74,18 @@ build_cmd(cargs_t *cargs, ISTGT_LU_CMD_Ptr cmd, SBC_OPCODE opcode,
 /*
  * Checks for settings on 'spec' to continue IOs
  */
-void check_settings(spec_t *spec)
+void
+check_settings(spec_t *spec)
 {
 	while (spec->ready != true)
 		sleep(1);
-
-	return;
 }
 
 /*
  * Adds write IOs to replication module
  * Increments '*count' variable to set the completion of writer thread
  */
-void *
+	void *
 writer(void *args)
 {
 	cargs_t *cargs = (cargs_t *)args;
@@ -102,7 +101,7 @@ writer(void *args)
 	pthread_mutex_t *mtx = cargs->mtx;
 	pthread_cond_t *cv = cargs->cv;
 	int *cnt = cargs->count;
-	SBC_OPCODE opcode; 
+	SBC_OPCODE opcode;
 
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	srandom(now.tv_sec);
@@ -120,7 +119,7 @@ writer(void *args)
 
 	while (1) {
 
-		opcode = SBC_WRITE_16; 
+		opcode = SBC_WRITE_16;
 		blk_offset = random() % num_blocks;
 		offset = blk_offset * blklen;
 		len_in_blocks = random() % 15;
@@ -158,14 +157,14 @@ end:
 	pthread_cond_signal(cv);
 	MTX_UNLOCK(mtx);
 
-	return NULL;
+	return (NULL);
 }
 
 /*
  * Adds read IOs to replication module
  * Increments '*count' variable to set the completion of reader thread
  */
-void *
+	void *
 reader(void *args)
 {
 	cargs_t *cargs = (cargs_t *)args;
@@ -181,7 +180,7 @@ reader(void *args)
 	pthread_mutex_t *mtx = cargs->mtx;
 	pthread_cond_t *cv = cargs->cv;
 	int *cnt = cargs->count;
-	SBC_OPCODE opcode = SBC_READ_16; 
+	SBC_OPCODE opcode = SBC_READ_16;
 
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	srandom(now.tv_sec);
@@ -237,10 +236,10 @@ end:
 	pthread_cond_signal(cv);
 	MTX_UNLOCK(mtx);
 
-	return NULL;
+	return (NULL);
 }
 
-void *
+	void *
 mgmt_thrd(void *args)
 {
 	cargs_t *cargs = (cargs_t *)args;
@@ -265,8 +264,9 @@ mgmt_thrd(void *args)
 	clock_gettime(CLOCK_MONOTONIC, &prev);
 	while (1) {
 		clock_gettime(CLOCK_MONOTONIC, &p);
-		(void) istgt_lu_create_snapshot(spec, snapname, random() % 2 + 2,
-		    random() % 2 + 4);
+		(void) istgt_lu_create_snapshot(spec, snapname,
+				random() % 2 + 2,
+				random() % 2 + 4);
 		clock_gettime(CLOCK_MONOTONIC, &now);
 
 		sleep(1);
@@ -287,15 +287,16 @@ mgmt_thrd(void *args)
 	pthread_cond_signal(cv);
 	MTX_UNLOCK(mtx);
 
-	return NULL;
+	return (NULL);
 }
 
 /*
- * creates client threads that are needed to send read/write IOs to replication module.
- * cargs_t stores details that are sent to reader/writer threads
- * which isends IOs to replication module.
+ * creates client threads that are needed to send read/write IOs to replication
+ * module.  cargs_t stores details that are sent to reader/writer threads which
+ * isends IOs to replication module.
  */
-void
+
+	void
 create_mock_client(spec_t *spec)
 {
 	int num_threads = 6;
@@ -315,8 +316,12 @@ create_mock_client(spec_t *spec)
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	srandom(now.tv_sec);
 
-	all_cargs = (cargs_t *)malloc(sizeof (cargs_t) * (num_threads + mgmt_threads));
-	all_cthreads = (pthread_t *)malloc(sizeof (pthread_t) * (num_threads + mgmt_threads));
+	all_cargs = (cargs_t *)malloc(
+			sizeof (cargs_t) * (num_threads + mgmt_threads)
+			);
+	all_cthreads = (pthread_t *)malloc(
+			sizeof (pthread_t) * (num_threads + mgmt_threads)
+			);
 
 	for (i = 0; i < num_threads; i++) {
 		cargs = &(all_cargs[i]);
@@ -338,7 +343,12 @@ create_mock_client(spec_t *spec)
 		cargs->mtx = &mtx;
 		cargs->cv = &cv;
 		cargs->count = &count;
-		pthread_create(&all_cthreads[cargs->workerid], NULL, &mgmt_thrd, cargs);
+		pthread_create(
+				&all_cthreads[cargs->workerid],
+				NULL,
+				&mgmt_thrd,
+				cargs
+				);
 	}
 
 	MTX_LOCK(&mtx);
@@ -350,11 +360,9 @@ create_mock_client(spec_t *spec)
 	free(all_cthreads);
 	all_cthreads = NULL;
 	all_cargs = NULL;
-
-	return;
 }
 
-void
+	void
 wait_for_mock_clients()
 {
 	int count = 10;
@@ -362,7 +370,7 @@ wait_for_mock_clients()
 		__sync_synchronize();
 		usleep(100000);
 		if (!all_cthreads)
-                        return;
+			return;
 		count--;
 	}
 
