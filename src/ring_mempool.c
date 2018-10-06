@@ -14,7 +14,7 @@ int
 init_mempool(rte_smempool_t *obj, size_t count, size_t mem_size,
     size_t offset, const char *ring_name, mempool_constructor_t *mem_init,
     mempool_destructor_t *mem_remove, mempool_reclaim_t *mem_reclaim,
-	bool initialize)
+    bool initialize)
 {
 	size_t i = 0;
 	void *mem_entry = NULL;
@@ -149,8 +149,6 @@ put_to_mempool(rte_smempool_t *obj, void *node)
 		REPLICA_ERRLOG("failed to put entry into mempool(%s)\n",
 		    obj->ring->name);
 	}
-
-	return ();
 }
 
 unsigned
