@@ -224,8 +224,8 @@ istgt_find_cf_section(CONFIG *cp, const char *name)
 		return (NULL);
 
 	for (sp = cp->section; sp != NULL; sp = sp->next) {
-		if (sp->name != NULL && sp->name[0] == name[0] 
-				&& strcasecmp(sp->name, name) == 0) {
+		if (sp->name != NULL && sp->name[0] == name[0] &&
+				strcasecmp(sp->name, name) == 0) {
 			return (sp);
 		}
 	}
@@ -260,8 +260,8 @@ istgt_find_cf_nitem(CF_SECTION *sp, const char *key, int idx)
 
 	i = 0;
 	for (ip = sp->item; ip != NULL; ip = ip->next) {
-		if (ip->key != NULL && ip->key[0] == key[0]
-				&& strcasecmp(ip->key, key) == 0) {
+		if (ip->key != NULL && ip->key[0] == key[0] &&
+				strcasecmp(ip->key, key) == 0) {
 			if (i == idx) {
 				return (ip);
 			}
@@ -330,8 +330,8 @@ istgt_set_cf_section_type(CF_SECTION *sp)
 	if (sp == NULL || sp->name == NULL)
 		return;
 	for (i = 0; cfst_table[i].name != NULL; i++) {
-		if (sp->name[0] == cfst_table[i].name[0]
-				&& strncasecmp(sp->name, cfst_table[i].name,
+		if (sp->name[0] == cfst_table[i].name[0] &&
+				strncasecmp(sp->name, cfst_table[i].name,
 				strlen(cfst_table[i].name)) == 0) {
 			sp->type = cfst_table[i].type;
 			return;
