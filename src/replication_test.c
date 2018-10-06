@@ -527,15 +527,14 @@ main(int argc, char **argv)
 
 	data = NULL;
 	epfd = epoll_create1(0);
-	
 	// Create listener for io connections from controller and add to epoll
 	if ((sfd = cstor_ops.conn_listen(replica_ip, replica_port, 32, 1)) < 0) {
-        		REPLICA_LOG("conn_listen() failed,"
-        			" err:%d replica(%d)", errno, ctrl_port);
+		REPLICA_LOG("conn_listen() failed,"
+				" err:%d replica(%d)", errno, ctrl_port);
 		close(vol_fd);
 		destroy_mdlist();
-        		exit(EXIT_FAILURE);
-    	}
+		exit(EXIT_FAILURE);
+	}
 	event.data.fd = sfd;
 	event.events = EPOLLIN | EPOLLET;
 	rc = epoll_ctl(epfd, EPOLL_CTL_ADD, sfd, &event);
@@ -755,7 +754,7 @@ execute_io:
 						data += sizeof (struct zvol_io_rw_hdr);
 						nbytes = 0;
 						while ((rc = pwrite(vol_fd, data + nbytes, io_rw_hdr->len - nbytes, io_hdr->offset + nbytes))) {
-							if (rc == -1 ) {
+							if (rc == -1) {
 								if (errno == 11) {
 									sleep(1);
 									continue;
