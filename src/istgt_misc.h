@@ -35,124 +35,106 @@
 #define ISTGT_USE_MACRO_EXPAND
 
 #ifdef ISTGT_USE_MACRO_EXPAND
-#define DSET8(B,D)  (*((uint8_t *)(B)) = (uint8_t)(D))
-#define DSET16(B,D)													\
-	(((*((uint8_t *)(B)+0)) = (uint8_t)((uint16_t)(D) >> 8)),		\
-	 ((*((uint8_t *)(B)+1)) = (uint8_t)((uint16_t)(D) >> 0)))
-#define DSET24(B,D)													\
-	(((*((uint8_t *)(B)+0)) = (uint8_t)((uint32_t)(D) >> 16)),		\
-	 ((*((uint8_t *)(B)+1)) = (uint8_t)((uint32_t)(D) >> 8)),		\
-	 ((*((uint8_t *)(B)+2)) = (uint8_t)((uint32_t)(D) >> 0)))
-#define DSET32(B,D)													\
-	(((*((uint8_t *)(B)+0)) = (uint8_t)((uint32_t)(D) >> 24)),		\
-	 ((*((uint8_t *)(B)+1)) = (uint8_t)((uint32_t)(D) >> 16)),		\
-	 ((*((uint8_t *)(B)+2)) = (uint8_t)((uint32_t)(D) >> 8)),		\
-	 ((*((uint8_t *)(B)+3)) = (uint8_t)((uint32_t)(D) >> 0)))
-#define DSET48(B,D)													\
-	(((*((uint8_t *)(B)+0)) = (uint8_t)((uint64_t)(D) >> 40)),		\
-	 ((*((uint8_t *)(B)+1)) = (uint8_t)((uint64_t)(D) >> 32)),		\
-	 ((*((uint8_t *)(B)+2)) = (uint8_t)((uint64_t)(D) >> 24)),		\
-	 ((*((uint8_t *)(B)+3)) = (uint8_t)((uint64_t)(D) >> 16)),		\
-	 ((*((uint8_t *)(B)+4)) = (uint8_t)((uint64_t)(D) >> 8)),		\
-	 ((*((uint8_t *)(B)+5)) = (uint8_t)((uint64_t)(D) >> 0)))
-#define DSET64(B,D)													\
-	(((*((uint8_t *)(B)+0)) = (uint8_t)((uint64_t)(D) >> 56)),		\
-	 ((*((uint8_t *)(B)+1)) = (uint8_t)((uint64_t)(D) >> 48)),		\
-	 ((*((uint8_t *)(B)+2)) = (uint8_t)((uint64_t)(D) >> 40)),		\
-	 ((*((uint8_t *)(B)+3)) = (uint8_t)((uint64_t)(D) >> 32)),		\
-	 ((*((uint8_t *)(B)+4)) = (uint8_t)((uint64_t)(D) >> 24)),		\
-	 ((*((uint8_t *)(B)+5)) = (uint8_t)((uint64_t)(D) >> 16)),		\
-	 ((*((uint8_t *)(B)+6)) = (uint8_t)((uint64_t)(D) >> 8)),		\
-	 ((*((uint8_t *)(B)+7)) = (uint8_t)((uint64_t)(D) >> 0)))
-#define DGET8(B)    (*((uint8_t *)(B)))
-#define DGET16(B)											\
-	(((  (uint16_t) *((uint8_t *)(B)+0)) << 8)				\
-	 | (((uint16_t) *((uint8_t *)(B)+1)) << 0))
-#define DGET24(B)											\
-	(((  (uint32_t) *((uint8_t *)(B)+0)) << 16)				\
-	 | (((uint32_t) *((uint8_t *)(B)+1)) << 8)				\
-	 | (((uint32_t) *((uint8_t *)(B)+2)) << 0))
-#define DGET32(B)											\
-	(((  (uint32_t) *((uint8_t *)(B)+0)) << 24)				\
-	 | (((uint32_t) *((uint8_t *)(B)+1)) << 16)				\
-	 | (((uint32_t) *((uint8_t *)(B)+2)) << 8)				\
-	 | (((uint32_t) *((uint8_t *)(B)+3)) << 0))
-#define DGET48(B)											\
-	(((  (uint64_t) *((uint8_t *)(B)+0)) << 40)				\
-	 | (((uint64_t) *((uint8_t *)(B)+1)) << 32)				\
-	 | (((uint64_t) *((uint8_t *)(B)+2)) << 24)				\
-	 | (((uint64_t) *((uint8_t *)(B)+3)) << 16)				\
-	 | (((uint64_t) *((uint8_t *)(B)+4)) << 8)				\
-	 | (((uint64_t) *((uint8_t *)(B)+5)) << 0))
-#define DGET64(B)											\
-	(((  (uint64_t) *((uint8_t *)(B)+0)) << 56)				\
-	 | (((uint64_t) *((uint8_t *)(B)+1)) << 48)				\
-	 | (((uint64_t) *((uint8_t *)(B)+2)) << 40)				\
-	 | (((uint64_t) *((uint8_t *)(B)+3)) << 32)				\
-	 | (((uint64_t) *((uint8_t *)(B)+4)) << 24)				\
-	 | (((uint64_t) *((uint8_t *)(B)+5)) << 16)				\
-	 | (((uint64_t) *((uint8_t *)(B)+6)) << 8)				\
-	 | (((uint64_t) *((uint8_t *)(B)+7)) << 0))
+#define DSET8(B, D) (*((uint8_t *)(B)) = (uint8_t)(D))
+#define DSET16(B, D)                                            \
+	(((*((uint8_t *)(B) + 0)) = (uint8_t)((uint16_t)(D) >> 8)), \
+	 ((*((uint8_t *)(B) + 1)) = (uint8_t)((uint16_t)(D) >> 0)))
+#define DSET24(B, D)                                             \
+	(((*((uint8_t *)(B) + 0)) = (uint8_t)((uint32_t)(D) >> 16)), \
+	 ((*((uint8_t *)(B) + 1)) = (uint8_t)((uint32_t)(D) >> 8)),  \
+	 ((*((uint8_t *)(B) + 2)) = (uint8_t)((uint32_t)(D) >> 0)))
+#define DSET32(B, D)                                             \
+	(((*((uint8_t *)(B) + 0)) = (uint8_t)((uint32_t)(D) >> 24)), \
+	 ((*((uint8_t *)(B) + 1)) = (uint8_t)((uint32_t)(D) >> 16)), \
+	 ((*((uint8_t *)(B) + 2)) = (uint8_t)((uint32_t)(D) >> 8)),  \
+	 ((*((uint8_t *)(B) + 3)) = (uint8_t)((uint32_t)(D) >> 0)))
+#define DSET48(B, D)                                             \
+	(((*((uint8_t *)(B) + 0)) = (uint8_t)((uint64_t)(D) >> 40)), \
+	 ((*((uint8_t *)(B) + 1)) = (uint8_t)((uint64_t)(D) >> 32)), \
+	 ((*((uint8_t *)(B) + 2)) = (uint8_t)((uint64_t)(D) >> 24)), \
+	 ((*((uint8_t *)(B) + 3)) = (uint8_t)((uint64_t)(D) >> 16)), \
+	 ((*((uint8_t *)(B) + 4)) = (uint8_t)((uint64_t)(D) >> 8)),  \
+	 ((*((uint8_t *)(B) + 5)) = (uint8_t)((uint64_t)(D) >> 0)))
+#define DSET64(B, D)                                             \
+	(((*((uint8_t *)(B) + 0)) = (uint8_t)((uint64_t)(D) >> 56)), \
+	 ((*((uint8_t *)(B) + 1)) = (uint8_t)((uint64_t)(D) >> 48)), \
+	 ((*((uint8_t *)(B) + 2)) = (uint8_t)((uint64_t)(D) >> 40)), \
+	 ((*((uint8_t *)(B) + 3)) = (uint8_t)((uint64_t)(D) >> 32)), \
+	 ((*((uint8_t *)(B) + 4)) = (uint8_t)((uint64_t)(D) >> 24)), \
+	 ((*((uint8_t *)(B) + 5)) = (uint8_t)((uint64_t)(D) >> 16)), \
+	 ((*((uint8_t *)(B) + 6)) = (uint8_t)((uint64_t)(D) >> 8)),  \
+	 ((*((uint8_t *)(B) + 7)) = (uint8_t)((uint64_t)(D) >> 0)))
+#define DGET8(B) (*((uint8_t *)(B)))
+#define DGET16(B) \
+	((((uint16_t) * ((uint8_t *)(B) + 0)) << 8) | (((uint16_t) * ((uint8_t *)(B) + 1)) << 0))
+#define DGET24(B) \
+	((((uint32_t) * ((uint8_t *)(B) + 0)) << 16) | (((uint32_t) * ((uint8_t *)(B) + 1)) << 8) | (((uint32_t) * ((uint8_t *)(B) + 2)) << 0))
+#define DGET32(B) \
+	((((uint32_t) * ((uint8_t *)(B) + 0)) << 24) | (((uint32_t) * ((uint8_t *)(B) + 1)) << 16) | (((uint32_t) * ((uint8_t *)(B) + 2)) << 8) | (((uint32_t) * ((uint8_t *)(B) + 3)) << 0))
+#define DGET48(B) \
+	((((uint64_t) * ((uint8_t *)(B) + 0)) << 40) | (((uint64_t) * ((uint8_t *)(B) + 1)) << 32) | (((uint64_t) * ((uint8_t *)(B) + 2)) << 24) | (((uint64_t) * ((uint8_t *)(B) + 3)) << 16) | (((uint64_t) * ((uint8_t *)(B) + 4)) << 8) | (((uint64_t) * ((uint8_t *)(B) + 5)) << 0))
+#define DGET64(B) \
+	((((uint64_t) * ((uint8_t *)(B) + 0)) << 56) | (((uint64_t) * ((uint8_t *)(B) + 1)) << 48) | (((uint64_t) * ((uint8_t *)(B) + 2)) << 40) | (((uint64_t) * ((uint8_t *)(B) + 3)) << 32) | (((uint64_t) * ((uint8_t *)(B) + 4)) << 24) | (((uint64_t) * ((uint8_t *)(B) + 5)) << 16) | (((uint64_t) * ((uint8_t *)(B) + 6)) << 8) | (((uint64_t) * ((uint8_t *)(B) + 7)) << 0))
 #else /* ISTGT_USE_MACRO_EXPAND */
 //#define DSET8(B,D)  (istgt_dset8((B),(D)))
-#define DSET8(B,D)  (*((uint8_t *)(B)) = (uint8_t)(D))
-#define DSET16(B,D) (istgt_dset16((B),(D)))
-#define DSET24(B,D) (istgt_dset24((B),(D)))
-#define DSET32(B,D) (istgt_dset32((B),(D)))
-#define DSET48(B,D) (istgt_dset48((B),(D)))
-#define DSET64(B,D) (istgt_dset64((B),(D)))
+#define DSET8(B, D) (*((uint8_t *)(B)) = (uint8_t)(D))
+#define DSET16(B, D) (istgt_dset16((B), (D)))
+#define DSET24(B, D) (istgt_dset24((B), (D)))
+#define DSET32(B, D) (istgt_dset32((B), (D)))
+#define DSET48(B, D) (istgt_dset48((B), (D)))
+#define DSET64(B, D) (istgt_dset64((B), (D)))
 //#define DGET8(B)    (istgt_dget8((B)))
-#define DGET8(B)    (*((uint8_t *)(B)))
-#define DGET16(B)   (istgt_dget16((B)))
-#define DGET24(B)   (istgt_dget24((B)))
-#define DGET32(B)   (istgt_dget32((B)))
-#define DGET48(B)   (istgt_dget48((B)))
-#define DGET64(B)   (istgt_dget64((B)))
+#define DGET8(B) (*((uint8_t *)(B)))
+#define DGET16(B) (istgt_dget16((B)))
+#define DGET24(B) (istgt_dget24((B)))
+#define DGET32(B) (istgt_dget32((B)))
+#define DGET48(B) (istgt_dget48((B)))
+#define DGET64(B) (istgt_dget64((B)))
 #endif /* ISTGT_USE_MACRO_EXPAND */
 
-#define DMIN8(A,B)  ((uint8_t)  ((A) > (B) ? (B) : (A)))
-#define DMIN16(A,B) ((uint16_t) ((A) > (B) ? (B) : (A)))
-#define DMIN24(A,B) ((uint32_t) ((A) > (B) ? (B) : (A)))
-#define DMIN32(A,B) ((uint32_t) ((A) > (B) ? (B) : (A)))
-#define DMIN48(A,B) ((uint64_t) ((A) > (B) ? (B) : (A)))
-#define DMIN64(A,B) ((uint64_t) ((A) > (B) ? (B) : (A)))
-#define DMAX8(A,B)  ((uint8_t)  ((A) > (B) ? (A) : (B)))
-#define DMAX16(A,B) ((uint16_t) ((A) > (B) ? (A) : (B)))
-#define DMAX24(A,B) ((uint32_t) ((A) > (B) ? (A) : (B)))
-#define DMAX32(A,B) ((uint32_t) ((A) > (B) ? (A) : (B)))
-#define DMAX48(A,B) ((uint64_t) ((A) > (B) ? (A) : (B)))
-#define DMAX64(A,B) ((uint64_t) ((A) > (B) ? (A) : (B)))
+#define DMIN8(A, B) ((uint8_t)((A) > (B) ? (B) : (A)))
+#define DMIN16(A, B) ((uint16_t)((A) > (B) ? (B) : (A)))
+#define DMIN24(A, B) ((uint32_t)((A) > (B) ? (B) : (A)))
+#define DMIN32(A, B) ((uint32_t)((A) > (B) ? (B) : (A)))
+#define DMIN48(A, B) ((uint64_t)((A) > (B) ? (B) : (A)))
+#define DMIN64(A, B) ((uint64_t)((A) > (B) ? (B) : (A)))
+#define DMAX8(A, B) ((uint8_t)((A) > (B) ? (A) : (B)))
+#define DMAX16(A, B) ((uint16_t)((A) > (B) ? (A) : (B)))
+#define DMAX24(A, B) ((uint32_t)((A) > (B) ? (A) : (B)))
+#define DMAX32(A, B) ((uint32_t)((A) > (B) ? (A) : (B)))
+#define DMAX48(A, B) ((uint64_t)((A) > (B) ? (A) : (B)))
+#define DMAX64(A, B) ((uint64_t)((A) > (B) ? (A) : (B)))
 
-#define BSHIFTNW(N,W) (((W) > 0) ? (((N) > ((W)-1)) ? ((N) - ((W)-1)) : 0) : 0)
+#define BSHIFTNW(N, W) (((W) > 0) ? (((N) > ((W)-1)) ? ((N) - ((W)-1)) : 0) : 0)
 #define BMASKW(W) (((W) > 0) ? (~((~0U) << (W))) : 0)
 
-#define BDSET8W(B,D,N,W) DSET8((B),(((D)&BMASKW((W)))<<BSHIFTNW((N),(W))))
-#define BDADD8W(B,D,N,W) DSET8((B),((DGET8((B)) & ~(BMASKW((W)) << BSHIFTNW((N),(W)))) | (uint8_t) (((D) & BMASKW((W))) << BSHIFTNW((N),(W)))))
-#define BSET8W(B,N,W) (*((uint8_t *)(B)) |= (uint8_t) (BMASKW((W))) << BSHIFTNW((N),(W)))
-#define BCLR8W(B,N,W) (*((uint8_t *)(B)) &= (uint8_t) (~(BMASKW((W))) << BSHIFTNW((N),(W))))
-#define BGET8W(B,N,W) ((*((uint8_t *)(B)) >> BSHIFTNW((N),(W))) & BMASKW((W)))
+#define BDSET8W(B, D, N, W) DSET8((B), (((D)&BMASKW((W))) << BSHIFTNW((N), (W))))
+#define BDADD8W(B, D, N, W) DSET8((B), ((DGET8((B)) & ~(BMASKW((W)) << BSHIFTNW((N), (W)))) | (uint8_t)(((D)&BMASKW((W))) << BSHIFTNW((N), (W)))))
+#define BSET8W(B, N, W) (*((uint8_t *)(B)) |= (uint8_t)(BMASKW((W))) << BSHIFTNW((N), (W)))
+#define BCLR8W(B, N, W) (*((uint8_t *)(B)) &= (uint8_t)(~(BMASKW((W))) << BSHIFTNW((N), (W))))
+#define BGET8W(B, N, W) ((*((uint8_t *)(B)) >> BSHIFTNW((N), (W))) & BMASKW((W)))
 
-#define BDSET8(B,D,N) (BDSET8W((B),(D),(N),1))
-#define BDADD8(B,D,N) (BDADD8W((B),(D),(N),1))
-#define BSET8(B,N) (BSET8W((B),(N),1))
-#define BCLR8(B,N) (BCLR8W((B),(N),1))
-#define BGET8(B,N) (BGET8W((B),(N),1))
+#define BDSET8(B, D, N) (BDSET8W((B), (D), (N), 1))
+#define BDADD8(B, D, N) (BDADD8W((B), (D), (N), 1))
+#define BSET8(B, N) (BSET8W((B), (N), 1))
+#define BCLR8(B, N) (BCLR8W((B), (N), 1))
+#define BGET8(B, N) (BGET8W((B), (N), 1))
 
-#define BGET32(B,N) (((B) >> (N)) & 1)
-#define BSET32(B,N) ((B) |= ((uint32_t)((1) << (N))))
-#define BUNSET32(B,N) ((B) &= ((uint32_t)(~((uint32_t)((1) << (N))))))
+#define BGET32(B, N) (((B) >> (N)) & 1)
+#define BSET32(B, N) ((B) |= ((uint32_t)((1) << (N))))
+#define BUNSET32(B, N) ((B) &= ((uint32_t)(~((uint32_t)((1) << (N))))))
 
 /* memory allocate */
-#ifdef	REPLICATION
-#define xmalloc(size)		malloc(size)
-#define xfree(p)		free(p)
-#define xstrdup(s)		(s == NULL) ? NULL : strdup(s)
-#define	xmalloci(size, l)	malloc(size)
-#define	xfreei(p, l)		free(p)
-#define	xstrdupi(s, l)		(s == NULL) ? NULL : strdup(s)
+#ifdef REPLICATION
+#define xmalloc(size) malloc(size)
+#define xfree(p) free(p)
+#define xstrdup(s) (s == NULL) ? NULL : strdup(s)
+#define xmalloci(size, l) malloc(size)
+#define xfreei(p, l) free(p)
+#define xstrdupi(s, l) (s == NULL) ? NULL : strdup(s)
 #else
-#define xmalloc(size)  xmalloci((size), __LINE__)
-#define xfree(p)  xfreei((p), __LINE__)
+#define xmalloc(size) xmalloci((size), __LINE__)
+#define xfree(p) xfreei((p), __LINE__)
 #define xstrdup(s) xstrdupi((s), __LINE__)
 void *xmalloci(size_t size, uint16_t line);
 void xfreei(void *p, uint16_t line);
@@ -209,16 +191,19 @@ void poolinit(void);
 void poolfini(void);
 int poolprint(char *inbuf, int len);
 
-#define timesdiff(_clockid, _st, _now, _re)				\
-{									\
-	clock_gettime(_clockid, &_now);					\
-	if ((_now.tv_nsec - _st.tv_nsec)<0) {				\
-		_re.tv_sec  = _now.tv_sec - _st.tv_sec - 1;		\
-		_re.tv_nsec = 1000000000 + _now.tv_nsec - _st.tv_nsec;	\
-	} else {							\
-		_re.tv_sec  = _now.tv_sec - _st.tv_sec;			\
-		_re.tv_nsec = _now.tv_nsec - _st.tv_nsec;		\
-	}								\
-}
+#define timesdiff(_clockid, _st, _now, _re)                        \
+	{                                                              \
+		clock_gettime(_clockid, &_now);                            \
+		if ((_now.tv_nsec - _st.tv_nsec) < 0)                      \
+		{                                                          \
+			_re.tv_sec = _now.tv_sec - _st.tv_sec - 1;             \
+			_re.tv_nsec = 1000000000 + _now.tv_nsec - _st.tv_nsec; \
+		}                                                          \
+		else                                                       \
+		{                                                          \
+			_re.tv_sec = _now.tv_sec - _st.tv_sec;                 \
+			_re.tv_nsec = _now.tv_nsec - _st.tv_nsec;              \
+		}                                                          \
+	}
 
 #endif /* ISTGT_MISC_H */
