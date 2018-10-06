@@ -1,4 +1,4 @@
-/*-
+/*
  * Copyright (c) 2003 Silicon Graphics International Corp.
  * All rights reserved.
  *
@@ -28,7 +28,8 @@
  * POSSIBILITY OF SUCH DAMAGES.
  *
  * $Id: //depot/users/kenm/FreeBSD-test2/sys/cam/ctl/ctl_ser_table.c#1 $
- * $FreeBSD: stable/9/sys/cam/ctl/ctl_ser_table.c 229997 2012-01-12 00:34:33Z ken $
+ * $FreeBSD: stable/9/sys/cam/ctl/ctl_ser_table.c 229997 2012-01-12
+ * 00:34:33Z ken $
  */
 
 /*
@@ -37,21 +38,22 @@
  * Author: Kim Le
  */
 
-/****************************************************************************/
-/* TABLE      istgtSerTbl                                                    */
-/*                                                                          */
-/*  The matrix which drives the serialization algorithm. The major index    */
-/*  (the first) into this table is the command being checked and the minor  */
-/*  index is the command against which the first command is being checked.  */
-/*  i.e., the major index (row) command is ahead of the minor index command */
-/*  (column) in the queue.  This allows the code to optimize by capturing   */
-/*  the result of the first indexing operation into a pointer.              */
-/*                                                                          */
-/*  Whenever a new value is added to the IDX_T type, this matrix must be    */
-/*  expanded by one row AND one column -- Because of this, some effort      */
-/*  should be made to re-use the indexes whenever possible.                 */
-/*                                                                          */
-/****************************************************************************/
+/* ******************************************************************* */
+/*
+ *	TABLE    istgtSerTbl
+ *
+ *  The matrix which drives the serialization algorithm. The major index
+ *  (the first) into this table is the command being checked and the minor
+ *  index is the command against which the first command is being checked.
+ *  i.e., the major index (row) command is ahead of the minor index command
+ *  (column) in the queue. This allows the code to optimize by capturing the
+ *	 result of the first indexing operation into a pointer.
+ *
+ *  Whenever a new value is added to the IDX_T type, this matrix must be
+ *	expanded by one row AND one column -- Because of this, some effort
+ *	should be made to re-use the indexes whenever possible.
+ */
+/* ******************************************************************** */
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -83,7 +85,7 @@
 
 #if !defined(__GNUC__)
 #undef __attribute__
-#define __attribute__(x)
+#define	__attribute__(x)
 #endif
 
 #define	sK	ISTGT_SER_SKIP		/* Skip */
@@ -93,24 +95,44 @@
 
 istgt_serialize_action
 istgt_serialize_table[ISTGT_SERIDX_COUNT + 1][ISTGT_SERIDX_COUNT + 1] = {
-/**>IDX_ :: 2nd:TUR RD  WRT UNMP MDSN MDSL RQSN INQ  RDCP RES  REL LSNS FMT STR PRIN PROT MAININ INVLD*/
-/*TUR     */{   pS, pS, pS,  pS,  pS,  pS,  pS,  pS,  pS,  bK,  bK, pS,  pS, pS, bK,  bK,  pS,    pS},
-/*READ    */{   pS, pS, xT,  bK,  bK,  bK,  bK,  pS,  pS,  bK,  bK, pS,  bK, bK, bK,  bK,  bK,    pS},
-/*WRITE   */{   pS, xT, xT,  bK,  bK,  bK,  bK,  pS,  pS,  bK,  bK, pS,  bK, bK, bK,  bK,  bK,    pS},
-/*UNMAP   */{   pS, bK, bK,  pS,  bK,  bK,  bK,  pS,  pS,  bK,  bK, pS,  bK, bK, pS,  bK,  bK,    pS},
-/*MD_SNS  */{   pS, bK, bK,  bK,  pS,  bK,  bK,  pS,  pS,  bK,  bK, pS,  bK, bK, bK,  bK,  bK,    pS},
-/*MD_SEL  */{   pS, bK, bK,  bK,  bK,  bK,  bK,  pS,  pS,  bK,  bK, pS,  bK, bK, bK,  bK,  bK,    pS},
-/*RQ_SNS  */{   pS, pS, pS,  pS,  pS,  pS,  pS,  pS,  pS,  pS,  pS, pS,  pS, pS, pS,  pS,  pS,    pS},
-/*INQ     */{   pS, pS, pS,  pS,  pS,  pS,  pS,  pS,  pS,  pS,  pS, pS,  pS, pS, pS,  pS,  pS,    pS},
-/*RD_CAP  */{   pS, pS, pS,  pS,  pS,  pS,  bK,  pS,  pS,  bK,  bK, pS,  bK, bK, bK,  bK,  bK,    pS},
-/*RESV    */{   bK, bK, bK,  bK,  bK,  bK,  bK,  pS,  bK,  bK,  bK, bK,  bK, bK, bK,  bK,  bK,    pS},
-/*REL     */{   bK, bK, bK,  bK,  bK,  bK,  bK,  pS,  bK,  bK,  bK, bK,  bK, bK, bK,  bK,  bK,    pS},
-/*LOG_SNS */{   pS, pS, pS,  pS,  pS,  bK,  bK,  pS,  pS,  bK,  bK, pS,  bK, bK, bK,  bK,  bK,    pS},
-/*FORMAT  */{   pS, bK, bK,  bK,  bK,  bK,  pS,  pS,  bK,  bK,  bK, bK,  bK, bK, bK,  bK,  bK,    pS},
-/*START   */{   pS, bK, bK,  bK,  bK,  bK,  bK,  pS,  bK,  bK,  bK, bK,  bK, bK, bK,  bK,  bK,    pS},
-/*PRES_IN */{   bK, bK, bK,  pS,  bK,  bK,  bK,  pS,  bK,  bK,  bK, bK,  bK, bK, bK,  bK,  bK,    pS},
-/*PRES_OUT*/{   bK, bK, bK,  bK,  bK,  bK,  bK,  pS,  bK,  bK,  bK, bK,  bK, bK, bK,  bK,  bK,    pS},
-/*MAIN_IN */{   pS, bK, bK,  bK,  bK,  bK,  bK,  pS,  bK,  bK,  bK, bK,  bK, bK, bK,  bK,  pS,    pS},
-/*INVLD   */{   pS, pS, pS,  pS,  pS,  pS,  pS,  pS,  pS,  pS,  pS, pS,  pS, pS, pS,  pS,  pS,    pS}
+/*
+ * >IDX_ :: 2nd:TUR RD  WRT UNMP MDSN MDSL RQSN INQ  RDCP RES  REL LSNS
+ * FMT STR PRIN PROT MAININ INVLD
+ */
+/* TUR */
+{ pS, pS, pS, pS, pS, pS, pS, pS, pS, bK, bK, pS, pS, pS, bK, bK, pS, pS},
+/* READ */
+{ pS, pS, xT, bK, bK, bK, bK, pS, pS, bK, bK, pS, bK, bK, bK, bK, bK, pS},
+/* WRITE */
+{ pS, xT, xT, bK, bK, bK, bK, pS, pS, bK, bK, pS, bK, bK, bK, bK, bK, pS},
+/* UNMAP */
+{ pS, bK, bK, pS, bK, bK, bK, pS, pS, bK, bK, pS, bK, bK, pS, bK, bK, pS},
+/* MD_SNS */
+{ pS, bK, bK, bK, pS, bK, bK, pS, pS, bK, bK, pS, bK, bK, bK, bK, bK, pS},
+/* MD_SEL */
+{ pS, bK, bK, bK, bK, bK, bK, pS, pS, bK, bK, pS, bK, bK, bK, bK, bK, pS},
+/* RQ_SNS */
+{ pS, pS, pS, pS, pS, pS, pS, pS, pS, pS, pS, pS, pS, pS, pS,  pS, pS, pS},
+/* INQ */
+{ pS, pS, pS, pS, pS, pS, pS, pS, pS, pS, pS, pS, pS, pS, pS, pS, pS, pS},
+/* RD_CAP */
+{ pS, pS, pS, pS, pS, pS, bK, pS, pS, bK, bK, pS, bK, bK, bK, bK, bK, pS},
+/* RESV  */
+{ bK, bK, bK, bK, bK, bK, bK, pS, bK, bK, bK, bK, bK, bK, bK, bK, bK, pS},
+/* REL  */
+{ bK, bK, bK, bK, bK, bK, bK, pS, bK, bK, bK, bK, bK, bK, bK, bK, bK, pS},
+/* LOG_SNS */
+{ pS, pS, pS,  pS, pS, bK, bK, pS, pS, bK, bK, pS, bK, bK, bK, bK, bK, pS},
+/* FORMAT */
+{ pS, bK, bK, bK, bK, bK, pS, pS, bK, bK, bK, bK, bK, bK, bK, bK, bK, pS},
+/* START */
+{ pS, bK, bK, bK, bK, bK, bK, pS, bK, bK, bK, bK, bK, bK, bK, bK, bK, pS},
+/* PRES_IN */
+{ bK, bK, bK, pS, bK, bK, bK, pS, bK, bK, bK, bK, bK, bK, bK, bK, bK, pS},
+/* PRES_OUT */
+{ bK, bK, bK, bK, bK, bK, bK, pS, bK, bK, bK, bK, bK, bK, bK, bK, bK, pS},
+/* MAIN_IN */
+{ pS, bK, bK, bK, bK, bK, bK, pS, bK, bK, bK, bK, bK, bK, bK, bK, pS, pS},
+/* INVLD */
+{ pS, pS, pS, pS, pS, pS, pS, pS, pS, pS, pS, pS, pS, pS, pS, pS, pS, pS}
 };
-
