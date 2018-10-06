@@ -25,11 +25,11 @@
  *
  */
 
-#ifndef BUILD_H
-#define BUILD_H
+#ifndef	BUILD_H
+#define	BUILD_H
 
-#define BUILD_PREFIX "/usr/local"
-#define BUILD_ETC_ISTGT "/usr/local/etc/istgt"
-#define BUILD_VAR_ISTGT "/var/istgt"
+#define	BUILD_PREFIX "/usr/local"
+#define	BUILD_ETC_ISTGT "/usr/local/etc/istgt"
+#define	BUILD_VAR_ISTGT "/var/istgt"
 
-#endif /* BUILD_H */
+#endif	/* BUILD_H */
