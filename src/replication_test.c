@@ -75,7 +75,8 @@ init_mdlist(char *vol_name)
 
 	mdlist_fd = open(mdpath, O_CREAT|O_RDWR, 0666);
 	if (mdlist_fd < 0) {
-		REPLICA_ERRLOG("Failed to open metadata file %s err(%d)\n",
+		REPLICA_ERRLOG("Failed to open"
+			" metadata file %s err(%d)\n",
 		    mdpath, errno);
 		return (-1);
 	}
@@ -551,7 +552,8 @@ main(int argc, char **argv)
 again:
 	// Connect to controller to start handshake and connect to epoll
 	if ((mgmtfd = cstor_ops.conn_connect(ctrl_ip, ctrl_port)) < 0) {
-		REPLICA_ERRLOG("conn_connect() failed errno:%d\n", errno);
+		REPLICA_ERRLOG("conn_connect()"
+			" failed errno:%d\n", errno);
 		if (retry) {
 			sleep(1);
 			goto again;
@@ -583,13 +585,17 @@ again:
 				count = test_read_data(events[i].data.fd, (uint8_t *)mgmtio, sizeof (zvol_io_hdr_t));
 				if (count < 0) {
 					if (retry) {
-						REPLICA_ERRLOG("Failed to read from %d\n", events[i].data.fd);
+						REPLICA_ERRLOG("Failed to"
+							" read "
+							"from %d\n", events[i].data.fd);
 						epoll_ctl(epfd, EPOLL_CTL_DEL, mgmtfd, NULL);
 						close(mgmtfd);
 						sleep(1);
 						goto again;
 					} else {
-						REPLICA_ERRLOG("Failed to read from %d\n", events[i].data.fd);
+						REPLICA_ERRLOG("Failed"
+							" to read "
+							"from %d\n", events[i].data.fd);
 						rc = -1;
 						goto error;
 					}
@@ -603,7 +609,8 @@ again:
 				}
 				if (count != sizeof (zvol_io_hdr_t)) {
 					REPLICA_ERRLOG("Failed to read complete"
-						" header.. got only %ld bytes out of %lu\n",
+						" header.. got only"
+						" %ld bytes out of %lu\n",
 					    count, sizeof (zvol_io_hdr_t));
 					rc = -1;
 					goto error;
@@ -646,12 +653,14 @@ again:
 					    sbuf, sizeof (sbuf),
 						NI_NUMERICHOST | NI_NUMERICSERV);
 				if (rc == 0) {
-					REPLICA_LOG("Accepted connection on descriptor %d "
+					REPLICA_LOG("Accepted connection"
+						" on descriptor %d "
 					    "(host=%s, port=%s)\n", iofd, hbuf, sbuf);
 				}
 				rc = make_socket_non_blocking(iofd);
 				if (rc == -1) {
-					REPLICA_ERRLOG("make_socket_non_blocking() failed, errno:%d"
+					REPLICA_ERRLOG("make_socket_non_blocking()"
+						" failed, errno:%d"
 					    " replica(%d)", errno, ctrl_port);
 					exit(EXIT_FAILURE);
 				}
@@ -660,7 +669,8 @@ again:
 				rc = epoll_ctl(epfd, EPOLL_CTL_ADD, iofd, &event);
 				if (rc == -1) {
 					REPLICA_ERRLOG("epoll_ctl() failed,"
-						" errno:%d replica(%d)", errno, ctrl_port);
+						" errno:%d"
+						" replica(%d)", errno, ctrl_port);
 					exit(EXIT_FAILURE);
 				}
 			} else if (events[i].data.fd == iofd) {
@@ -734,7 +744,8 @@ again:
 					if (io_hdr->opcode == ZVOL_OPCODE_OPEN) {
 						open_ptr = (zvol_op_open_data_t *)data;
 						io_hdr->status = ZVOL_OP_STATUS_OK;
-						REPLICA_LOG("Volume name:%s blocksize:%d"
+						REPLICA_LOG("Volume"
+							" name:%s blocksize:%d"
 							" timeout:%d.. replica(%d)\n",
 						    open_ptr->volname, open_ptr->tgt_block_size, open_ptr->timeout, ctrl_port);
 					}
@@ -743,7 +754,9 @@ execute_io:
 						    io_hdr->opcode == ZVOL_OPCODE_READ)) {
 						io_cnt --;
 						if (io_cnt == 0) {
-							REPLICA_ERRLOG("sleeping for 60 seconds.."
+							REPLICA_ERRLOG("sleeping"
+								" for 60"
+								" seconds.."
 								" replica(%d)\n", ctrl_port);
 							sleep(60);
 						}
@@ -772,7 +785,8 @@ execute_io:
 						}
 
 						if (nbytes != io_rw_hdr->len) {
-							REPLICA_ERRLOG("Failed to write data"
+							REPLICA_ERRLOG("Failed"
+								" to write data"
 								" to %s replica(%d)\n", test_vol, ctrl_port);
 							goto error;
 						}
@@ -808,9 +822,12 @@ execute_io:
 						}
 
 						if (nbytes != io_hdr->len) {
-							REPLICA_ERRLOG("failed to read completed"
-								" data from %s off:%lu "
-							    "req:%lu read:%lu replica(%d)\n",
+							REPLICA_ERRLOG("failed"
+								" to read completed"
+								" data from %s "
+								"off:%lu "
+							    "req:%lu read:%lu"
+							    " replica(%d)\n",
 							    test_vol, io_hdr->offset, io_hdr->len, nbytes, ctrl_port);
 							free(user_data);
 							goto error;
@@ -825,8 +842,10 @@ execute_io:
 
 					rc = send_io_resp(iofd, io_hdr, data);
 					if (rc) {
-						REPLICA_ERRLOG("Failed to send response"
-							" replica(%d)\n", ctrl_port);
+						REPLICA_ERRLOG("Failed"
+							" to send response"
+							" replica"
+							"(%d)\n", ctrl_port);
 						goto error;
 					}
 
