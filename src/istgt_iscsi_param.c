@@ -66,8 +66,8 @@ istgt_iscsi_param_find(ISCSI_PARAM *params, const char *key)
 	if (params == NULL || key == NULL)
 		return (NULL);
 	for (param = params; param != NULL; param = param->next) {
-		if (param->key != NULL && param->key[0] == key[0]
-            && strcasecmp(param->key, key) == 0) {
+		if (param->key != NULL && param->key[0] == key[0] &&
+            strcasecmp(param->key, key) == 0) {
 			return (param);
 		}
 	}
@@ -83,8 +83,8 @@ istgt_iscsi_param_del(ISCSI_PARAM **params, const char *key)
 	if (params == NULL || key == NULL)
 		return (0);
 	for (param = *params; param != NULL; param = param->next) {
-		if (param->key != NULL && param->key[0] == key[0]
-            && strcasecmp(param->key, key) == 0) {
+		if (param->key != NULL && param->key[0] == key[0] &&
+            strcasecmp(param->key, key) == 0) {
 			if (prev_param != NULL) {
 				prev_param->next = param->next;
 			} else {
@@ -106,7 +106,7 @@ istgt_iscsi_param_add(ISCSI_PARAM **params, const char *key, const char *val,
 	ISCSI_PARAM *param, *last_param;
 
     ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "add %s=%s, list=[%s], type=%d\n",
-    key, val, list, type);
+        key, val, list, type);
 	if (key == NULL)
 		return (-1);
 	param = istgt_iscsi_param_find(*params, key);
@@ -166,7 +166,7 @@ istgt_iscsi_param_set_int(ISCSI_PARAM *params, const char *key, int val)
 	}
 
 	xfree(param->val);
-	snprintf(buf, sizeof buf, "%d", val);
+	snprintf(buf, sizeof (buf), "%d", val);
 	param->val = xstrdup(buf);
 
 	return (0);
