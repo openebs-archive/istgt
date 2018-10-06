@@ -38,8 +38,8 @@
 #include "istgt_misc.h"
 #include "istgt_conf.h"
 
-//#define CF_DELIM " \t,;"
-#define CF_DELIM " \t"
+// #define CF_DELIM " \t,;"
+#define	CF_DELIM " \t"
 
 static void istgt_free_all_cf_section(CF_SECTION *sp);
 static void istgt_free_all_cf_item(CF_ITEM *ip);
@@ -52,12 +52,12 @@ istgt_allocate_config(void)
 {
 	CONFIG *cp;
 
-	cp = xmalloc(sizeof *cp);
-	memset(cp, 0, sizeof *cp);
+	cp = xmalloc(sizeof (*cp));
+	memset(cp, 0, sizeof (*cp));
 	cp->file = NULL;
 	cp->section = NULL;
 
-	return cp;
+	return (cp);
 }
 
 void
@@ -77,12 +77,12 @@ istgt_allocate_cf_section(void)
 {
 	CF_SECTION *sp;
 
-	sp = xmalloc(sizeof *sp);
-	memset(sp, 0, sizeof *sp);
+	sp = xmalloc(sizeof (*sp));
+	memset(sp, 0, sizeof (*sp));
 	sp->next = NULL;
 	sp->item = NULL;
 
-	return sp;
+	return (sp);
 }
 
 static void
@@ -116,13 +116,13 @@ istgt_allocate_cf_item(void)
 {
 	CF_ITEM *ip;
 
-	ip = xmalloc(sizeof *ip);
-	memset(ip, 0, sizeof *ip);
+	ip = xmalloc(sizeof (*ip));
+	memset(ip, 0, sizeof (*ip));
 	ip->next = NULL;
 	ip->key = NULL;
 	ip->val = NULL;
 
-	return ip;
+	return (ip);
 }
 
 static void
@@ -156,12 +156,12 @@ istgt_allocate_cf_value(void)
 {
 	CF_VALUE *vp;
 
-	vp = xmalloc(sizeof *vp);
-	memset(vp, 0, sizeof *vp);
+	vp = xmalloc(sizeof (*vp));
+	memset(vp, 0, sizeof (*vp));
 	vp->next = NULL;
 	vp->value = NULL;
 
-	return vp;
+	return (vp);
 }
 
 static void
@@ -221,16 +221,16 @@ istgt_find_cf_section(CONFIG *cp, const char *name)
 	CF_SECTION *sp;
 
 	if (name == NULL || name[0] == '\0')
-		return NULL;
+		return (NULL);
 
 	for (sp = cp->section; sp != NULL; sp = sp->next) {
-		if (sp->name != NULL && sp->name[0] == name[0]
-			&& strcasecmp(sp->name, name) == 0) {
-			return sp;
+		if (sp->name != NULL && sp->name[0] == name[0] 
+				&& strcasecmp(sp->name, name) == 0) {
+			return (sp);
 		}
 	}
 
-	return NULL;
+	return (NULL);
 }
 
 static void
@@ -256,26 +256,26 @@ istgt_find_cf_nitem(CF_SECTION *sp, const char *key, int idx)
 	int i;
 
 	if (key == NULL || key[0] == '\0')
-		return NULL;
+		return (NULL);
 
 	i = 0;
 	for (ip = sp->item; ip != NULL; ip = ip->next) {
 		if (ip->key != NULL && ip->key[0] == key[0]
-			&& strcasecmp(ip->key, key) == 0) {
+				&& strcasecmp(ip->key, key) == 0) {
 			if (i == idx) {
-				return ip;
+				return (ip);
 			}
 			i++;
 		}
 	}
 
-	return NULL;
+	return (NULL);
 }
 
 CF_ITEM *
 istgt_find_cf_item(CF_SECTION *sp, const char *key)
 {
-	return istgt_find_cf_nitem(sp, key, 0);
+	return (istgt_find_cf_nitem(sp, key, 0));
 }
 
 static void
@@ -331,8 +331,8 @@ istgt_set_cf_section_type(CF_SECTION *sp)
 		return;
 	for (i = 0; cfst_table[i].name != NULL; i++) {
 		if (sp->name[0] == cfst_table[i].name[0]
-			&& strncasecmp(sp->name, cfst_table[i].name,
-						   strlen(cfst_table[i].name)) == 0) {
+				&& strncasecmp(sp->name, cfst_table[i].name,
+				strlen(cfst_table[i].name)) == 0) {
 			sp->type = cfst_table[i].type;
 			return;
 		}
@@ -359,10 +359,10 @@ parse_line(CONFIG *cp, char *lp)
 		key = strsepq(&arg, "]");
 		if (key == NULL || arg != NULL) {
 			fprintf(stderr, "broken section\n");
-			return -1;
+			return (-1);
 		}
 		/* determine section number */
-		for (p = key; *p != '\0' && !isdigit((int) *p); p++)
+		for (p = key; *p != '\0' && !isdigit((int)*p); p++)
 			;
 		if (*p != '\0') {
 			num = (int)strtol(p, NULL, 10);
@@ -384,12 +384,12 @@ parse_line(CONFIG *cp, char *lp)
 		sp = cp->current_section;
 		if (sp == NULL) {
 			fprintf(stderr, "unknown section\n");
-			return -1;
+			return (-1);
 		}
 		key = strsepq(&arg, CF_DELIM);
 		if (key == NULL) {
 			fprintf(stderr, "broken key\n");
-			return -1;
+			return (-1);
 		}
 
 		ip = istgt_allocate_cf_item();
@@ -407,13 +407,13 @@ parse_line(CONFIG *cp, char *lp)
 		}
 	}
 
-	return 0;
+	return (0);
 }
 
 static char *
-fgets_line (FILE *fp)
+fgets_line(FILE *fp)
 {
-#define MAX_TMPBUFX 8192
+#define	MAX_TMPBUFX 8192
 	char *dst, *p, *tmp;
 	size_t total, len;
 
@@ -425,14 +425,14 @@ fgets_line (FILE *fp)
 		len = strlen(p);
 		total += len;
 		if (len + 1 < MAX_TMPBUFX || dst[total - 1] == '\n') {
-			//return realloc(dst, total + 1);
+			// return realloc(dst, total + 1);
 			tmp = xmalloc(total + 5);
 			bcopy(dst, tmp, total);
 			tmp[total] = '\0';
 			xfree(dst);
 			dst = tmp;
 			tmp = NULL;
-			return dst;
+			return (dst);
 		}
 		tmp = xmalloc(total + MAX_TMPBUFX);
 		bcopy(dst, tmp, total);
@@ -440,7 +440,7 @@ fgets_line (FILE *fp)
 		xfree(dst);
 		dst = tmp;
 		tmp = NULL;
-		//dst = realloc (dst, total + MAX_TMPBUFX);
+		// dst = realloc (dst, total + MAX_TMPBUFX);
 		p = dst + total;
 	}
 
@@ -452,15 +452,15 @@ fgets_line (FILE *fp)
 		xfree(dst);
 		dst = tmp;
 		tmp = NULL;
-		//dst = realloc(dst, total + 2);
-		//dst[total] = '\n';
-		//dst[total + 1] = '\0';
-		return dst;
+		// dst = realloc(dst, total + 2);
+		// dst[total] = '\n';
+		// dst[total + 1] = '\0';
+		return (dst);
 	}
 
 	xfree(dst);
 
-	return NULL;
+	return (NULL);
 }
 
 int
@@ -473,18 +473,18 @@ istgt_read_config(CONFIG *cp, const char *file)
 	int n, n2;
 
 	if (file == NULL || file[0] == '\0')
-		return -1;
+		return (-1);
 	fp = fopen(file, "r");
 	if (fp == NULL) {
 		fprintf(stderr, "open error: %s\n", file);
-		return -1;
+		return (-1);
 	}
 	cp->file = xstrdup(file);
 
 	line = 1;
 	while ((lp = fgets_line(fp)) != NULL) {
 		/* skip spaces */
-		for (p = lp; *p != '\0' && isspace((int) *p); p++)
+		for (p = lp; *p != '\0' && isspace((int)*p); p++)
 			;
 		/* skip comment, empty line */
 		if (p[0] == '#' || p[0] == '\0')
@@ -507,11 +507,12 @@ istgt_read_config(CONFIG *cp, const char *file)
 			xfree(lp);
 			p = lp = q;
 			n += n2;
-		} 
+		}
 
 		/* parse one line */
 		if (parse_line(cp, p) < 0) {
-			fprintf(stderr, "parse error at line %d of %s\n", line, cp->file);
+			fprintf(stderr, "parse error at line %d of %s\n",
+				line, cp->file);
 		}
 	next_line:
 		line++;
@@ -519,7 +520,7 @@ istgt_read_config(CONFIG *cp, const char *file)
 	}
 
 	fclose(fp);
-	return 0;
+	return (0);
 }
 
 int
@@ -530,12 +531,12 @@ istgt_print_config(CONFIG *cp)
 	CF_VALUE *vp;
 
 	if (cp == NULL)
-		return -1;
+		return (-1);
 
 	/* empty config? */
 	sp = cp->section;
 	if (sp == NULL)
-		return 0;
+		return (0);
 
 	while (sp != NULL) {
 		printf("Section: %s\n", sp->name);
@@ -553,5 +554,5 @@ istgt_print_config(CONFIG *cp)
 		sp = sp->next;
 	}
 
-	return 0;
+	return (0);
 }
