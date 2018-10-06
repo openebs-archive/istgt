@@ -119,9 +119,8 @@ static int istgt_lu_disk_open_vbox(ISTGT_LU_DISK *spec, int flags,
 		if (strcasecmp(spec->disktype, "QCOW") == 0 ||
 			strcasecmp(spec->disktype, "QED") == 0 ||
 			strcasecmp(spec->disktype, "VHDX") == 0) {
-			ISTGT_ERRLOG("VD format(%s) is not supported
-				in this version.\n",
-			    spec->disktype);
+			ISTGT_ERRLOG("VD format(%s) is not supported" +
+				"in this version.\n", spec->disktype);
 			return (-1);
 		}
 	}
@@ -370,9 +369,9 @@ istgt_lu_disk_vbox_lun_init(ISTGT_LU_DISK *spec, ISTGT_Ptr istgt
 			spec->close(spec);
 			return (-1);
 		}
-		printf("LU%d: LUN%d UUID=""
-			%8.8x-%4.4x-%4.4x-%2.2x%2.2x-
-			%2.2x%2.2x%2.2x%2.2x%2.2x%2.2x\n",
+		printf("LU%d: LUN%d UUID="
+			"%8.8x-%4.4x-%4.4x-%2.2x%2.2x-" +
+			"%2.2x%2.2x%2.2x%2.2x%2.2x%2.2x\n",
 		    spec->num, spec->lun,
 		    exspec->uuid.Gen.u32TimeLow,
 		    exspec->uuid.Gen.u16TimeMid,
