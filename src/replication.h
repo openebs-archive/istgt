@@ -1,5 +1,5 @@
 #ifndef _REPLICATION_H
-#define _REPLICATION_H
+#define	_REPLICATION_H
 
 #include <inttypes.h>
 #include <stdint.h>
@@ -18,11 +18,11 @@
 #include "replication_log.h"
 #include "zrepl_prot.h"
 
-#define MAXREPLICA 5
-#define MAXEVENTS 64
-#define BUFSIZE 1024
-#define MAXIPLEN 56
-#define MAXNAMELEN 256
+#define	MAXREPLICA 5
+#define	MAXEVENTS 64
+#define	BUFSIZE 1024
+#define	MAXIPLEN 56
+#define	MAXNAMELEN 256
 
 #include "istgt_lu.h"
 
@@ -31,9 +31,9 @@
  * current limit is 524288 per replica. Replica will be able to serve
  * 524288 in-flight IOs.
  */
-#define RCMD_MEMPOOL_ENTRIES    (1 << 19)
+#define	RCMD_MEMPOOL_ENTRIES    (1 << 19)
 
-#define MAX(a,b) (((a)>(b))?(a):(b))
+#define	MAX(a, b) (((a) > (b))?(a):(b))
 
 typedef enum zvol_cmd_type_e {
 	CMD_IO = 1,
@@ -83,8 +83,9 @@ typedef struct rcommon_cmd_s {
 	rcomm_cmd_state_t state;
 	void *data;
 	pthread_mutex_t *mutex;
-	pthread_cond_t *cond_var;
-	replica_rcomm_resp_t resp_list[MAXREPLICA];   /* array of response received from replica */
+	pthread_cond_t *cond_var;\
+	/* array of response received from replica */
+	replica_rcomm_resp_t resp_list[MAXREPLICA];
 	int64_t iovcnt;
 	struct iovec iov[41];
 } rcommon_cmd_t;
@@ -137,7 +138,7 @@ typedef struct mgmt_cmd_s {
 	zvol_io_hdr_t *io_hdr;			/* management command header */
 	void *data;				/* cmd data */
 	int mgmt_cmd_state;			/* current state of cmd */
-	int cmd_completed;			/* if command execution has completed */
+	int cmd_completed;	/* if command execution has completed */
 	/*
 	 * amount of IO data written/read in current command state
 	 */
@@ -172,7 +173,7 @@ void accept_mgmt_conns(int, int);
 void clear_rcomm_cmd(rcommon_cmd_t *);
 void ask_replica_status(spec_t *spec, replica_t *replica);
 extern void * replica_thread(void *);
-extern int do_drainfd(int );
+extern int do_drainfd(int);
 void close_fd(int epollfd, int fd);
 int64_t perform_read_write_on_fd(int fd, uint8_t *data, uint64_t len,
     int state);
@@ -183,7 +184,7 @@ void inform_mgmt_conn(replica_t *r);
 /* Replica default timeout is 200 seconds */
 #define	REPLICA_DEFAULT_TIMEOUT	200
 
-#define DECREMENT_INFLIGHT_REPLICA_IO_CNT(_r, _opcode)			\
+#define	DECREMENT_INFLIGHT_REPLICA_IO_CNT(_r, _opcode)			\
 	do {								\
 		switch (_opcode) {					\
 			case ZVOL_OPCODE_WRITE:				\
@@ -209,7 +210,7 @@ void inform_mgmt_conn(replica_t *r);
 		}							\
 	} while (0)
 
-#define INCREMENT_INFLIGHT_REPLICA_IO_CNT(_r, _opcode)			\
+#define	INCREMENT_INFLIGHT_REPLICA_IO_CNT(_r, _opcode)			\
 	do {								\
 		switch (_opcode) {					\
 			case ZVOL_OPCODE_WRITE:				\
