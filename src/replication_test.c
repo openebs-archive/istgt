@@ -635,7 +635,8 @@ again:
 					if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
 						break;
 					} else {
-						REPLICA_ERRLOG("accept() failed, err:%d replica(%d)", errno, ctrl_port);
+						REPLICA_ERRLOG("accept() failed,"
+							" err:%d replica(%d)", errno, ctrl_port);
 						break;
 					}
 				}
@@ -658,7 +659,8 @@ again:
 				event.events = EPOLLIN | EPOLLET;
 				rc = epoll_ctl(epfd, EPOLL_CTL_ADD, iofd, &event);
 				if (rc == -1) {
-					REPLICA_ERRLOG("epoll_ctl() failed, errno:%d replica(%d)", errno, ctrl_port);
+					REPLICA_ERRLOG("epoll_ctl() failed,"
+						" errno:%d replica(%d)", errno, ctrl_port);
 					exit(EXIT_FAILURE);
 				}
 			} else if (events[i].data.fd == iofd) {
@@ -732,7 +734,8 @@ again:
 					if (io_hdr->opcode == ZVOL_OPCODE_OPEN) {
 						open_ptr = (zvol_op_open_data_t *)data;
 						io_hdr->status = ZVOL_OP_STATUS_OK;
-						REPLICA_LOG("Volume name:%s blocksize:%d timeout:%d.. replica(%d)\n",
+						REPLICA_LOG("Volume name:%s blocksize:%d"
+							" timeout:%d.. replica(%d)\n",
 						    open_ptr->volname, open_ptr->tgt_block_size, open_ptr->timeout, ctrl_port);
 					}
 execute_io:
@@ -740,7 +743,8 @@ execute_io:
 						    io_hdr->opcode == ZVOL_OPCODE_READ)) {
 						io_cnt --;
 						if (io_cnt == 0) {
-							REPLICA_ERRLOG("sleeping for 60 seconds.. replica(%d)\n", ctrl_port);
+							REPLICA_ERRLOG("sleeping for 60 seconds.."
+								" replica(%d)\n", ctrl_port);
 							sleep(60);
 						}
 					}
@@ -768,7 +772,8 @@ execute_io:
 						}
 
 						if (nbytes != io_rw_hdr->len) {
-							REPLICA_ERRLOG("Failed to write data to %s replica(%d)\n", test_vol, ctrl_port);
+							REPLICA_ERRLOG("Failed to write data"
+								" to %s replica(%d)\n", test_vol, ctrl_port);
 							goto error;
 						}
 
