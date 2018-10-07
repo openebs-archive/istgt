@@ -168,9 +168,13 @@ uctl_readline(UCTL_Ptr uctl)
 	ssize_t total;
 
 	total = istgt_readline_socket
-	(uctl->sock, uctl->recvbuf, uctl->recvbufsize,
-	    uctl->recvtmp, uctl->recvtmpsize,
-	    &uctl->recvtmpidx, &uctl->recvtmpcnt,
+	    (uctl->sock,
+	    uctl->recvbuf,
+	    uctl->recvbufsize,
+	    uctl->recvtmp,
+	    uctl->recvtmpsize,
+	    &uctl->recvtmpidx,
+	    &uctl->recvtmpcnt,
 	    uctl->timeout);
 	if (total < 0) {
 		return (UCTL_CMD_DISCON);
@@ -189,7 +193,9 @@ uctl_writeline(UCTL_Ptr uctl)
 
 	expect = strlen(uctl->sendbuf);
 	total = istgt_writeline_socket
-	(uctl->sock, uctl->sendbuf, uctl->timeout);
+	    (uctl->sock,
+	    uctl->sendbuf,
+	    uctl->timeout);
 	if (total < 0) {
 		return (UCTL_CMD_DISCON);
 	}
@@ -199,8 +205,8 @@ uctl_writeline(UCTL_Ptr uctl)
 	return (UCTL_CMD_OK);
 }
 
-static int uctl_snprintf(UCTL_Ptr uctl, const char *format, ...)
-__attribute__((__format__(__printf__, 2, 3)));
+    static int uctl_snprintf(UCTL_Ptr uctl, const char *format, ...)
+    __attribute__((__format__(__printf__, 2, 3)));
 
 static int
 uctl_snprintf(UCTL_Ptr uctl, const char *format, ...)
@@ -635,29 +641,29 @@ exec_sync(UCTL_Ptr uctl)
 
 	/* send command */
 	if (uctl->iqn == NULL || uctl->lun < 0) {
-			return (UCTL_CMD_ERR);
-		}
+		return (UCTL_CMD_ERR);
+	}
 		uctl_snprintf(uctl, "SYNC \"%s\" %d\n", uctl->iqn, uctl->lun);
 		rc = uctl_writeline(uctl);
-		if (rc != UCTL_CMD_OK) {
-			return (rc);
-		}
+	if (rc != UCTL_CMD_OK) {
+		return (rc);
+	}
 
 		/* receive result */
 		rc = uctl_readline(uctl);
-		if (rc != UCTL_CMD_OK) {
-			return (rc);
-		}
-		arg = trim_string(uctl->recvbuf);
-		result = strsepq(&arg, delim);
-		strupr(result);
-		if (strcmp(result, "OK") != 0) {
-			if (is_err_req_auth(uctl, arg))
+	if (rc != UCTL_CMD_OK) {
+		return (rc);
+	}
+	arg = trim_string(uctl->recvbuf);
+	result = strsepq(&arg, delim);
+	strupr(result);
+	if (strcmp(result, "OK") != 0) {
+		if (is_err_req_auth(uctl, arg))
 			return (UCTL_CMD_REQAUTH);
-			fprintf(stderr, "ERROR %s\n", arg);
-			return (UCTL_CMD_ERR);
-		}
-		return (UCTL_CMD_OK);
+		fprintf(stderr, "ERROR %s\n", arg);
+		return (UCTL_CMD_ERR);
+	}
+	return (UCTL_CMD_OK);
 }
 
 static int
@@ -670,10 +676,10 @@ exec_persist(UCTL_Ptr uctl)
 
 	/* send command */
 	if (uctl->iqn == NULL || uctl->lun < 0) {
-		return (UCTL_CMD_ERR);
+	    return (UCTL_CMD_ERR);
 	}
-	uctl_snprintf(uctl, "PERSIST \"%s\" %d %d\n", uctl->iqn,
-	uctl->lun, uctl->persistopt);
+	    uctl_snprintf(uctl, "PERSIST \"%s\" %d %d\n", uctl->iqn,
+	    uctl->lun, uctl->persistopt);
 	rc = uctl_writeline(uctl);
 	if (rc != UCTL_CMD_OK) {
 		return (rc);
@@ -687,9 +693,9 @@ exec_persist(UCTL_Ptr uctl)
 	arg = trim_string(uctl->recvbuf);
 	result = strsepq(&arg, delim);
 	strupr(result);
-	if (strcmp(result, "OK") != 0) {
-		if (is_err_req_auth(uctl, arg))
-		return (UCTL_CMD_REQAUTH);
+		if (strcmp(result, "OK") != 0) {
+			if (is_err_req_auth(uctl, arg))
+				return (UCTL_CMD_REQAUTH);
 		fprintf(stderr, "ERROR %s\n", arg);
 		return (UCTL_CMD_ERR);
 	}
