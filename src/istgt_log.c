@@ -38,7 +38,7 @@
 #include "istgt_log.h"
 #include "istgt_misc.h"
 
-// gstatic int g_trace_flag = 0;
+// static int g_trace_flag = 0;
 int g_trace_flag = 0;
 int g_warn_flag = 1;
 static int g_log_facility = ISTGT_LOG_FACILITY;
