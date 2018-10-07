@@ -1730,7 +1730,7 @@ istgt_iscsi_check_values(CONN_Ptr conn)
 		ISTGT_ERRLOG("MaxRecvDataSegmentLength(%d) > 0x00ffffff\n",
 		    conn->TargetMaxRecvDataSegmentLength);
 		SESS_MTX_UNLOCK(conn);
-		return (-1)
+		return (-1);
 	}
 	if (conn->MaxRecvDataSegmentLength < 512) {
 		ISTGT_ERRLOG("MaxRecvDataSegmentLength(%d) < 512\n",
