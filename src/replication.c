@@ -246,7 +246,7 @@ count_of_replicas_helping_rebuild(spec_t *spec, replica_t *healthy_replica)
 
 	if (healthy_replica != NULL)
 		return (1);
-	return ((MAX(spec->replication_factor - spec->consistency_factor + 1,
+	return ((MAX_OF(spec->replication_factor - spec->consistency_factor + 1,
 	    spec->consistency_factor)) - 1);
 }
 
@@ -648,7 +648,7 @@ update_volstate(spec_t *spec)
 	if (((spec->healthy_rcount + spec->degraded_rcount >=
 	    spec->consistency_factor) && (spec->healthy_rcount >= 1)) ||
 	    (spec->healthy_rcount  + spec->degraded_rcount >=
-	    MAX(spec->replication_factor - spec->consistency_factor + 1,
+	    MAX_OF(spec->replication_factor - spec->consistency_factor + 1,
 	    spec->consistency_factor))) { 
 		TAILQ_FOREACH(replica, &spec->rq, r_next) {
 			if (max < replica->initial_checkpointed_io_seq) {
@@ -931,7 +931,7 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	replica->port = ack_data->port;
 	replica->state = ZVOL_STATUS_DEGRADED;
 	replica->initial_checkpointed_io_seq =
-	    MAX(ack_data->checkpointed_io_seq,
+	    MAX_OF(ack_data->checkpointed_io_seq,
 	    ack_data->checkpointed_degraded_io_seq);
 
 	replica->pool_guid = ack_data->pool_guid;
@@ -2358,7 +2358,7 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 	}
 
 	response_received = success + failure;
-	min_response = MAX(rcomm_cmd->replication_factor -
+	min_response = MAX_OF(rcomm_cmd->replication_factor -
 	    rcomm_cmd->consistency_factor + 1, rcomm_cmd->consistency_factor);
 
 	rc = 0;
