@@ -51,7 +51,7 @@
 
 #ifdef __FreeBSD__
 #include <sys/event.h>
-#define DIO_ISCSIWR _IOW('d', 131, struct istgt_detail)
+#define   DIO_ISCSIWR _IOW('d', 131, struct istgt_detail)
 #endif
 
 #ifdef __linux__
@@ -7343,7 +7343,7 @@ istgt_find_conn(const char *initiator_port, const char *target_name, uint16_t ts
 	}
 	if (rc < 0) {
 		//MTX_UNLOCK(&g_conns_mutex);
-		return NULL;
+		return (NULL);
 	}
 	MTX_UNLOCK(&sess->mutex);
 	//MTX_UNLOCK(&g_conns_mutex);
@@ -7360,29 +7360,30 @@ istgt_iscsi_init(ISTGT_Ptr istgt)
 	sp = istgt_find_cf_section(istgt->config, "Global");
 	if (sp == NULL) {
 		ISTGT_ERRLOG("find_cf_section failed()\n");
-		return -1;
+		return (-1);
 	}
 
 	rc = pthread_mutex_init(&g_conns_mutex, NULL);
 	if (rc != 0) {
 		ISTGT_ERRLOG("mutex_init() failed\n");
-		return -1;
+		return (-1);
 	}
 	rc = pthread_mutex_init(&g_last_tsih_mutex, NULL);
 	if (rc != 0) {
 		ISTGT_ERRLOG("mutex_init() failed\n");
-		return -1;
+		return (-1);
 	}
 	g_max_connidx = -1;
-	g_nconns = MAX_LOGICAL_UNIT * istgt->MaxSessions * istgt->MaxConnections;
+	g_nconns = MAX_LOGICAL_UNIT * istgt->MaxSessions * \
+				istgt->MaxConnections;
 	g_nconns += MAX_LOGICAL_UNIT * istgt->MaxConnections;
-	//g_conns = xmalloc(sizeof *g_conns * g_nconns);
+	// g_conns = xmalloc(sizeof *g_conns * g_nconns);
 	allocsize = ((sizeof (CONN_Ptr *)) * (g_nconns + 100));
 	g_conns = xmalloc(allocsize);
 	bzero(g_conns, allocsize);
 	g_last_tsih = 0;
 
-	return 0;
+	return (0);
 }
 
 int
@@ -7432,12 +7433,12 @@ istgt_iscsi_shutdown(ISTGT_Ptr istgt __attribute__((__unused__)))
 	rc = pthread_mutex_destroy(&g_last_tsih_mutex);
 	if (rc != 0) {
 		ISTGT_ERRLOG("mutex_destroy() failed\n");
-		return -1;
+		return (-1);
 	}
 	rc = pthread_mutex_destroy(&g_conns_mutex);
 	if (rc != 0) {
 		ISTGT_ERRLOG("mutex_destroy() failed\n");
-		return -1;
+		return (-1);
 	}
 
 	if (num == 0) {
@@ -7445,5 +7446,5 @@ istgt_iscsi_shutdown(ISTGT_Ptr istgt __attribute__((__unused__)))
 		g_conns = NULL;
 	}
 
-	return 0;
+	return (0);
 }
