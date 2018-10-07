@@ -43,7 +43,7 @@ int istgt_set_recvlowat(int s, int nbytes);
 ssize_t istgt_read_socket(int s, void *buf, size_t nbytes, int timeout);
 ssize_t istgt_write_socket(int s, const void *buf, size_t nbytes, int timeout);
 ssize_t istgt_readline_socket(int sock, char *buf, size_t size, char *tmp,
-                              size_t tmpsize, int *tmpidx, int *tmpcnt, int timeout);
+                        size_t tmpsize, int *tmpidx, int *tmpcnt, int timeout);
 ssize_t istgt_writeline_socket(int sock, const char *buf, int timeout);
 
 #endif /* ISTGT_SOCK_H */
