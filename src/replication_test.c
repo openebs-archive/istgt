@@ -75,8 +75,7 @@ init_mdlist(char *vol_name)
 
 	mdlist_fd = open(mdpath, O_CREAT|O_RDWR, 0666);
 	if (mdlist_fd < 0) {
-		REPLICA_ERRLOG("Failed to open"
-			" metadata file %s err(%d)\n",
+		REPLICA_ERRLOG("Failed to open metadata file %s err(%d)\n",
 		    mdpath, errno);
 		return (-1);
 	}
@@ -326,12 +325,12 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 				break;
 			/* adjust iovec length */
 			for (i = start; i < start + 1; i++) {
-				if (iovec[i].iov_len != 0 && iovec[i].iov_len > (size_t)rc) {
-						iovec[i].iov_base
-							= (void *) (((uintptr_t)iovec[i].iov_base) + rc);
-						iovec[i].iov_len -= rc;
-						break;
-					} else {
+				if (iovec[i].iov_len != 0 &&
+					iovec[i].iov_len > (size_t)rc) {
+					iovec[i].iov_base = (void *) (((uintptr_t)iovec[i].iov_base) + rc);
+					iovec[i].iov_len -= rc;
+					break;
+				} else {
 					rc -= iovec[i].iov_len;
 					iovec[i].iov_len = 0;
 				}
