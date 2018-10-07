@@ -63,12 +63,12 @@ typedef struct istgt_xcopy_tgt_t {
 
 int istgt_lu_disk_receive_copy_results(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd);
 int istgt_lu_disk_xcopy(ISTGT_LU_DISK *spec,
-	CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd);
+    CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd);
 int istgt_lu_disk_process_xcopy(ISTGT_LU_DISK *spec,
-	CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, uint8_t *data_buf, int dlen);
+    CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, uint8_t *data_buf, int dlen);
 int istgt_lu_disk_lbxcopy(ISTGT_XCOPY_TGT *src_tgt, ISTGT_XCOPY_TGT *dst_tgt,
-	CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, int dc, int cat,
-	uint64_t num_blks_byts, uint8_t sd_opcode);
+    CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, int dc, int cat,
+    uint64_t num_blks_byts, uint8_t sd_opcode);
 
 
 #endif /* ISTGT_ISCSI_XCOPY_H */
