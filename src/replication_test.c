@@ -586,15 +586,18 @@ again:
 					if (retry) {
 						REPLICA_ERRLOG("Failed to"
 							" read "
-							"from %d\n", events[i].data.fd);
-						epoll_ctl(epfd, EPOLL_CTL_DEL, mgmtfd, NULL);
+							"from %d\n",
+							events[i].data.fd);
+						epoll_ctl(epfd, EPOLL_CTL_DEL,
+							mgmtfd, NULL);
 						close(mgmtfd);
 						sleep(1);
 						goto again;
 					} else {
 						REPLICA_ERRLOG("Failed"
 							" to read "
-							"from %d\n", events[i].data.fd);
+							"from %d\n",
+							events[i].data.fd);
 						rc = -1;
 						goto error;
 					}
@@ -622,15 +625,19 @@ again:
 						rc = -1;
 						goto error;
 					} else if ((uint64_t)count != mgmtio->len) {
-						REPLICA_ERRLOG("failed to getch mgmt"
-							" data.. got only %ld bytes out of %lu\n",
+						REPLICA_ERRLOG("failed"
+							" to getch mgmt"
+							" data.. got only %ld"
+							" bytes out of %lu\n",
 						    count, mgmtio->len);
 						rc = -1;
 						goto error;
 					}
 				}
 				opcode = mgmtio->opcode;
-				send_mgmt_ack(mgmtfd, opcode, data, replica_ip, replica_port, zrepl_status, &zrepl_status_msg_cnt);
+				send_mgmt_ack(mgmtfd, opcode, data,
+					replica_ip, replica_port,
+					zrepl_status, &zrepl_status_msg_cnt);
 			} else if (events[i].data.fd == sfd) {
 				struct sockaddr saddr;
 				socklen_t slen;
@@ -745,8 +752,12 @@ again:
 						io_hdr->status = ZVOL_OP_STATUS_OK;
 						REPLICA_LOG("Volume"
 							" name:%s blocksize:%d"
-							" timeout:%d.. replica(%d)\n",
-						    open_ptr->volname, open_ptr->tgt_block_size, open_ptr->timeout, ctrl_port);
+							" timeout:%d.."
+							" replica(%d)\n",
+						    open_ptr->volname,
+						    open_ptr->tgt_block_size,
+						    open_ptr->timeout,
+						    ctrl_port);
 					}
 execute_io:
 					if ((io_cnt > 0) && (io_hdr->opcode == ZVOL_OPCODE_WRITE ||
@@ -769,7 +780,10 @@ execute_io:
 						write_metadata(io_hdr->offset, io_rw_hdr->len, io_rw_hdr->io_num);
 						data += sizeof (struct zvol_io_rw_hdr);
 						nbytes = 0;
-						while ((rc = pwrite(vol_fd, data + nbytes, io_rw_hdr->len - nbytes, io_hdr->offset + nbytes))) {
+						while ((rc = pwrite(vol_fd,
+							data + nbytes,
+							io_rw_hdr->len - nbytes,
+							io_hdr->offset + nbytes))) {
 							if (rc == -1) {
 								if (errno == 11) {
 									sleep(1);
@@ -786,7 +800,11 @@ execute_io:
 						if (nbytes != io_rw_hdr->len) {
 							REPLICA_ERRLOG("Failed"
 								" to write data"
-								" to %s replica(%d)\n", test_vol, ctrl_port);
+								" to %s"
+								" replica(%d)"
+								"\n",
+								test_vol,
+								ctrl_port);
 							goto error;
 						}
 
@@ -805,7 +823,10 @@ execute_io:
 						io_hdr->status = ZVOL_OP_STATUS_OK;
 						rc = check_for_err(io_hdr);
 						if (!rc)  {
-							while ((rc = pread(vol_fd, user_data + nbytes, io_hdr->len - nbytes, io_hdr->offset + nbytes))) {
+							while ((rc = pread(vol_fd,
+								user_data + nbytes,
+								io_hdr->len - nbytes,
+								io_hdr->offset + nbytes))) {
 								if (rc == -1) {
 									if (errno == EAGAIN) {
 										sleep(1);
@@ -822,17 +843,23 @@ execute_io:
 
 						if (nbytes != io_hdr->len) {
 							REPLICA_ERRLOG("failed"
-								" to read completed"
+								" to read"
+								" completed"
 								" data from %s "
 								"off:%lu "
 							    "req:%lu read:%lu"
 							    " replica(%d)\n",
-							    test_vol, io_hdr->offset, io_hdr->len, nbytes, ctrl_port);
+							    test_vol,
+							    io_hdr->offset,
+							    io_hdr->len,
+							    nbytes, ctrl_port);
 							free(user_data);
 							goto error;
 						}
 
-						nbytes = fetch_update_io_buf(io_hdr, user_data, &data);
+						nbytes = fetch_update_io_buf(io_hdr,
+							user_data,
+							&data);
 						if (user_data)
 							free(user_data);
 						io_hdr->len = nbytes;
