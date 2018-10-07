@@ -96,8 +96,9 @@
 istgt_serialize_action
 istgt_serialize_table[ISTGT_SERIDX_COUNT + 1][ISTGT_SERIDX_COUNT + 1] = {
 /*
- * >IDX_ :: 2nd:TUR RD  WRT UNMP MDSN MDSL RQSN INQ  RDCP RES  REL LSNS
- * FMT STR PRIN PROT MAININ INVLD
+ * >IDX_ :: 2nd:
+ * TU RD WRT UNMP MDS MDS RQS INQ RDC RES REL LSN FMT STR PR PROT MAI INV
+ * R              N   L   N       P           S           IN      NIN LD
  */
 /* TUR */
 { pS, pS, pS, pS, pS, pS, pS, pS, pS, bK, bK, pS, pS, pS, bK, bK, pS, pS},
