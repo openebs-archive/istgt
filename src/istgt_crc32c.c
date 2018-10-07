@@ -44,8 +44,8 @@
 #include "istgt_crc32c.h"
 
 /* defined in RFC3720(12.1) */
-static uint32_t istgt_crc32c_initial    = ISTGT_CRC32C_INITIAL;
-static uint32_t istgt_crc32c_xor        = ISTGT_CRC32C_XOR;
+static uint32_t istgt_crc32c_initial = ISTGT_CRC32C_INITIAL;
+static uint32_t istgt_crc32c_xor = ISTGT_CRC32C_XOR;
 static uint32_t istgt_crc32c_polynomial = ISTGT_CRC32C_POLYNOMIAL;
 #ifdef ISTGT_USE_CRC32C_TABLE
 static uint32_t istgt_crc32c_table[256];
@@ -59,12 +59,12 @@ istgt_reflect(uint32_t val, int bits)
 	uint32_t r;
 
 	if (bits < 1 || bits > 32)
-		return 0;
+		return (0);
 	r = 0;
 	for (i = 0; i < bits; i++) {
 		r |= ((val >> ((bits - 1) - i)) & 1) << i;
 	}
-	return r;
+	return (r);
 }
 
 #ifdef ISTGT_USE_CRC32C_TABLE
@@ -127,7 +127,7 @@ istgt_update_crc32c(const uint8_t *buf, size_t len, uint32_t crc)
 		}
 #endif /* ISTGT_USE_CRC32C_TABLE */
 	}
-	return crc;
+	return (crc);
 }
 
 uint32_t
@@ -138,7 +138,7 @@ istgt_fixup_crc32c(size_t total, uint32_t crc)
 	size_t rest;
 
 	if (total == 0)
-		return crc;
+		return (crc);
 #if 0
 	/* alignment must be power of 2 */
 	rest = total & ~(ISCSI_ALIGNMENT - 1);
@@ -147,12 +147,12 @@ istgt_fixup_crc32c(size_t total, uint32_t crc)
 	if (rest != 0) {
 		pad_length = ISCSI_ALIGNMENT;
 		pad_length -= rest;
-		if (pad_length > 0 && pad_length < sizeof padding){
-			memset(padding, 0, sizeof padding);
+		if (pad_length > 0 && pad_length < sizeof (padding)) {
+			memset(padding, 0, sizeof (padding));
 			crc = istgt_update_crc32c(padding, pad_length, crc);
 		}
 	}
-	return crc;
+	return (crc);
 }
 
 uint32_t
@@ -166,11 +166,12 @@ istgt_crc32c(const uint8_t *buf, size_t len)
 		crc32c = istgt_fixup_crc32c(len, crc32c);
 	}
 	crc32c = crc32c ^ istgt_crc32c_xor;
-	return crc32c;
+	return (crc32c);
 }
 
 uint32_t
-istgt_iovec_crc32c(const struct iovec *iovp, int iovc, uint32_t offset, uint32_t len)
+istgt_iovec_crc32c(const struct iovec *iovp, int iovc, uint32_t offset,
+uint32_t len)
 {
 	const uint8_t *p;
 	uint32_t total;
@@ -205,5 +206,5 @@ istgt_iovec_crc32c(const struct iovec *iovp, int iovc, uint32_t offset, uint32_t
 #endif
 	crc32c = istgt_fixup_crc32c(total, crc32c);
 	crc32c = crc32c ^ istgt_crc32c_xor;
-	return crc32c;
+	return (crc32c);
 }
