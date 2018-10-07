@@ -26,7 +26,7 @@
  */
 
 #ifndef ISTGT_LOG_H
-#define ISTGT_LOG_H
+#define		ISTGT_LOG_H
 
 #include <stdint.h>
 #include <stddef.h>
@@ -34,40 +34,40 @@
 
 #if !defined(__GNUC__)
 #undef __attribute__
-#define __attribute__(x)
+#define 	__attribute__(x)
 #endif
 
 #ifndef ISTGT_LOG_FACILITY
-#define ISTGT_LOG_FACILITY LOG_LOCAL7
+#define		ISTGT_LOG_FACILITY LOG_LOCAL7
 #endif
 #ifndef ISTGT_LOG_PRIORITY
-#define ISTGT_LOG_PRIORITY LOG_NOTICE
+#define		ISTGT_LOG_PRIORITY LOG_NOTICE
 #endif
 
-#define ISTGT_TRACE_ALL     (~0U)
-#define ISTGT_TRACE_NONE    0U
-#define ISTGT_TRACE_DEBUG   0x80000000U
-#define ISTGT_TRACE_NET     0x0000000fU
-#define ISTGT_TRACE_ISCSI   0x000000f0U
-#define ISTGT_TRACE_SCSI    0x00000f00U
-#define ISTGT_TRACE_LU      0x0000f000U
-#define ISTGT_TRACE_PQ      0x000f0000U
-#define ISTGT_TRACE_MEM     0x00f00000U
-#define ISTGT_TRACE_PROF    0x01000000U
-#define ISTGT_TRACE_PROFX   0x02000000U
-#define ISTGT_TRACE_CMD		0x04000000U
+#define 	ISTGT_TRACE_ALL     (~0U)
+#define 	ISTGT_TRACE_NONE    0U
+#define 	ISTGT_TRACE_DEBUG   0x80000000U
+#define 	ISTGT_TRACE_NET     0x0000000fU
+#define 	ISTGT_TRACE_ISCSI   0x000000f0U
+#define 	ISTGT_TRACE_SCSI    0x00000f00U
+#define 	ISTGT_TRACE_LU      0x0000f000U
+#define 	ISTGT_TRACE_PQ      0x000f0000U
+#define 	ISTGT_TRACE_MEM     0x00f00000U
+#define 	ISTGT_TRACE_PROF    0x01000000U
+#define 	ISTGT_TRACE_PROFX   0x02000000U
+#define 	ISTGT_TRACE_CMD		0x04000000U
 
 extern __thread char tinfo[50];
 
 #ifdef	REPLICATION
 #include "replication_log.h"
 
-#define ISTGT_LOG		REPLICA_LOG
-#define ISTGT_NOTICELOG		REPLICA_NOTICELOG
-#define ISTGT_ERRLOG		REPLICA_ERRLOG
-#define ISTGT_WARNLOG		REPLICA_WARNLOG
+#define 	ISTGT_LOG		REPLICA_LOG
+#define 	ISTGT_NOTICELOG		REPLICA_NOTICELOG
+#define 	ISTGT_ERRLOG		REPLICA_ERRLOG
+#define 	ISTGT_WARNLOG		REPLICA_WARNLOG
 
-#define ISTGT_TRACELOG(FLAG, fmt, ...)					\
+#define 	ISTGT_TRACELOG(FLAG, fmt, ...)					\
 	do {								\
 		if (g_trace_flag & FLAG)				\
 			fprintf(stderr, "%-18.18s:%4d: %-20.20s: " fmt,	\
@@ -75,12 +75,16 @@ extern __thread char tinfo[50];
 	} while (0)
 /* REPLICATION */
 #else
-#define ISTGT_LOG(fmt, ...)  syslog(LOG_NOTICE, 	 "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
-#define ISTGT_NOTICELOG(fmt, ...) syslog(LOG_NOTICE, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
-#define ISTGT_ERRLOG(fmt, ...) syslog(LOG_ERR,  	 "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
-#define ISTGT_WARNLOG(fmt, ...) syslog(LOG_ERR, 	 "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
+#define 	ISTGT_LOG(fmt, ...)  syslog(LOG_NOTICE, 	 \
+"%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
+#define 	ISTGT_NOTICELOG(fmt, ...) syslog(LOG_NOTICE, \
+"%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
+#define 	ISTGT_ERRLOG(fmt, ...) syslog(LOG_ERR,  	 \
+"%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
+#define 	ISTGT_WARNLOG(fmt, ...) syslog(LOG_ERR, 	 \
+"%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__)
 
-#define ISTGT_TRACELOG(FLAG, fmt, ...)  \
+#define 	ISTGT_TRACELOG(FLAG, fmt, ...)  \
 	do {								\
 		if (g_trace_flag & FLAG)		\
 			syslog(LOG_NOTICE, "%-18.18s:%4d: %-20.20s: " fmt, __func__, __LINE__, tinfo, ##__VA_ARGS__); \
@@ -88,14 +92,14 @@ extern __thread char tinfo[50];
 #endif
 
 #ifdef TRACEDUMP
-#define ISTGT_TRACEDUMP(FLAG, LABEL, BUF, LEN)				\
+#define 	ISTGT_TRACEDUMP(FLAG, LABEL, BUF, LEN)				\
 	do {								\
 		if (g_trace_flag & (FLAG)) {				\
 			istgt_trace_dump((FLAG), (LABEL), (BUF), (LEN));\
 		}							\
 	} while (0)
 #else
-#define ISTGT_TRACEDUMP(FLAG, LABEL, BUF, LEN)
+#define 	ISTGT_TRACEDUMP(FLAG, LABEL, BUF, LEN)
 #endif /* TRACEDUMP */
 
 int istgt_set_log_facility(const char *facility);
