@@ -199,7 +199,7 @@ uctl_writeline(UCTL_Ptr uctl)
 	return (UCTL_CMD_OK);
 }
 
-static int uctl_snprintf(UCTL_Ptr uctl, const char *format, ...)  \
+static int uctl_snprintf(UCTL_Ptr uctl, const char *format, ...)
 __attribute__((__format__(__printf__, 2, 3)));
 
 static int
@@ -1042,8 +1042,8 @@ exec_dump(UCTL_Ptr uctl)
 			continue;
 		}	else if (strcmp(type, "CONN") == 0) {
 			if (flag == 1) {
-				printf("c#	ISID
-				TSIH	CID	T_IP	I_IP	NAME\n");
+				printf("c#	ISID	TSIH	CID");
+				printf("T_IP	I_IP	NAME");
 				flag = 0;
 			}
 			c_num = strsepq(&arg, delim);
