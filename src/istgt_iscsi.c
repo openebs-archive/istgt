@@ -1263,7 +1263,7 @@ istgt_chap_get_authinfo(ISTGT_CHAP_AUTH *auth, const char *authfile, const char 
 				if (!user || !secret || !muser || !msecret) {
 					ISTGT_ERRLOG("Invalid argument\n");
 					istgt_free_config(config);
-					return -1;
+					return (-1);
 				}
 				if (strcasecmp(authuser, user) == 0) {
 					/* match user */
@@ -1272,7 +1272,7 @@ istgt_chap_get_authinfo(ISTGT_CHAP_AUTH *auth, const char *authfile, const char 
 					auth->muser = xstrdup(muser);
 					auth->msecret = xstrdup(msecret);
 					istgt_free_config(config);
-					return 0;
+					return (0);
 				}
 			}
 		}
@@ -1281,7 +1281,7 @@ istgt_chap_get_authinfo(ISTGT_CHAP_AUTH *auth, const char *authfile, const char 
 	}
 
 	istgt_free_config(config);
-	return 0;
+	return (0);
 }
 
 static int
@@ -1313,10 +1313,10 @@ istgt_iscsi_get_authinfo(CONN_Ptr conn, const char *authuser)
 	if (rc < 0) {
 		ISTGT_ERRLOG("chap_get_authinfo() failed\n");
 		xfree(authfile);
-		return -1;
+		return (-1);
 	}
 	xfree(authfile);
-	return 0;
+	return (0);
 }
 
 static int
@@ -1333,23 +1333,23 @@ istgt_iscsi_auth_params(CONN_Ptr conn, ISCSI_PARAM *params, const char *method, 
 	int rc;
 
 	if (conn == NULL || params == NULL || method == NULL) {
-		return -1;
+		return (-1);
 	}
 	if (strcasecmp(method, "CHAP") == 0) {
 		/* method OK */
 	} else {
 		ISTGT_ERRLOG("unsupported AuthMethod %.64s\n", method);
-		return -1;
+		return (-1);
 	}
 
 	total = data_len;
 	if (alloc_len < 1) {
-		return 0;
+		return (0);
 	}
 	if (total > alloc_len) {
 		total = alloc_len;
 		data[total - 1] = '\0';
-		return total;
+		return (total);
 	}
 
 	/* for temporary store */
