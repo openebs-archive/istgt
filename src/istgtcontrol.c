@@ -167,15 +167,9 @@ uctl_readline(UCTL_Ptr uctl)
 {
 	ssize_t total;
 
-	total = istgt_readline_socket
-	    (uctl->sock,
-	    uctl->recvbuf,
-	    uctl->recvbufsize,
-	    uctl->recvtmp,
-	    uctl->recvtmpsize,
-	    &uctl->recvtmpidx,
-	    &uctl->recvtmpcnt,
-	    uctl->timeout);
+	total = istgt_readline_socket(uctl->sock, uctl->recvbuf,
+		uctl->recvbufsize, uctl->recvtmp, uctl->recvtmpsize,
+		&uctl->recvtmpidx, &uctl->recvtmpcnt, uctl->timeout);
 	if (total < 0) {
 		return (UCTL_CMD_DISCON);
 	}
@@ -192,10 +186,8 @@ uctl_writeline(UCTL_Ptr uctl)
 	ssize_t expect;
 
 	expect = strlen(uctl->sendbuf);
-	total = istgt_writeline_socket
-	    (uctl->sock,
-	    uctl->sendbuf,
-	    uctl->timeout);
+	total = istgt_writeline_socket(uctl->sock,
+	    uctl->sendbuf, uctl->timeout);
 	if (total < 0) {
 		return (UCTL_CMD_DISCON);
 	}
@@ -206,7 +198,7 @@ uctl_writeline(UCTL_Ptr uctl)
 }
 
     static int uctl_snprintf(UCTL_Ptr uctl, const char *format, ...)
-    __attribute__((__format__(__printf__, 2, 3)));
+	__attribute__((__format__(__printf__, 2, 3)));
 
 static int
 uctl_snprintf(UCTL_Ptr uctl, const char *format, ...)
