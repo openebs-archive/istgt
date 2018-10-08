@@ -71,6 +71,7 @@ distdir:
 
 cstyle:
 	find $(top_srcdir) -name '*.[hc]' \
+                ! -path './src/config.h' \
                 ! -name 'rte_*.[hc]' -type f -exec $(top_srcdir)/cstyle.pl -cpP {} \+
 
 clean: local-clean
