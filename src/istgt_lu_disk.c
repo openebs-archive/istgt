@@ -2361,7 +2361,6 @@ istgt_lu_disk_scsi_inquiry(ISTGT_LU_DISK *spec, CONN_Ptr conn, uint8_t *cdb, uin
 			DSET32(&data[12], blocks);
 			/* MAXIMUM PREFETCH XDREAD XDWRITE TRANSFER LENGTH */
 			DSET32(&data[16], 0);
-			len = 20 - hlen;
 
 			if (spec->unmap) {
 				/* MAXIMUM UNMAP LBA COUNT */
@@ -2372,7 +2371,6 @@ istgt_lu_disk_scsi_inquiry(ISTGT_LU_DISK *spec, CONN_Ptr conn, uint8_t *cdb, uin
 				data[25] = 0xFF;
 				data[26] = 0xFF;
 				data[27] = 0xFF;
-				len = 27 - hlen;
 
 				/* OPTIMAL UNMAP GRANULARITY */
 				DSET32(&data[28], spec->lb_per_rec);
