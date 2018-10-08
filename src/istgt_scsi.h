@@ -26,7 +26,7 @@
  */
 
 #ifndef ISTGT_SCSI_H
-#define ISTGT_SCSI_H
+#define        ISTGT_SCSI_H
 
 typedef enum {
 	ISTGT_SCSI_STATUS_GOOD = 0x00,
