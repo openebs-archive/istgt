@@ -635,14 +635,18 @@ exec_sync(UCTL_Ptr uctl)
 	if (uctl->iqn == NULL || uctl->lun < 0) {
 		return (UCTL_CMD_ERR);
 	}
-		uctl_snprintf(uctl, "SYNC \"%s\" %d\n", uctl->iqn, uctl->lun);
-		rc = uctl_writeline(uctl);
+
+	uctl_snprintf(uctl, "SYNC \"%s\" %d\n", uctl->iqn, uctl->lun);
+	rc = uctl_writeline(uctl);
+
 	if (rc != UCTL_CMD_OK) {
 		return (rc);
 	}
 
 		/* receive result */
-		rc = uctl_readline(uctl);
+
+	rc = uctl_readline(uctl);
+
 	if (rc != UCTL_CMD_OK) {
 		return (rc);
 	}
@@ -831,6 +835,7 @@ exec_log(UCTL_Ptr uctl)
 	}
 	return (UCTL_CMD_OK);
 }
+
 static int
 exec_memdebug(UCTL_Ptr uctl)
 {
