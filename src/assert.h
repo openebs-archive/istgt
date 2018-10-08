@@ -105,12 +105,10 @@ do {									\
 #define	ASSERTV(x)		x
 #define	IMPLY(A, B) \
 	((void)(((!(A)) || (B)) || \
-	    REPLICA_ERRLOG("(" %s ") implies (" %s ")", \
-#A, #B)))
+	    REPLICA_ERRLOG("(" %s ") implies (" %s ")", #A, #B)))
 #define	EQUIV(A, B) \
 	((void)((!!(A) == !!(B)) || \
-	    REPLICA_ERRLOG("(" %s ") is equivalent to (" %s ")", \
-#A, #B)))
+	    REPLICA_ERRLOG("(" %s ") is equivalent to (" %s ")", #A, #B)))
 
 #endif  /* DEBUG */
 
