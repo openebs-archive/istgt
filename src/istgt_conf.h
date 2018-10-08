@@ -26,7 +26,7 @@
  */
 
 #ifndef ISTGT_CONF_H
-#define ISTGT_CONF_H
+#define	ISTGT_CONF_H
 
 typedef struct config_value_t {
 	struct config_value_t *next;
