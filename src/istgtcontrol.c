@@ -674,7 +674,8 @@ exec_persist(UCTL_Ptr uctl)
 	if (uctl->iqn == NULL || uctl->lun < 0) {
 	    return (UCTL_CMD_ERR);
 	}
-	    uctl_snprintf(uctl, "PERSIST \"%s\" %d %d\n", uctl->iqn,
+
+	uctl_snprintf(uctl, "PERSIST \"%s\" %d %d\n", uctl->iqn,
 	    uctl->lun, uctl->persistopt);
 	rc = uctl_writeline(uctl);
 	if (rc != UCTL_CMD_OK) {
@@ -2445,7 +2446,7 @@ main(int argc, char *argv[])
 	/* connect to target */
 	if (verbose) {
 		printf("connect to %s else to %s:%d\n", ISTGT_UCTL_UNXPATH,
-		uctl->host, uctl->port);
+		    uctl->host, uctl->port);
 	}
 	sock = istgt_connect_unx(ISTGT_UCTL_UNXPATH);
 	if (sock < 0) {
