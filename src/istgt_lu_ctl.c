@@ -2938,11 +2938,16 @@ istgt_uctl_cmd_dump(UCTL_Ptr uctl)
 						pgp = istgt_lu_find_portalgroup(
 						    uctl->istgt,
 						    lu->map[t].pg_tag);
-						if (pgp != NULL) {
-							for (x = 0; x < pgp->nportals; x++) {
-								if (strcmp(pgp->portals[x]->host, conn->target_addr) == 0) {
-									break;
-								}
+						if (pgp == NULL)
+							continue;
+
+						for (x = 0; x < pgp->nportals;
+						    x++) {
+							if (strcmp(pgp
+							    ->portals[x]->host,
+							    conn->target_addr)
+							    == 0) {
+								break;
 							}
 						}
 					}
