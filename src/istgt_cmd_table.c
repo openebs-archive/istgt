@@ -38,7 +38,7 @@
  */
 
 #ifdef HAVE_CONFIG_H
-# include "config.h"
+#include "config.h"
 #endif
 
 #include <inttypes.h>
@@ -55,7 +55,7 @@
 #include <unistd.h>
 
 #ifdef __FreeBSD__
-# include <sys / param.h> 
+#include <sys/param.h>
 #endif
 
 #include "istgt.h"
@@ -69,9 +69,9 @@
 #include "istgt_proto.h"
 
 #if !defined(__GNUC__)
-# undef __attribute__
-# define __attribute__(x)
-# endif
+#undef __attribute__
+#define	__attribute__(x)
+#endif
 
 	/*
 	 * Whenever support for a new command is added,
