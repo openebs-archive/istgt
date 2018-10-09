@@ -37,24 +37,26 @@
  * Author: Ken Merry <ken@FreeBSD.org>, Kim Le
  */
 
-#
-ifdef HAVE_CONFIG_H# include "config.h"#
-endif
-
-#include < inttypes.h >
-#include < stdint.h >
-
-#include < stdarg.h >
-#include < stdio.h >
-#include < stdlib.h >
-#include < string.h >
-#include < pthread.h >
-#ifdef HAVE_PTHREAD_NP_H
-#include < pthread_np.h >
+#ifdef HAVE_CONFIG_H
+# include "config.h"
 #endif
-#include < unistd.h >
 
-#ifdef __FreeBSD__# include < sys / param.h > #endif
+#include <inttypes.h>
+#include <stdint.h>
+
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <pthread.h>
+#ifdef HAVE_PTHREAD_NP_H
+#include <pthread_np.h>
+#endif
+#include <unistd.h>
+
+#ifdef __FreeBSD__
+# include <sys / param.h> 
+#endif
 
 #include "istgt.h"
 #include "istgt_ver.h"
@@ -66,8 +68,10 @@ endif
 #include "istgt_iscsi.h"
 #include "istgt_proto.h"
 
-#
-if !defined(__GNUC__)# undef __attribute__# define __attribute__(x)# endif
+#if !defined(__GNUC__)
+# undef __attribute__
+# define __attribute__(x)
+# endif
 
 	/*
 	 * Whenever support for a new command is added,
