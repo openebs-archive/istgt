@@ -48,20 +48,20 @@
 #define	ISCSI_TEXT_MAX_VAL_LEN 8192
 
 #define	SESS_MTX_LOCK(CONN) \
-	do {								\
-		int _rc_;						\
-		if ((_rc_ = pthread_mutex_lock(&(CONN)->sess->mutex)) != 0) {	\
-			ISTGT_ERRLOG("sess lock error:%d", _rc_);		\
-			pthread_exit(NULL);				\
-		}							\
+	do {	\
+		int _rc_;	\
+		if ((_rc_ = pthread_mutex_lock(&(CONN)->sess->mutex)) != 0) {\
+			ISTGT_ERRLOG("sess lock error:%d", _rc_);	\
+			pthread_exit(NULL);	\
+		}	\
 	} while (0)
 #define	SESS_MTX_UNLOCK(CONN) \
-	do {								\
-		int _rc_;						\
-		if ((_rc_ = pthread_mutex_unlock(&(CONN)->sess->mutex)) != 0) {	\
-			ISTGT_ERRLOG("sess unlock error:%d", _rc_);		\
-			pthread_exit(NULL);				\
-		}							\
+	do {	\
+		int _rc_;	\
+		if ((_rc_ = pthread_mutex_unlock(&(CONN)->sess->mutex)) != 0) {\
+			ISTGT_ERRLOG("sess unlock error:%d", _rc_);	\
+			pthread_exit(NULL);	\
+		}	\
 	} while (0)
 
 typedef enum {
