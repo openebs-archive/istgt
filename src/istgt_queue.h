@@ -26,7 +26,7 @@
  */
 
 #ifndef ISTGT_QUEUE_H
-#define ISTGT_QUEUE_H
+#define	ISTGT_QUEUE_H
 
 #include <stddef.h>
 
@@ -39,23 +39,35 @@ typedef struct istgt_queue_t {
 typedef ISTGT_QUEUE *ISTGT_QUEUE_Ptr;
 
 int istgt_queue_init(ISTGT_QUEUE_Ptr head);
-#define istgt_queue_destroy(head) istgt_queue_destroyi(head, __LINE__)
+#define	istgt_queue_destroy(head) istgt_queue_destroyi(head, __LINE__)
 void istgt_queue_destroyi(ISTGT_QUEUE_Ptr head, uint16_t line);
 int istgt_queue_count(ISTGT_QUEUE_Ptr head);
 
-#define istgt_queue_enqueue(head, elem) istgt_queue_enqueuei(head, elem, __LINE__)
-#define istgt_queue_enqueue_after(head, current_ptr,  elem) istgt_queue_enqueue_afteri(head, current_ptr, elem, __LINE__)
-#define istgt_queue_dequeue(head)  istgt_queue_dequeuei(head, __LINE__)
-#define istgt_queue_dequeue_middle(head, ptr)  istgt_queue_dequeue_middlei(head, ptr, __LINE__)
-#define istgt_queue_enqueue_first(head, elem) istgt_queue_enqueue_firsti(head, elem, __LINE__)
+#define	istgt_queue_enqueue(head, elem)	\
+	istgt_queue_enqueuei(head, elem, __LINE__)
+#define	istgt_queue_enqueue_after(head, current_ptr,  elem)	\
+	istgt_queue_enqueue_afteri(head, current_ptr, elem, __LINE__)
+#define	istgt_queue_dequeue(head)  istgt_queue_dequeuei(head, __LINE__)
+#define	istgt_queue_dequeue_middle(head, ptr)	\
+	istgt_queue_dequeue_middlei(head, ptr, __LINE__)
+#define	istgt_queue_enqueue_first(head, elem)	\
+	istgt_queue_enqueue_firsti(head, elem, __LINE__)
 
 ISTGT_QUEUE_Ptr istgt_get_next_qptr(void *cookie);
 ISTGT_QUEUE_Ptr istgt_get_prev_qptr(void *cookie);
-ISTGT_QUEUE_Ptr istgt_queue_enqueuei(ISTGT_QUEUE_Ptr head, void *elem, uint16_t line);
-ISTGT_QUEUE_Ptr istgt_queue_enqueue_afteri(ISTGT_QUEUE_Ptr head, ISTGT_QUEUE_Ptr current_ptr, void *elem, uint16_t line);
+ISTGT_QUEUE_Ptr istgt_queue_enqueuei(ISTGT_QUEUE_Ptr head,
+					void *elem,
+					uint16_t line);
+ISTGT_QUEUE_Ptr istgt_queue_enqueue_afteri(ISTGT_QUEUE_Ptr head,
+						ISTGT_QUEUE_Ptr current_ptr,
+						void *elem, uint16_t line);
 void *istgt_queue_dequeuei(ISTGT_QUEUE_Ptr head, uint16_t line);
-void *istgt_queue_dequeue_middlei(ISTGT_QUEUE_Ptr head, ISTGT_QUEUE_Ptr complete_queue_ptr, uint16_t line);
-ISTGT_QUEUE_Ptr istgt_queue_enqueue_firsti(ISTGT_QUEUE_Ptr head, void *elem, uint16_t line);
+void *istgt_queue_dequeue_middlei(ISTGT_QUEUE_Ptr head,
+					ISTGT_QUEUE_Ptr complete_queue_ptr,
+					uint16_t line);
+ISTGT_QUEUE_Ptr istgt_queue_enqueue_firsti(ISTGT_QUEUE_Ptr head,
+						void *elem,
+						uint16_t line);
 
 void *istgt_queue_first(ISTGT_QUEUE_Ptr head);
 void *istgt_queue_last(ISTGT_QUEUE_Ptr head, void *elem);
@@ -66,7 +78,7 @@ void * istgt_queue_reverse_walk(ISTGT_QUEUE_Ptr head, void ** cookie);
 #endif /* ISTGT_QUEUE_H */
 
 #ifdef __linux__
-#define TAILQ_FOREACH_SAFE(var, head, field, tvar)                      \
+#define	TAILQ_FOREACH_SAFE(var, head, field, tvar)                      \
 	for ((var) = TAILQ_FIRST((head));                               \
 		(var) && ((tvar) = TAILQ_NEXT((var), field), 1);            \
 		(var) = (tvar))
