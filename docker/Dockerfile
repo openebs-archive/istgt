@@ -2,22 +2,7 @@
 # This Dockerfile builds cstor istgt container running istgt from istgt base image
 #
 
-FROM ubuntu:14.04
-RUN apt-get update; exit 0
-RUN apt-get -y install rsyslog
-RUN apt-get -y install net-tools iputils-ping
-RUN apt-get -y install libssl-dev libjson-c-dev libjemalloc-dev
-RUN apt -y install apt-file && apt-file update
-
-RUN mkdir -p /usr/local/etc/bkpistgt
-RUN mkdir -p /usr/local/etc/istgt
-COPY istgt istgtcontrol /usr/local/bin/
-COPY istgt.conf istgtcontrol.conf /usr/local/etc/bkpistgt/
-RUN touch /usr/local/etc/bkpistgt/auth.conf
-RUN touch /usr/local/etc/bkpistgt/logfile
-
-COPY entrypoint-istgtimage.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/entrypoint-istgtimage.sh
+FROM ubuntu:16.04
 
 ARG BUILD_DATE
 LABEL org.label-schema.name="cstor"
@@ -27,5 +12,19 @@ LABEL org.label-schema.vcs-url="https://github.com/openebs/cstor"
 LABEL org.label-schema.schema-version="1.0"
 LABEL org.label-schema.build-date=$BUILD_DATE
 
-ENTRYPOINT entrypoint-istgtimage.sh
 EXPOSE 3260 6060
+
+COPY istgt istgtcontrol /usr/local/bin/
+COPY istgt.conf istgtcontrol.conf /usr/local/etc/bkpistgt/
+COPY entrypoint-istgtimage.sh /usr/local/bin/
+
+RUN apt-get update && \
+    apt-get install -y rsyslog net-tools iputils-ping libssl-dev libjson-c-dev libjemalloc-dev && \
+    mkdir -p /usr/local/etc/bkpistgt /usr/local/etc/istgt && \
+    touch /usr/local/etc/bkpistgt/auth.conf && \
+    touch /usr/local/etc/bkpistgt/logfile && \
+    chmod +x /usr/local/bin/entrypoint-istgtimage.sh && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+ENTRYPOINT entrypoint-istgtimage.sh
