@@ -3010,7 +3010,7 @@ parse_scsi_cdb(ISTGT_LU_CMD_Ptr lu_cmd)
 }
 	int sync_nv = 0, immed = 0;
 	int sa = 0;
-	int NOR = 0, NOW = 0, inv = 0;
+	int NOR = 0, NOW = 0;
 	int dpo = 0, fua = 0, fua_nv = 0; // cdb[1] bits 4, 3, 1
 	int bytchk = 0;     //cdb[1] bits 1
 	int anchor = 0, unmap = 0;  //cdb[1] bits 4,  3
@@ -3024,7 +3024,6 @@ parse_scsi_cdb(ISTGT_LU_CMD_Ptr lu_cmd)
 	SCSIstat_rest[sidx].opcode = cdb[0];
 	++SCSIstat_rest[sidx].req_start;
 
-	(void)inv;
 	lu_cmd->infdx = 0;
 	lu_cmd->cdbflags = 0;
 	lu_cmd->cdb0  = cdb[0];
@@ -3198,9 +3197,6 @@ parse_scsi_cdb(ISTGT_LU_CMD_Ptr lu_cmd)
 				lu_cmd->info[lu_cmd->infdx++] = 'P';
 			if (lbdata)
 				lu_cmd->info[lu_cmd->infdx++] = 'L';
-			/* only PBDATA=0 and LBDATA=0 support */
-			if (pbdata || lbdata)
-				inv = 1; //(ILLEGAL_REQUEST, 0x24, 0x00);
 			break;
 
 		case SBC_WRITE_SAME_16:
@@ -3218,11 +3214,6 @@ parse_scsi_cdb(ISTGT_LU_CMD_Ptr lu_cmd)
 				lu_cmd->info[lu_cmd->infdx++] = 'P';
 			if (lbdata)
 				lu_cmd->info[lu_cmd->infdx++] = 'L';
-			/* only PBDATA=0 and LBDATA=0 support */
-			if (pbdata || lbdata)
-				inv = 1; //(ILLEGAL_REQUEST, 0x24, 0x00);
-			if (anchor)
-				inv = 1; //(ILLEGAL_REQUEST, 0x24, 0x00);
 			break;
 
 		case SBC_COMPARE_AND_WRITE:
@@ -3300,8 +3291,6 @@ parse_scsi_cdb(ISTGT_LU_CMD_Ptr lu_cmd)
 
 		case SPC_EXTENDED_COPY:
 			sa = BGET8W(&cdb[1], 4, 5); /* LID1  - 00h / LID4 - 01h  */
-			if (sa != 0x00)
-				inv = 1;/* INVALID COMMAND SERVICE ACTION */
 			break;
 		case SPC2_RELEASE_6:
 			break;
