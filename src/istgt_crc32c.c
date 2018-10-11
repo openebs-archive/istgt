@@ -45,7 +45,7 @@
 
 /* defined in RFC3720(12.1) */
 static uint32_t istgt_crc32c_initial    = ISTGT_CRC32C_INITIAL;
-static uint32_t istgt_crc32c_xor			 = ISTGT_CRC32C_XOR;
+static uint32_t istgt_crc32c_xor	  = ISTGT_CRC32C_XOR;
 static uint32_t istgt_crc32c_polynomial = ISTGT_CRC32C_POLYNOMIAL;
 #ifdef ISTGT_USE_CRC32C_TABLE
 static uint32_t istgt_crc32c_table[256];
