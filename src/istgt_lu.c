@@ -4202,13 +4202,11 @@ maintenance_io_worker(void *arg)
 			MTX_LOCK(&spec->complete_queue_mutex);
 again:
 			do {
-				if (istgt_lu_get_state(lu) != ISTGT_STATE_RUNNING)
-				{
+				if (istgt_lu_get_state(lu) != ISTGT_STATE_RUNNING) {
 					MTX_UNLOCK(&spec->complete_queue_mutex);
 					goto loop_exit;
 				}
-				if (spec->schdler_cmd_waiting == 1)
-				{
+				if (spec->schdler_cmd_waiting == 1) {
 					if (unlikely((qcnt = istgt_queue_count(&spec->cmd_queue)) != 0))
 						pthread_cond_signal(&spec->cmd_queue_cond);
 					else
@@ -4218,22 +4216,19 @@ again:
 				}
 				if ((qcnt = istgt_queue_count(&spec->maint_cmd_queue)) == 0)
 					istgt_schedule_blocked_requests(spec, &spec->maint_cmd_queue, &spec->maint_blocked_queue, 1); // 1 for maintenance queues
-				if (((qcnt = istgt_queue_count(&spec->maint_cmd_queue)) == 0) && (spec->disk_modify_work_pending == 0) && (!(spec->rsv_pending & ISTGT_RSV_READ)))
-				{
+				if (((qcnt = istgt_queue_count(&spec->maint_cmd_queue)) == 0) && (spec->disk_modify_work_pending == 0) && (!(spec->rsv_pending & ISTGT_RSV_READ))) {
 					spec->maint_thread_waiting = 1;
 					pthread_cond_wait(&spec->maint_cmd_queue_cond, &spec->complete_queue_mutex);
 					spec->maint_thread_waiting = 0;
 
-					if (istgt_lu_get_state(lu) != ISTGT_STATE_RUNNING)
-					{
+					if (istgt_lu_get_state(lu) != ISTGT_STATE_RUNNING) {
 						MTX_UNLOCK(&spec->complete_queue_mutex);
 						goto loop_exit;
 					}
 				}
 			} while (((qcnt = istgt_queue_count(&spec->maint_cmd_queue)) == 0) && (spec->disk_modify_work_pending == 0) && (!(spec->rsv_pending & ISTGT_RSV_READ)));
 
-			if (unlikely(spec->disk_modify_work_pending == 1))
-			{
+			if (unlikely(spec->disk_modify_work_pending == 1)) {
 				MTX_UNLOCK(&spec->complete_queue_mutex);
 				do_open = 0; do_close = 0;
 				MTX_LOCK(&spec->state_mutex);
