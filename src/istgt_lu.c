@@ -115,8 +115,8 @@ istgt_lu_allow_ipv6(const char *netmask, const char *addr)
 #endif
 
 	/* presentation to network order binary */
-	if (inet_pton(AF_INET6, mask, &in6_mask) <= 0
-		|| inet_pton(AF_INET6, addr, &in6_addr) <= 0) {
+	if (inet_pton(AF_INET6, mask, &in6_mask) <= 0 ||
+		inet_pton(AF_INET6, addr, &in6_addr) <= 0) {
 		return (0);
 	}
 
@@ -171,8 +171,8 @@ istgt_lu_allow_ipv4(const char *netmask, const char *addr)
 #endif
 
 	/* presentation to network order binary */
-	if (inet_pton(AF_INET, mask, &in4_mask) <= 0
-		|| inet_pton(AF_INET, addr, &in4_addr) <= 0) {
+	if (inet_pton(AF_INET, mask, &in4_mask) <= 0 ||
+		inet_pton(AF_INET, addr, &in4_addr) <= 0) {
 		return (0);
 	}
 
@@ -264,9 +264,9 @@ istgt_lu_access(CONN_Ptr conn, ISTGT_LU_Ptr lu, const char *iqn, const char *add
 		}
 		for (j = 0; j < igp->ninitiators; j++) {
 			/* deny initiators */
-			if (igp->initiators[j][0] == '!'
-			    && (strcasecmp(&igp->initiators[j][1], "ALL") == 0
-				|| strcasecmp(&igp->initiators[j][1], iqn) == 0)) {
+			if (igp->initiators[j][0] == '!' &&
+				(strcasecmp(&igp->initiators[j][1], "ALL") == 0 ||
+					strcasecmp(&igp->initiators[j][1], iqn) == 0)) {
 				/* NG */
 				MTX_UNLOCK(&conn->istgt->mutex);
 				istgt_connection_status(conn, "ACCESS DENIED");
@@ -277,8 +277,8 @@ istgt_lu_access(CONN_Ptr conn, ISTGT_LU_Ptr lu, const char *iqn, const char *add
 				return (0);
 			}
 			/* allow initiators */
-			if (strcasecmp(igp->initiators[j], "ALL") == 0
-			    || strcasecmp(igp->initiators[j], iqn) == 0) {
+			if (strcasecmp(igp->initiators[j], "ALL") == 0 ||
+				strcasecmp(igp->initiators[j], iqn) == 0) {
 				/* OK iqn, check netmask */
 				if (igp->nnetmasks == 0) {
 					/* OK, empty netmask as ALL */
@@ -340,14 +340,14 @@ istgt_lu_visible(ISTGT_Ptr istgt, ISTGT_LU_Ptr lu, const char *iqn, int pg_tag)
 			continue;
 		}
 		for (j = 0; j < igp->ninitiators; j++) {
-			if (igp->initiators[j][0] == '!'
-			    && (strcasecmp(&igp->initiators[j][1], "ALL") == 0
-				|| strcasecmp(&igp->initiators[j][1], iqn) == 0)) {
+			if (igp->initiators[j][0] == '!' &&
+				(strcasecmp(&igp->initiators[j][1], "ALL") == 0 ||
+					strcasecmp(&igp->initiators[j][1], iqn) == 0)) {
 				/* NG */
 				return (0);
 			}
-			if (strcasecmp(igp->initiators[j], "ALL") == 0
-			    || strcasecmp(igp->initiators[j], iqn) == 0) {
+			if (strcasecmp(igp->initiators[j], "ALL") == 0 ||
+				strcasecmp(igp->initiators[j], iqn) == 0) {
 				/* OK iqn, no check addr */
 				return (1);
 			}
@@ -389,14 +389,14 @@ istgt_pg_visible(ISTGT_Ptr istgt, ISTGT_LU_Ptr lu, const char *iqn, int pg_tag)
 		return (0);
 	}
 	for (j = 0; j < igp->ninitiators; j++) {
-		if (igp->initiators[j][0] == '!'
-		    && (strcasecmp(&igp->initiators[j][1], "ALL") == 0
-			|| strcasecmp(&igp->initiators[j][1], iqn) == 0)) {
+		if (igp->initiators[j][0] == '!' &&
+			(strcasecmp(&igp->initiators[j][1], "ALL") == 0 ||
+				strcasecmp(&igp->initiators[j][1], iqn) == 0)) {
 			/* NG */
 			return (0);
 		}
-		if (strcasecmp(igp->initiators[j], "ALL") == 0
-		    || strcasecmp(igp->initiators[j], iqn) == 0) {
+		if (strcasecmp(igp->initiators[j], "ALL") == 0 ||
+			strcasecmp(igp->initiators[j], iqn) == 0) {
 			/* OK iqn, no check addr */
 			return (1);
 		}
@@ -443,8 +443,8 @@ istgt_lu_sendtargets(CONN_Ptr conn, const char *iiqn, const char *iaddr, const c
 		lu = istgt->logical_unit[i];
 		if (lu == NULL)
 			continue;
-		if (strcasecmp(tiqn, "ALL") != 0
-			&& strcasecmp(tiqn, lu->name) != 0) {
+		if (strcasecmp(tiqn, "ALL") != 0 &&
+			strcasecmp(tiqn, lu->name) != 0) {
 			ISTGT_TRACELOG(ISTGT_TRACE_DEBUG,
 			    "SKIP iqn=%s for %s from %s (%s)\n",
 			    tiqn, lu->name, iiqn, iaddr);
@@ -498,19 +498,19 @@ istgt_lu_sendtargets(CONN_Ptr conn, const char *iiqn, const char *iaddr, const c
 					}
 					host = istgt->portal_group[k].portals[l]->host;
 					/* wildcard? */
-					if (strcasecmp(host, "[::]") == 0
-					    || strcasecmp(host, "[*]") == 0
-					    || strcasecmp(host, "0.0.0.0") == 0
-					    || strcasecmp(host, "*") == 0) {
-						if ((strcasecmp(host, "[::]") == 0
-							|| strcasecmp(host, "[*]") == 0)
-						    && conn->initiator_family == AF_INET6) {
+					if (strcasecmp(host, "[::]") == 0 ||
+						strcasecmp(host, "[*]") == 0 ||
+						strcasecmp(host, "0.0.0.0") == 0 ||
+						strcasecmp(host, "*") == 0) {
+						if ((strcasecmp(host, "[::]") == 0 ||
+							strcasecmp(host, "[*]") == 0) &&
+							conn->initiator_family == AF_INET6) {
 							snprintf(buf, sizeof (buf), "[%s]",
 							    conn->target_addr);
 							host = buf;
-						} else if ((strcasecmp(host, "0.0.0.0") == 0
-							|| strcasecmp(host, "*") == 0)
-						    && conn->initiator_family == AF_INET) {
+						} else if ((strcasecmp(host, "0.0.0.0") == 0 ||
+										strcasecmp(host, "*") == 0) &&
+									conn->initiator_family == AF_INET) {
 							snprintf(buf, sizeof (buf), "%s",
 							    conn->target_addr);
 							host = buf;
@@ -661,8 +661,8 @@ istgt_lu_allocate_tsih(ISTGT_LU_Ptr lu, const char *initiator_port, int tag)
 			return (0);
 		}
 		for (i = 1; i < MAX_LU_TSIH; i++) {
-			if (lu->tsih[i].initiator_port != NULL
-				&& lu->tsih[i].tsih == tsih) {
+			if (lu->tsih[i].initiator_port != NULL &&
+				lu->tsih[i].tsih == tsih) {
 				ISTGT_ERRLOG("tsih is found in list\n");
 				if (retry > 0) {
 					retry--;
@@ -983,8 +983,8 @@ istgt_lu_parse_media_size(const char *file, const char *size, int *flags)
 	if (strcasecmp(file, "/dev/null") == 0) {
 		return (0);
 	}
-	if (strcasecmp(size, "Auto") == 0
-	    || strcasecmp(size, "Size") == 0) {
+	if (strcasecmp(size, "Auto") == 0 ||
+		strcasecmp(size, "Size") == 0) {
 		msize = istgt_lu_get_filesize(file);
 		if (msize == 0) {
 			msize = ISTGT_LU_MEDIA_SIZE_MIN;
@@ -1068,9 +1068,9 @@ istgt_lu_check_iscsi_name(const char *name)
 	/* valid format? */
 	if (strncasecmp(name, "iqn.", 4) == 0) {
 		/* iqn.YYYY-MM.reversed.domain.name */
-		if (!isdigit(up[4]) || !isdigit(up[5]) || !isdigit(up[6])
-		    || !isdigit(up[7]) || up[8] != '-' || !isdigit(up[9])
-		    || !isdigit(up[10]) || up[11] != '.') {
+		if (!isdigit(up[4]) || !isdigit(up[5]) || !isdigit(up[6]) ||
+			!isdigit(up[7]) || up[8] != '-' || !isdigit(up[9]) ||
+			!isdigit(up[10]) || up[11] != '.') {
 			ISTGT_ERRLOG("invalid iqn format. "
 			    "expect \"iqn.YYYY-MM.reversed.domain.name\"\n");
 			return (-1);
@@ -1098,8 +1098,8 @@ istgt_lu_get_nbserial(const char *nodebase)
 	int i;
 
 	snprintf(buf, sizeof (buf), "%s", nodebase);
-	if (strcasecmp(buf, "iqn.2007-09.jp.ne.peach.istgt") == 0
-	    || strcasecmp(buf, "iqn.2007-09.jp.ne.peach") == 0) {
+	if (strcasecmp(buf, "iqn.2007-09.jp.ne.peach.istgt") == 0 ||
+		strcasecmp(buf, "iqn.2007-09.jp.ne.peach") == 0) {
 		/* always zero */
 		return (0);
 	}
@@ -1427,9 +1427,9 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 		goto error_return;
 	}
 	lu->volname = xstrdup(val);
-	if (strncasecmp(val, "iqn.", 4) != 0
-		&& strncasecmp(val, "eui.", 4) != 0
-		&& strncasecmp(val, "naa.", 4) != 0) {
+	if (strncasecmp(val, "iqn.", 4) != 0 &&
+		strncasecmp(val, "eui.", 4) != 0 &&
+		strncasecmp(val, "naa.", 4) != 0) {
 		snprintf(buf, sizeof (buf), "%s:%s", istgt->nodebase, val);
 	} else {
 		snprintf(buf, sizeof (buf), "%s", val);
@@ -1475,14 +1475,14 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 				goto error_return;
 			}
 			if (strncasecmp(pg_tag, "PortalGroup",
-				strlen("PortalGroup")) != 0
-			    || sscanf(pg_tag, "%*[^0-9]%d", &pg_tag_i) != 1) {
+				strlen("PortalGroup")) != 0 ||
+				sscanf(pg_tag, "%*[^0-9]%d", &pg_tag_i) != 1) {
 				ISTGT_ERRLOG("LU%d: mapping portal error\n", lu->num);
 				goto error_return;
 			}
 			if (strncasecmp(ig_tag, "InitiatorGroup",
-				strlen("InitiatorGroup")) != 0
-			    || sscanf(ig_tag, "%*[^0-9]%d", &ig_tag_i) != 1) {
+				strlen("InitiatorGroup")) != 0 ||
+				sscanf(ig_tag, "%*[^0-9]%d", &ig_tag_i) != 1) {
 				ISTGT_ERRLOG("LU%d: mapping initiator error\n", lu->num);
 				goto error_return;
 			}
@@ -1576,8 +1576,8 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 			ag_tag_i = 0;
 		} else {
 			if (strncasecmp(ag_tag, "AuthGroup",
-				strlen("AuthGroup")) != 0
-			    || sscanf(ag_tag, "%*[^0-9]%d", &ag_tag_i) != 1) {
+				strlen("AuthGroup")) != 0 ||
+				sscanf(ag_tag, "%*[^0-9]%d", &ag_tag_i) != 1) {
 				ISTGT_ERRLOG("LU%d: auth group error\n", lu->num);
 				goto error_return;
 			}
@@ -1943,8 +1943,8 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 #ifdef	REPLICATION
 				lu->lun[i].u.storage.size = istgt_lu_parse_size(size);
 #else
-				if ((strcasecmp(size, "Auto") == 0
-				    || strcasecmp(size, "Size") == 0) && istgt->OperationalMode == 0) {
+				if ((strcasecmp(size, "Auto") == 0 ||
+					strcasecmp(size, "Size") == 0) && istgt->OperationalMode == 0) {
 					lu->lun[i].u.storage.size = istgt_lu_get_filesize(file);
 				} else {
 					lu->lun[i].u.storage.size = istgt_lu_parse_size(size);
@@ -2299,8 +2299,8 @@ istgt_lu_close_connection(ISTGT_LU_Ptr lu, INITIATOR_GROUP *igp_new)
 	}
 	/* Traverse all connections to Disconnect the invalid ones */
 		for (j = 1; j < MAX_LU_TSIH; j++) {
-			if (lu->tsih[j].initiator_port != NULL
-				&& lu->tsih[j].tsih != 0) {
+			if (lu->tsih[j].initiator_port != NULL &&
+				lu->tsih[j].tsih != 0) {
 				found = 0;
 				conn = istgt_find_conn(lu->tsih[j].initiator_port, lu->name, lu->tsih[j].tsih);
 				if (conn == NULL)
@@ -2366,8 +2366,8 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 				goto error_return;
 			}
 			if (strncasecmp(ig_tag_new, "InitiatorGroup",
-				strlen("InitiatorGroup")) != 0
-			    || sscanf(ig_tag_new, "%*[^0-9]%d", &ig_tag_i_new) != 1) {
+				strlen("InitiatorGroup")) != 0 ||
+				sscanf(ig_tag_new, "%*[^0-9]%d", &ig_tag_i_new) != 1) {
 				ISTGT_ERRLOG("LU%d: mapping initiator error\n", lu->num);
 				goto error_return;
 			}
@@ -2462,8 +2462,8 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 			ag_tag_i = 0;
 		} else {
 			if (strncasecmp(ag_tag, "AuthGroup",
-				strlen("AuthGroup")) != 0
-			    || sscanf(ag_tag, "%*[^0-9]%d", &ag_tag_i) != 1) {
+				strlen("AuthGroup")) != 0 ||
+				sscanf(ag_tag, "%*[^0-9]%d", &ag_tag_i) != 1) {
 				ISTGT_ERRLOG("LU%d: auth group error\n", lu->num);
 				goto error_return;
 			}
@@ -2540,9 +2540,9 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 				old_rsize = lu->lun[i].u.storage.rsize;
 				old_size = lu->lun[i].u.storage.size;
 #ifndef	REPLICATION
-				if ((strcasecmp(size, "Auto") == 0
-				    || strcasecmp(size, "Size") == 0)
-				    && lu->istgt->OperationalMode == 0) {
+				if ((strcasecmp(size, "Auto") == 0 ||
+					strcasecmp(size, "Size") == 0) &&
+					lu->istgt->OperationalMode == 0) {
 				        new_size = istgt_lu_get_filesize(file);
 				} else {
 				        new_size = istgt_lu_parse_size(size);
@@ -2575,8 +2575,8 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 						new_rsize = (uint32_t)vall;
 				}
 
-				if (old_size == new_size && new_rsize == old_rsize
-					&& spec != NULL &&  strcasecmp(file, spec->file) == 0)
+				if (old_size == new_size && new_rsize == old_rsize &&
+					spec != NULL &&  strcasecmp(file, spec->file) == 0)
 					continue;
 
 				lu->lun[i].u.storage.size = new_size;
@@ -4165,8 +4165,8 @@ maintenance_io_worker(void *arg)
 
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "LU%d:%d loop start before running\n", lu->num, tind);
 	while (istgt_get_state(lu->istgt) != ISTGT_STATE_RUNNING) {
-		if (istgt_get_state(lu->istgt) == ISTGT_STATE_EXITING
-		    || istgt_get_state(lu->istgt) == ISTGT_STATE_SHUTDOWN) {
+		if (istgt_get_state(lu->istgt) == ISTGT_STATE_EXITING ||
+			istgt_get_state(lu->istgt) == ISTGT_STATE_SHUTDOWN) {
 			ISTGT_ERRLOG("exit before running\n");
 			return (NULL);
 		}
@@ -4372,8 +4372,8 @@ luworker(void *arg)
 	}
 
 	while (istgt_get_state(lu->istgt) != ISTGT_STATE_RUNNING) {
-		if (istgt_get_state(lu->istgt) == ISTGT_STATE_EXITING
-		    || istgt_get_state(lu->istgt) == ISTGT_STATE_SHUTDOWN) {
+		if (istgt_get_state(lu->istgt) == ISTGT_STATE_EXITING ||
+			istgt_get_state(lu->istgt) == ISTGT_STATE_SHUTDOWN) {
 			ISTGT_ERRLOG("exit before running\n");
 			return (NULL);
 		}
@@ -4569,8 +4569,8 @@ luscheduler(void *arg)
 	snprintf(tinfo, sizeof (tinfo), "sh#%d.%ld.%d", lu->num, (uint64_t)(((uint64_t *)sf)[0]), 0);
 	pthread_set_name_np(lu->schdler_thread, tinfo);
 	while (istgt_get_state(lu->istgt) != ISTGT_STATE_RUNNING) {
-		if (istgt_get_state(lu->istgt) == ISTGT_STATE_EXITING
-		    || istgt_get_state(lu->istgt) == ISTGT_STATE_SHUTDOWN) {
+		if (istgt_get_state(lu->istgt) == ISTGT_STATE_EXITING ||
+			istgt_get_state(lu->istgt) == ISTGT_STATE_SHUTDOWN) {
 			ISTGT_ERRLOG("exit before running\n");
 			return (NULL);
 		}
