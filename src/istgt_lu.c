@@ -3923,7 +3923,7 @@ istgt_lu_create_task(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, int lun, ISTGT_LU_D
 			break;
 
 		case SBC_UNMAP:
-			/*presently unmap is serializing all reads and writes*/
+			/* presently unmap is serializing all reads and writes */
 			break;
 
 		default:
