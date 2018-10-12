@@ -59,7 +59,7 @@
 #endif
 #ifdef __linux__
 #include <linux/fs.h>
-#define pthread_set_name_np pthread_setname_np
+#define	pthread_set_name_np pthread_setname_np
 #endif
 
 #include "istgt.h"
@@ -74,7 +74,7 @@
 #include "istgt_proto.h"
 #include "istgt_scsi.h"
 
-#define MAX_MASKBUF 128
+#define	MAX_MASKBUF 128
 
 
 static int
@@ -4336,7 +4336,7 @@ luworker(void *arg)
 
 	oldtime.tv_sec = 0;
 	oldtime.tv_nsec = 0;
-#define tdiff(_s, _n, _r) {                     \
+#define	tdiff(_s, _n, _r) {                     \
 	if(unlikely(spec->do_avg == 1))	\
 	{	\
         	if ((_n.tv_nsec - _s.tv_nsec) < 0) {        \
@@ -4543,7 +4543,7 @@ luscheduler(void *arg)
 	int worker_id;
 	int id, found_worker = 0;
 	unsigned long secs, nsecs;
-#define tdiff(_s, _n, _r) {                     \
+#define	tdiff(_s, _n, _r) {                     \
 	if(unlikely(spec->do_avg == 1))	\
 	{	\
                 if ((_n.tv_nsec - _s.tv_nsec) < 0) {        \
