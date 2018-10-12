@@ -1382,7 +1382,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	const char *flags, *file, *size, *rsz;
 	const char *key, *val;
 	uint64_t msize;
-	//uint64_t nbs64;
+	// uint64_t nbs64;
 	int pg_tag_i, ig_tag_i;
 	int ag_tag_i;
 	int rpm, formfactor, opt_tlen;
@@ -1510,7 +1510,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 			MTX_UNLOCK(&istgt->mutex);
 			lu->map[i].pg_tag = pg_tag_i;
 			lu->map[i].pg_aas = AAS_ACTIVE_OPTIMIZED;
-			//lu->map[i].pg_aas = AAS_ACTIVE_NON_OPTIMIZED;
+			// lu->map[i].pg_aas = AAS_ACTIVE_NON_OPTIMIZED;
 			lu->map[i].pg_aas |= AAS_STATUS_IMPLICIT;
 			lu->map[i].ig_tag = ig_tag_i;
 			ISTGT_TRACELOG(ISTGT_TRACE_DEBUG,
@@ -1784,7 +1784,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	}
 
 	lu->rshift = 0;
-	lu->recordsize = lu->blocklen; //old volumes
+	lu->recordsize = lu->blocklen; // old volumes
 	val = istgt_get_val(sp, "PhysRecordLength");
 	if (val != NULL) {
 		int lbPerRecord, lrsize;
@@ -1806,7 +1806,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 		switch (lu->type) {
 		case ISTGT_LU_TYPE_DISK:
 			lu->queue_depth = DEFAULT_LU_QUEUE_DEPTH;
-			//lu->queue_depth = 0;
+			// lu->queue_depth = 0;
 			break;
 		case ISTGT_LU_TYPE_DVD:
 		case ISTGT_LU_TYPE_TAPE:
@@ -1921,7 +1921,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 					uint64_t vall;
 					char *endp, *p;
 					vall = (uint64_t) strtoul(rsz, &endp, 10);
-					//error will mean vall == ULONG_MAX
+					// error will mean vall == ULONG_MAX
 					if (endp != NULL) {
 						p = endp;
 						switch (toupper((int) *p)) {
@@ -2555,7 +2555,7 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 					uint64_t vall;
 					char *endp, *p;
 					vall = (uint64_t) strtoul(rsz, &endp, 10);
-					//error will mean vall == ULONG_MAX
+					// error will mean vall == ULONG_MAX
 					if (endp != NULL) {
 						p = endp;
 						switch (toupper((int) *p)) {
@@ -2772,7 +2772,7 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 				continue;
 			} else {
 				ISTGT_ERRLOG("LU%d: unknown lun type\n", lu->num);
-				//goto error_return;
+				// goto error_return;
 			}
 		}
 		/* update the quota */
@@ -2871,10 +2871,10 @@ istgt_lu_del_unit(ISTGT_Ptr istgt, ISTGT_LU_Ptr lu)
 		return (0);
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "del unit %d\n", lu->num);
 
-	//MTX_LOCK(&istgt->mutex);
+	// MTX_LOCK(&istgt->mutex);
 	istgt->nlogical_unit--;
 	istgt->logical_unit[lu->num] = NULL;
-	//MTX_UNLOCK(&istgt->mutex);
+	// MTX_UNLOCK(&istgt->mutex);
 
 	xfree(lu->name);
 	xfree(lu->volname);
@@ -2911,14 +2911,14 @@ istgt_lu_del_unit(ISTGT_Ptr istgt, ISTGT_LU_Ptr lu)
 	for (i = 0; i < lu->maxmap; i++) {
 		pg_tag_i = lu->map[i].pg_tag;
 		ig_tag_i = lu->map[i].ig_tag;
-		//MTX_LOCK(&istgt->mutex);
+		// MTX_LOCK(&istgt->mutex);
 		pgp = istgt_lu_find_portalgroup(istgt, pg_tag_i);
 		igp = istgt_lu_find_initiatorgroup(istgt, ig_tag_i);
 		if (pgp != NULL && igp != NULL) {
 			pgp->ref--;
 			igp->ref--;
 		}
-		//MTX_UNLOCK(&istgt->mutex);
+		// MTX_UNLOCK(&istgt->mutex);
 	}
 
 	return (0);
@@ -2976,7 +2976,7 @@ static int istgt_lu_init_unit(ISTGT_Ptr istgt, ISTGT_LU_Ptr lu)
 		break;
 
 	case ISTGT_LU_TYPE_NONE:
-		//ISTGT_ERRLOG("LU%d: dummy type\n", lu->num);
+		// ISTGT_ERRLOG("LU%d: dummy type\n", lu->num);
 		break;
 	default:
 		ISTGT_ERRLOG("LU%d: unsupported type\n", lu->num);
@@ -3240,10 +3240,10 @@ istgt_lu_reload_update(ISTGT_Ptr istgt)
 						// ISTGT_ERRLOG("update active LU%d: Name=%s, "
 						//     "# of TSIH=%d\n",
 						//     lu->num, lu->name, lu->maxtsih - 1);
-						//rc = istgt_lu_copy_sp(sp, istgt->config_old);
-					//	if (rc < 0) {
+						// rc = istgt_lu_copy_sp(sp, istgt->config_old);
+						// if (rc < 0) {
 							/* ignore error */
-						//}
+						// }
 						MTX_UNLOCK(&lu->mutex);
 						MTX_UNLOCK(&istgt->mutex);
 						rc = istgt_lu_update_unit(lu, sp);
@@ -3453,7 +3453,7 @@ static int
 istgt_lu_shutdown_unit(ISTGT_Ptr istgt, ISTGT_LU_Ptr lu)
 {
 	int rc;
-	//int i = 0;
+	// int i = 0;
 
 	switch (lu->type) {
 	case ISTGT_LU_TYPE_PASS:
@@ -3477,7 +3477,7 @@ istgt_lu_shutdown_unit(ISTGT_Ptr istgt, ISTGT_LU_Ptr lu)
 		break;
 
 	case ISTGT_LU_TYPE_NONE:
-		//ISTGT_ERRLOG("LU%d: dummy type\n", lu->num);
+		// ISTGT_ERRLOG("LU%d: dummy type\n", lu->num);
 		break;
 	default:
 		ISTGT_ERRLOG("LU%d: unsupported type\n", lu->num);
@@ -3623,7 +3623,7 @@ istgt_lu_reset(ISTGT_LU_Ptr lu, uint64_t lun, istgt_ua_type ua_type)
 		break;
 
 	case ISTGT_LU_TYPE_NONE:
-		//ISTGT_ERRLOG("LU%d: dummy type\n", lu->num);
+		// ISTGT_ERRLOG("LU%d: dummy type\n", lu->num);
 		break;
 	default:
 		ISTGT_ERRLOG("LU%d: unsupported type\n", lu->num);
@@ -3755,8 +3755,8 @@ istgt_lu_create_task(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, int lun, ISTGT_LU_D
 #endif
 	lu_task->lu_cmd.pdu = (ISCSI_PDU_Ptr) ((uintptr_t)lu_task
 				            + ISCSI_ALIGN(sizeof *lu_task));
-	//lu_task->lu_cmd.pdu = xmalloc(sizeof *lu_task->lu_cmd.pdu);
-	//memset(lu_task->lu_cmd.pdu, 0, sizeof *lu_task->lu_cmd.pdu);
+	// lu_task->lu_cmd.pdu = xmalloc(sizeof *lu_task->lu_cmd.pdu);
+	// memset(lu_task->lu_cmd.pdu, 0, sizeof *lu_task->lu_cmd.pdu);
 
 	/* copy PDU */
 	dst_pdu = lu_task->lu_cmd.pdu;
@@ -3786,11 +3786,11 @@ istgt_lu_create_task(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, int lun, ISTGT_LU_D
 	lu_task->lu_cmd.lun = lu_cmd->lun;
 	lu_task->lu_cmd.task_tag = lu_cmd->task_tag;
 	lu_task->lu_cmd.transfer_len = lu_cmd->transfer_len;
-	//lu_task->lu_cmd.cdb = lu_cmd->cdb;
+	// lu_task->lu_cmd.cdb = lu_cmd->cdb;
 	lu_task->lu_cmd.cdb = cdb;
 	lu_task->lu_cmd.CmdSN = lu_cmd->CmdSN;
 
-	//lu_task->lu_cmd.iobuf = lu_cmd->iobuf;
+	// lu_task->lu_cmd.iobuf = lu_cmd->iobuf;
 	lu_task->lu_cmd.iobufindx = -1;
 	lu_task->lu_cmd.iobufsize = 0;
 	lu_task->lu_cmd.data = lu_cmd->data;
@@ -3812,7 +3812,7 @@ istgt_lu_create_task(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, int lun, ISTGT_LU_D
 	lu_task->lu_cmd.aborted = 0;
 	lu_task->lu_cmd.release_aborted = 0;
 
-	lu_task->alloc_len = 0; //alloc_len;
+	lu_task->alloc_len = 0; // alloc_len;
 
 	lu_task->cdb0  = cdb[0];
 	lu_task->lba   = 0;
@@ -3852,7 +3852,7 @@ istgt_lu_create_task(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, int lun, ISTGT_LU_D
 			pbdata = BGET8(&cdb[1], 2);
 			lbdata = BGET8(&cdb[1], 1);
 			if (pbdata || lbdata) {
-				//we don't support this
+				// we don't support this
 			} else {
 				lu_task->lba = (uint64_t) DGET32(&cdb[2]);
 				lu_task->lblen = (uint32_t) DGET16(&cdb[7]);
@@ -3870,11 +3870,11 @@ istgt_lu_create_task(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, int lun, ISTGT_LU_D
 			break;
 		case SBC_WRITE_SAME_16:
 			anchor = BGET8(&cdb[1], 4);
-			//int unmap = BGET8(&cdb[1], 3);
+			// int unmap = BGET8(&cdb[1], 3);
 			pbdata = BGET8(&cdb[1], 2);
 			lbdata = BGET8(&cdb[1], 1);
 			if (pbdata || lbdata || anchor) {
-				//we don't support this
+				// we don't support this
 			} else {
 				lu_task->lba = (uint64_t) DGET32(&cdb[2]);
 				lu_task->lblen = (uint32_t) DGET32(&cdb[10]);
@@ -3940,7 +3940,7 @@ istgt_lu_create_task(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, int lun, ISTGT_LU_D
 		} else {
 			if (lu_task->lblen > 0)
 				lu_task->lbE = lu_task->lba + lu_task->lblen - 1;
-			else //would never be here
+			else // would never be here
 				lu_task->lbE = lu_task->lba;
 		}
 		lu_task->lu_cmd.lblen = lu_task->lblen;
@@ -3997,7 +3997,7 @@ istgt_lu_destroy_task(ISTGT_LU_TASK_Ptr lu_task)
 			xfree(lu_task->lu_cmd.pdu->data);
 			lu_task->lu_cmd.pdu->data = NULL;
 		}
-		//xfree(lu_task->lu_cmd.pdu);
+		// xfree(lu_task->lu_cmd.pdu);
 	}
 	if (lu_task->lu_cmd.data != NULL) {
 		xfree(lu_task->lu_cmd.data);
@@ -4170,7 +4170,7 @@ maintenance_io_worker(void *arg)
 			ISTGT_ERRLOG("exit before running\n");
 			return (NULL);
 		}
-		//ISTGT_WARNLOG("Wait for running\n");
+		// ISTGT_WARNLOG("Wait for running\n");
 		sleep(1);
 		ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "LU%d:%d loop start waiting\n", lu->num, tind);
 		continue;
@@ -4212,12 +4212,12 @@ again:
 					if (unlikely((qcnt = istgt_queue_count(&spec->cmd_queue)) != 0))
 						pthread_cond_signal(&spec->cmd_queue_cond);
 					else
-						istgt_schedule_blocked_requests(spec, &spec->cmd_queue, &spec->blocked_queue, 0); //0 for command queues
+						istgt_schedule_blocked_requests(spec, &spec->cmd_queue, &spec->blocked_queue, 0); // 0 for command queues
 					if ((qcnt = istgt_queue_count(&spec->cmd_queue)) != 0)
 						pthread_cond_signal(&spec->cmd_queue_cond);
 				}
 				if ((qcnt = istgt_queue_count(&spec->maint_cmd_queue)) == 0)
-					istgt_schedule_blocked_requests(spec, &spec->maint_cmd_queue, &spec->maint_blocked_queue, 1); //1 for maintenance queues
+					istgt_schedule_blocked_requests(spec, &spec->maint_cmd_queue, &spec->maint_blocked_queue, 1); // 1 for maintenance queues
 				if (((qcnt = istgt_queue_count(&spec->maint_cmd_queue)) == 0) && (spec->disk_modify_work_pending == 0) && (!(spec->rsv_pending & ISTGT_RSV_READ)) )
 				{
 					spec->maint_thread_waiting = 1;
@@ -4239,7 +4239,7 @@ again:
 				MTX_LOCK(&spec->state_mutex);
 				if (spec->ex_state == ISTGT_LUN_CLOSE_PENDING) {
 					do_close = 1;
-					if (spec->open_waiting4close == 1) //open after the pending close
+					if (spec->open_waiting4close == 1) // open after the pending close
 						do_open = 1;
 				} else if (spec->ex_state == ISTGT_LUN_OPEN_PENDING) {
 						do_open = 1;
@@ -4497,7 +4497,7 @@ luworker(void *arg)
 
 			if (unlikely(lu->limit_q_size != 0 &&
 				tind == 0))
-				usleep(50000); //50ms
+				usleep(50000); // 50ms
 
 			clock_gettime(clockid, &third);
 			id = 16;
@@ -4574,7 +4574,7 @@ luscheduler(void *arg)
 			ISTGT_ERRLOG("exit before running\n");
 			return (NULL);
 		}
-		//ISTGT_WARNLOG("Wait for running\n");
+		// ISTGT_WARNLOG("Wait for running\n");
 		sleep(1);
 		continue;
 	}
@@ -4627,10 +4627,10 @@ start:
 next_lu_worker:
 		if ((worker_id = ffs(spec->lu_free_matrix[ind])) <= 0)
 			goto start;
-		worker_id--; //Bits are numbered starting at 1, the least significant bit.
+		worker_id--; // Bits are numbered starting at 1, the least significant bit.
 		worker_id += (ind<<5);
 
-		if (worker_id >= spec->luworkers) //worker_id can't be >= luworkers
+		if (worker_id >= spec->luworkers) // worker_id can't be >= luworkers
 			goto start;
 
 		clock_gettime(clockid, &sch2);
@@ -4660,13 +4660,13 @@ next_lu_worker:
 				if (unlikely((qcnt = istgt_queue_count(&spec->maint_cmd_queue)) != 0))
 					pthread_cond_signal(&spec->maint_cmd_queue_cond);
 				else
-					istgt_schedule_blocked_requests(spec, &spec->maint_cmd_queue, &spec->maint_blocked_queue, 1); //1 for maint queues
+					istgt_schedule_blocked_requests(spec, &spec->maint_cmd_queue, &spec->maint_blocked_queue, 1); // 1 for maint queues
 				if ((qcnt = istgt_queue_count(&spec->maint_cmd_queue)) != 0)
 					pthread_cond_signal(&spec->maint_cmd_queue_cond);
 			}
 
 			if ((qcnt = istgt_queue_count(&spec->cmd_queue)) == 0)
-				istgt_schedule_blocked_requests(spec, &spec->cmd_queue, &spec->blocked_queue, 0); //0 for cmd queues
+				istgt_schedule_blocked_requests(spec, &spec->cmd_queue, &spec->blocked_queue, 0); // 0 for cmd queues
 			if ((qcnt = istgt_queue_count(&spec->cmd_queue)) == 0) {
 				spec->schdler_cmd_waiting = 1;
 				pthread_cond_wait(&spec->cmd_queue_cond, &spec->complete_queue_mutex);
