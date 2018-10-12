@@ -715,7 +715,6 @@ istgt_lu_free_tsih(ISTGT_LU_Ptr lu, uint16_t tsih, char *initiator_port)
 		}
 	}
 	MTX_UNLOCK(&lu->mutex);
-	return;
 }
 
 char *
