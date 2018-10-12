@@ -2543,9 +2543,9 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 				if ((strcasecmp(size, "Auto") == 0 ||
 					strcasecmp(size, "Size") == 0) &&
 					lu->istgt->OperationalMode == 0) {
-				        new_size = istgt_lu_get_filesize(file);
+					new_size = istgt_lu_get_filesize(file);
 				} else {
-				        new_size = istgt_lu_parse_size(size);
+					new_size = istgt_lu_parse_size(size);
 				}
 #else
 				new_size = istgt_lu_parse_size(size);
@@ -3238,8 +3238,8 @@ istgt_lu_reload_update(ISTGT_Ptr istgt)
 					MTX_LOCK(&lu->mutex);
 					if (lu->maxtsih > 1) {
 						// ISTGT_ERRLOG("update active LU%d: Name=%s, "
-						//     "# of TSIH=%d\n",
-						//     lu->num, lu->name, lu->maxtsih - 1);
+						//		"# of TSIH=%d\n",
+						//		lu->num, lu->name, lu->maxtsih - 1);
 						// rc = istgt_lu_copy_sp(sp, istgt->config_old);
 						// if (rc < 0) {
 							/* ignore error */
@@ -3754,7 +3754,7 @@ istgt_lu_create_task(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, int lun, ISTGT_LU_D
 	}
 #endif
 	lu_task->lu_cmd.pdu = (ISCSI_PDU_Ptr) ((uintptr_t)lu_task
-				            + ISCSI_ALIGN(sizeof (*lu_task)));
+							+ ISCSI_ALIGN(sizeof (*lu_task)));
 	// lu_task->lu_cmd.pdu = xmalloc(sizeof *lu_task->lu_cmd.pdu);
 	// memset(lu_task->lu_cmd.pdu, 0, sizeof *lu_task->lu_cmd.pdu);
 
@@ -4460,13 +4460,13 @@ luworker(void *arg)
 				clock_gettime(clockid, &first);
 				if (unlikely(spec->do_avg == 1))
 				{
-		                	spec->avgs[8].count++;
-			                spec->avgs[9].count++;
-			                spec->avgs[11].count++;
+					spec->avgs[8].count++;
+					spec->avgs[9].count++;
+					spec->avgs[11].count++;
 
-			                spec->avgs[8].tot_sec += istgt_queue_count(&spec->cmd_queue);
-			                spec->avgs[9].tot_sec += istgt_queue_count(&spec->blocked_queue);
-			                spec->avgs[11].tot_sec += spec->inflight;
+					spec->avgs[8].tot_sec += istgt_queue_count(&spec->cmd_queue);
+					spec->avgs[9].tot_sec += istgt_queue_count(&spec->blocked_queue);
+					spec->avgs[11].tot_sec += spec->inflight;
 				}
 				if (istgt_lu_get_state(lu) != ISTGT_STATE_RUNNING)
 				{
@@ -4479,9 +4479,9 @@ luworker(void *arg)
 
 				if (unlikely(spec->do_avg == 1))
 				{
-		                	spec->avgs[8].tot_nsec += istgt_queue_count(&spec->cmd_queue);
-			                spec->avgs[9].tot_nsec += istgt_queue_count(&spec->blocked_queue);
-			                spec->avgs[11].tot_nsec += spec->inflight;
+					spec->avgs[8].tot_nsec += istgt_queue_count(&spec->cmd_queue);
+					spec->avgs[9].tot_nsec += istgt_queue_count(&spec->blocked_queue);
+					spec->avgs[11].tot_nsec += spec->inflight;
 				}
 				clock_gettime(clockid, &second2);
 				id = 17;
