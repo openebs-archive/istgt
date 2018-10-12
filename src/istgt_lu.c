@@ -229,7 +229,7 @@ istgt_connection_status(CONN_Ptr conn, const char *status)
 		fprintf(stderr, "Cannot open the file %s \n", logfile);
 		return;
 	}
-	fprintf(fp,"%s From %s To %s : %s\n", time_val, conn->initiator_name, conn->target_name, status);
+	fprintf(fp, "%s From %s To %s : %s\n", time_val, conn->initiator_name, conn->target_name, status);
 	fclose(fp);
 	xfree(logfile);
 }
@@ -609,7 +609,7 @@ istgt_lu_remove_nexus(ISTGT_LU_Ptr lu, char* initiator_port)
 	if (lu == NULL || initiator_port == NULL)
 		return (-1);
 
-	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG,"istgt_lu_remove_nexus LU%d Initiator %s \n", lu->num, initiator_port);
+	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "istgt_lu_remove_nexus LU%d Initiator %s \n", lu->num, initiator_port);
 	for (lun = 0; lun < lu->maxlun; lun++) {
 		if (lu->type == ISTGT_LU_TYPE_DISK)
 			rc = istgt_lu_disk_remove_nexus(lu, lun, initiator_port);
@@ -1430,7 +1430,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	if (strncasecmp(val, "iqn.", 4) != 0
 		&& strncasecmp(val, "eui.", 4) != 0
 		&& strncasecmp(val, "naa.", 4) != 0) {
-		snprintf(buf, sizeof buf,"%s:%s", istgt->nodebase, val);
+		snprintf(buf, sizeof buf, "%s:%s", istgt->nodebase, val);
 	} else {
 		snprintf(buf, sizeof buf, "%s", val);
 	}
@@ -2288,7 +2288,7 @@ static int
 istgt_lu_close_connection(ISTGT_LU_Ptr lu, INITIATOR_GROUP *igp_new)
 {
 	CONN_Ptr conn;
-	int i,j,found;
+	int i, j, found;
 
 	if (igp_new == NULL){
 		return (-1);
@@ -2387,14 +2387,14 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 			igp_old = istgt_lu_find_initiatorgroup(lu->istgt, lu->map[i].ig_tag);
 			if (igp_old == NULL) {
                                ISTGT_NOTICELOG("LU%d: InitiatoGroup%d not found\n",
-					lu->num,lu->map[i].ig_tag );
+					lu->num, lu->map[i].ig_tag );
 			}
 			ISTGT_NOTICELOG("initiator grp updated with new value %d\n", igp_new->tag);
 			rc = istgt_lu_close_connection(lu, igp_new);
 			MTX_UNLOCK(&lu->istgt->mutex);
 			if (rc < 0){
 				/* handle the error */
-				ISTGT_ERRLOG("Unable to close Unauthorised connections for LU%d\n",lu->num);
+				ISTGT_ERRLOG("Unable to close Unauthorised connections for LU%d\n", lu->num);
 				goto error_out;
 			}
 			lu->map[i].ig_tag = ig_tag_i_new;
@@ -2853,7 +2853,7 @@ error_out:
 	}
 
 error_return:
-	ISTGT_ERRLOG("Updating the logical unit failed LU%d\n",lu->num);
+	ISTGT_ERRLOG("Updating the logical unit failed LU%d\n", lu->num);
 	return (-1);
 }
 
@@ -3715,7 +3715,7 @@ istgt_lu_create_task(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, int lun, ISTGT_LU_D
 		lu_task->lu_cmd.caller[i] = lu_cmd->caller[i];
 		lu_task->lu_cmd.line[i] = lu_cmd->line[i];
 	}
-	for (; i < _PSZ;i++) {
+	for (; i < _PSZ; i++) {
 		lu_task->lu_cmd.times[i].tv_sec = 0;
 		lu_task->lu_cmd.times[i].tv_nsec = 0;
 		lu_task->lu_cmd.caller[i] = 0;
@@ -4212,12 +4212,12 @@ again:
 					if (unlikely((qcnt = istgt_queue_count(&spec->cmd_queue)) != 0))
 						pthread_cond_signal(&spec->cmd_queue_cond);
 					else
-						istgt_schedule_blocked_requests(spec, &spec->cmd_queue, &spec->blocked_queue, 0);//0 for command queues
+						istgt_schedule_blocked_requests(spec, &spec->cmd_queue, &spec->blocked_queue, 0); //0 for command queues
 					if ((qcnt = istgt_queue_count(&spec->cmd_queue)) != 0)
 						pthread_cond_signal(&spec->cmd_queue_cond);
 				}
 				if ((qcnt = istgt_queue_count(&spec->maint_cmd_queue)) == 0)
-					istgt_schedule_blocked_requests(spec, &spec->maint_cmd_queue, &spec->maint_blocked_queue, 1);//1 for maintenance queues
+					istgt_schedule_blocked_requests(spec, &spec->maint_cmd_queue, &spec->maint_blocked_queue, 1); //1 for maintenance queues
 				if (((qcnt = istgt_queue_count(&spec->maint_cmd_queue)) == 0) && (spec->disk_modify_work_pending == 0) && (!(spec->rsv_pending & ISTGT_RSV_READ)) )
 				{
 					spec->maint_thread_waiting = 1;
@@ -4539,7 +4539,7 @@ luscheduler(void *arg)
 	ISTGT_LU_DISK *spec = (ISTGT_LU_DISK *) lu->lun[0].spec;
 	ISTGT_LU_TASK_Ptr lu_task;
 	int retry_runningstate_count = 0;
-	struct timespec sch1, sch2, sch3, sch4, sch5,sch6, r;
+	struct timespec sch1, sch2, sch3, sch4, sch5, sch6, r;
 	int qcnt = 0, ind = 0;
 	int worker_id;
 	int id, found_worker = 0;
@@ -4660,13 +4660,13 @@ next_lu_worker:
 				if (unlikely((qcnt = istgt_queue_count(&spec->maint_cmd_queue)) != 0))
 					pthread_cond_signal(&spec->maint_cmd_queue_cond);
 				else
-					istgt_schedule_blocked_requests(spec, &spec->maint_cmd_queue, &spec->maint_blocked_queue, 1);//1 for maint queues
+					istgt_schedule_blocked_requests(spec, &spec->maint_cmd_queue, &spec->maint_blocked_queue, 1); //1 for maint queues
 				if ((qcnt = istgt_queue_count(&spec->maint_cmd_queue)) != 0)
 					pthread_cond_signal(&spec->maint_cmd_queue_cond);
 			}
 
 			if ((qcnt = istgt_queue_count(&spec->cmd_queue)) == 0)
-				istgt_schedule_blocked_requests(spec, &spec->cmd_queue, &spec->blocked_queue, 0);//0 for cmd queues
+				istgt_schedule_blocked_requests(spec, &spec->cmd_queue, &spec->blocked_queue, 0); //0 for cmd queues
 			if ((qcnt = istgt_queue_count(&spec->cmd_queue)) == 0) {
 				spec->schdler_cmd_waiting = 1;
 				pthread_cond_wait(&spec->cmd_queue_cond, &spec->complete_queue_mutex);
@@ -4703,7 +4703,7 @@ next_lu_worker:
 			MTX_UNLOCK(&spec->complete_queue_mutex);
 		}else {
 			spec->error_count++;
-			istgt_queue_enqueue_first(&spec->cmd_queue,lu_task);
+			istgt_queue_enqueue_first(&spec->cmd_queue, lu_task);
 			MTX_UNLOCK(&spec->complete_queue_mutex);
 			MTX_UNLOCK(&spec->luworker_mutex[worker_id]);
 			if ((spec->lu_free_matrix[ind] > 0) &&
