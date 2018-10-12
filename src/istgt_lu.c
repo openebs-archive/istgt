@@ -2341,10 +2341,10 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 	int ag_tag_i;
 	int i, j;
 	int rc, flags;
-	uint64_t old_size=0, new_size;
-	uint32_t old_rsize=0, new_rsize;
+	uint64_t old_size = 0, new_size;
+	uint32_t old_rsize = 0, new_rsize;
 	int rpm, formfactor, opt_tlen;
-	int storagechange=0;
+	int storagechange = 0;
 
 	val = istgt_get_val(sp, "Mapping");
 	if (val == NULL) {
@@ -2867,7 +2867,7 @@ istgt_lu_del_unit(ISTGT_Ptr istgt, ISTGT_LU_Ptr lu)
 	int pg_tag_i, ig_tag_i;
 	int i, j;
 
-	if (lu ==NULL)
+	if (lu == NULL)
 		return (0);
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "del unit %d\n", lu->num);
 
@@ -3355,11 +3355,11 @@ int istgt_lu_update_ig(ISTGT_Ptr istgt, INITIATOR_GROUP *igp_new)
 	if (igp_new == NULL)
 		return (0);
 	ISTGT_NOTICELOG("initiator group update\n");
-	for (i=0; i < MAX_LOGICAL_UNIT; i++) {
+	for (i = 0; i < MAX_LOGICAL_UNIT; i++) {
 		lu = istgt->logical_unit[i];
 		if (lu == NULL)
 			continue;
-		for (j=0; j < lu->maxmap; j++) {
+		for (j = 0; j < lu->maxmap; j++) {
 			if (lu->map[j].ig_tag == igp_new->tag)
 				istgt_lu_close_connection(lu, igp_new);
 		}
@@ -3403,7 +3403,7 @@ istgt_lu_create_thread(ISTGT_Ptr istgt, ISTGT_LU_Ptr lu)
 	if (lu->queue_depth != 0) {
 		ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "thread for LU%d\n", lu->num);
 		/* create LU thread */
-		for (i=0; i < lu->luworkers; i++) {
+		for (i = 0; i < lu->luworkers; i++) {
 			rc = pthread_create(&lu->luthread[i], &istgt->attr, &luworker,
 											(void *)lu);
 			if (rc != 0) {
@@ -3658,7 +3658,7 @@ istgt_lu_reset_all(ISTGT_Ptr istgt, istgt_ua_type ua_type)
 				ISTGT_ERRLOG("istgt_lu_reset() failed, LU %d, LUN %d\n", lu->num, j);
 				ret = -1;
 			} else
-				cleared +=clear_temp;
+				cleared += clear_temp;
 		}
 	}
 	return ((ret < 0) ? ret : cleared);
@@ -3671,7 +3671,7 @@ istgt_lu_create_task(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, int lun, ISTGT_LU_D
 	ISTGT_LU_TASK_Ptr lu_task = NULL;
 	ISCSI_PDU_Ptr dst_pdu, src_pdu;
 	uint8_t *cdb;
-	int alloc_len, i, gotlba=0;
+	int alloc_len, i, gotlba = 0;
 	int pbdata, lbdata, anchor;
 	int64_t maxlen;
 	uint64_t blkcnt = 0;
@@ -3707,7 +3707,7 @@ istgt_lu_create_task(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, int lun, ISTGT_LU_D
 	lu_task->lu_cmd._andx = lu_cmd->_andx;
 	lu_task->lu_cmd._lst = lu_cmd->_lst;
 	lu_task->lu_cmd._roll_cnt = 0;
-	for (i=0; i<= lu_cmd->_andx; ++i) {
+	for (i = 0; i <= lu_cmd->_andx; ++i) {
 		lu_task->lu_cmd.times[i].tv_sec = lu_cmd->times[i].tv_sec;
 		lu_task->lu_cmd.times[i].tv_nsec = lu_cmd->times[i].tv_nsec;
 		lu_task->lu_cmd.tdiff[i].tv_sec = lu_cmd->tdiff[i].tv_sec;
@@ -4008,7 +4008,7 @@ istgt_lu_destroy_task(ISTGT_LU_TASK_Ptr lu_task)
 		lu_task->lu_cmd.sense_data = NULL;
 	}
 	if (lu_task->lu_cmd.iobufindx != -1) {
-		for (i=0; i<=lu_task->lu_cmd.iobufindx; ++i) {
+		for (i = 0; i <= lu_task->lu_cmd.iobufindx; ++i) {
 			if (lu_task->lu_cmd.iobuf[i].iov_base) {
 				xfree(lu_task->lu_cmd.iobuf[i].iov_base);
 				lu_task->lu_cmd.iobuf[i].iov_base = NULL;
@@ -4152,7 +4152,7 @@ maintenance_io_worker(void *arg)
 		tind = i;
 		snprintf(tinfo, sizeof (tinfo), "mt#%d.%ld.%d", lu->num, (uint64_t)(((uint64_t *)self)[0]), i);
 		pthread_set_name_np(lu->maintenance_thread, tinfo);
-		for (j = 0; j< lu->maxlun; j++) {
+		for (j = 0; j < lu->maxlun; j++) {
 			spec = (ISTGT_LU_DISK *) lu->lun[j].spec;
 			spec->inflight_io[i] = NULL;
 		}
@@ -4358,12 +4358,12 @@ luworker(void *arg)
 }
 
 	pthread_t self = pthread_self();
-	for (i= 0; i < lu->luworkers; i++) {
+	for (i = 0; i < lu->luworkers; i++) {
 		if (lu->luthread[i] == self) {
 			tind = i;
 			snprintf(tinfo, sizeof (tinfo), "l#%d.%ld.%d", lu->num, (uint64_t)(((uint64_t *)self)[0]), i);
 			pthread_set_name_np(lu->luthread[i], tinfo);
-			for (j = 0; j< lu->maxlun; j++) {
+			for (j = 0; j < lu->maxlun; j++) {
 				spec = (ISTGT_LU_DISK *) lu->lun[j].spec;
 				spec->inflight_io[i] = NULL;
 			}
@@ -4383,7 +4383,7 @@ luworker(void *arg)
 
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "LU%d loop start\n", lu->num);
 	lu_num = 0;
-	for (j = 0; j< lu->maxlun; j++) {
+	for (j = 0; j < lu->maxlun; j++) {
 		spec = (ISTGT_LU_DISK *) lu->lun[j].spec;
 		MTX_LOCK(&spec->luworker_mutex[tind]);
 		if (likely(spec->inflight_io[tind] == NULL)) {
