@@ -616,7 +616,7 @@ istgt_lu_remove_nexus(ISTGT_LU_Ptr lu, char* initiator_port)
 		}
 
 	return (rc);
- }
+}
 
 uint16_t
 istgt_lu_allocate_tsih(ISTGT_LU_Ptr lu, const char *initiator_port, int tag)
@@ -1818,8 +1818,8 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 		lu->queue_depth = (int) strtol(val, NULL, 10);
 	}
 	if (lu->queue_depth < 0 || lu->queue_depth >= MAX_LU_QUEUE_DEPTH) {
- 		ISTGT_ERRLOG("LU%d: queue depth %d is not in range, resetting to %d\n", lu->num, lu->queue_depth, DEFAULT_LU_QUEUE_DEPTH);
- 		lu->queue_depth = DEFAULT_LU_QUEUE_DEPTH;
+		ISTGT_ERRLOG("LU%d: queue depth %d is not in range, resetting to %d\n", lu->num, lu->queue_depth, DEFAULT_LU_QUEUE_DEPTH);
+		lu->queue_depth = DEFAULT_LU_QUEUE_DEPTH;
 		goto error_return;
 	}
 
@@ -1828,8 +1828,8 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	lu->conns = 0;
 	lu->limit_q_size = 0;
 
- 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "BlockLength %d, PhysRecordLength %d, QueueDepth %d\n",
- 	    lu->blocklen, lu->recordsize, lu->queue_depth);
+	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "BlockLength %d, PhysRecordLength %d, QueueDepth %d\n",
+		lu->blocklen, lu->recordsize, lu->queue_depth);
 
 	val = istgt_get_val(sp, "Luworkers");
 	if (val == NULL) {
@@ -2110,9 +2110,9 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 				} else if (strcasecmp(key, "WZero") == 0) {
 					if (strcasecmp(val, "Enable") == 0) {
 						if (lu->lun[i].unmap == 0) {
-                                                        ISTGT_ERRLOG("LU%d: LUN%d: Wzero enabled while Unmap disabled\n", lu->num, i);
-                                                        goto error_return;
-                                                }
+							ISTGT_ERRLOG("LU%d: LUN%d: Wzero enabled while Unmap disabled\n", lu->num, i);
+							goto error_return;
+						}
 						lu->lun[i].wzero = 1;
 					} else if (strcasecmp(val, "Disable") == 0) {
 						lu->lun[i].wzero = 0;
@@ -2235,7 +2235,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	MTX_UNLOCK(&istgt->mutex);
 	return (0);
 
- error_return:
+error_return:
 	xfree(lu->name);
 	xfree(lu->volname);
 	xfree(lu->alias);
@@ -2386,8 +2386,8 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 			igp_new->ref++;
 			igp_old = istgt_lu_find_initiatorgroup(lu->istgt, lu->map[i].ig_tag);
 			if (igp_old == NULL) {
-                               ISTGT_NOTICELOG("LU%d: InitiatoGroup%d not found\n",
-					lu->num, lu->map[i].ig_tag);
+				ISTGT_NOTICELOG("LU%d: InitiatoGroup%d not found\n",
+				lu->num, lu->map[i].ig_tag);
 			}
 			ISTGT_NOTICELOG("initiator grp updated with new value %d\n", igp_new->tag);
 			rc = istgt_lu_close_connection(lu, igp_new);
@@ -3393,10 +3393,10 @@ istgt_lu_create_thread(ISTGT_Ptr istgt, ISTGT_LU_Ptr lu)
 	int i = 0;
 
 	rc = pthread_create(&lu->schdler_thread, &istgt->attr, &luscheduler,
-                        (void *)lu);
+						(void *)lu);
 	if (rc != 0) {
 		ISTGT_ERRLOG("pthread_create() failed ,lun %d, rc = %d\n",
-                	lu->num, rc);
+					lu->num, rc);
 		return (-1);
 	}
 
@@ -3405,21 +3405,21 @@ istgt_lu_create_thread(ISTGT_Ptr istgt, ISTGT_LU_Ptr lu)
 		/* create LU thread */
 		for (i=0; i < lu->luworkers; i++) {
 			rc = pthread_create(&lu->luthread[i], &istgt->attr, &luworker,
-                                            (void *)lu);
+											(void *)lu);
 			if (rc != 0) {
 				ISTGT_ERRLOG("pthread_create() failed for thread %d, lun %d, rc = %d\n",
-                                              i, lu->num, rc);
+											i, lu->num, rc);
 				return (-1);
 			}
 			++lu->luworkersActive;
-        	}
+		}
 	}
 
 	rc = pthread_create(&lu->maintenance_thread, &istgt->attr, &maintenance_io_worker,
-                        (void *)lu);
+						(void *)lu);
 	if (rc != 0) {
 		ISTGT_ERRLOG("pthread_create() failed for maintenance thread ,lun %d, rc = %d\n",
-                	lu->num, rc);
+					lu->num, rc);
 		return (-1);
 	}
 
@@ -4340,13 +4340,13 @@ luworker(void *arg)
 #define	tdiff(_s, _n, _r) {                     \
 	if (unlikely(spec->do_avg == 1))	\
 	{	\
-        	if ((_n.tv_nsec - _s.tv_nsec) < 0) {        \
-                	_r.tv_sec  = _n.tv_sec - _s.tv_sec-1;   \
-                	_r.tv_nsec = 1000000000 + _n.tv_nsec - _s.tv_nsec; \
-        	} else {                                    \
-                	_r.tv_sec  = _n.tv_sec - _s.tv_sec;     \
-                	_r.tv_nsec = _n.tv_nsec - _s.tv_nsec;   \
-        	}                                           \
+		if ((_n.tv_nsec - _s.tv_nsec) < 0) {        \
+			_r.tv_sec  = _n.tv_sec - _s.tv_sec-1;   \
+			_r.tv_nsec = 1000000000 + _n.tv_nsec - _s.tv_nsec; \
+		} else {                                    \
+			_r.tv_sec  = _n.tv_sec - _s.tv_sec;     \
+			_r.tv_nsec = _n.tv_nsec - _s.tv_nsec;   \
+		}                                           \
 		spec->avgs[id].count++;	\
 		spec->avgs[id].tot_sec += _r.tv_sec;	\
 		spec->avgs[id].tot_nsec += _r.tv_nsec;	\
@@ -4526,7 +4526,7 @@ luworker(void *arg)
 			lu_num++;
 		}
 	}
- loop_exit:
+loop_exit:
 	;
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "LU%d loop ended\n", lu->num);
 	return (NULL);
@@ -4547,13 +4547,13 @@ luscheduler(void *arg)
 #define	tdiff(_s, _n, _r) {                     \
 	if (unlikely(spec->do_avg == 1))	\
 	{	\
-                if ((_n.tv_nsec - _s.tv_nsec) < 0) {        \
-                        _r.tv_sec  = _n.tv_sec - _s.tv_sec-1;   \
-                        _r.tv_nsec = 1000000000 + _n.tv_nsec - _s.tv_nsec; \
-                } else {                                    \
-                        _r.tv_sec  = _n.tv_sec - _s.tv_sec;     \
-                        _r.tv_nsec = _n.tv_nsec - _s.tv_nsec;   \
-                }                                           \
+		if ((_n.tv_nsec - _s.tv_nsec) < 0) {        \
+			_r.tv_sec  = _n.tv_sec - _s.tv_sec-1;   \
+			_r.tv_nsec = 1000000000 + _n.tv_nsec - _s.tv_nsec; \
+		} else {                                    \
+			_r.tv_sec  = _n.tv_sec - _s.tv_sec;     \
+			_r.tv_nsec = _n.tv_nsec - _s.tv_nsec;   \
+		}                                           \
 		spec->avgs[id].count++;	\
 		spec->avgs[id].tot_sec += _r.tv_sec;	\
 		spec->avgs[id].tot_nsec += _r.tv_nsec;	\
@@ -4581,9 +4581,9 @@ luscheduler(void *arg)
 	while (1) {
 		/*
 		 * Take the scheduler mutex lock, find if any of the luworkers are free from spec->lu_free_matrix.
- 		 * If so find the index of the least significant bit set in the spec->lu_free_matrix to get the
- 		 * luworker's id. If the all the luworkers are busy, then wait on schdler_cond variable.
- 		 */
+		 * If so find the index of the least significant bit set in the spec->lu_free_matrix to get the
+		 * luworker's id. If the all the luworkers are busy, then wait on schdler_cond variable.
+		 */
 start:
 		while ((retry_runningstate_count < ISTGT_MAX_LU_RUNNING_STATE_RETRY_COUNT) &&
 				(istgt_lu_get_state(lu) == ISTGT_STATE_INITIALIZED)) {
@@ -4727,7 +4727,7 @@ next_lu_worker:
 			(likely(lu->limit_q_size == 0)))
 			goto next_lu_worker;
 	}
- loop_exit:
+loop_exit:
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "scheduler loop ended\n");
 	return (NULL);
 }
