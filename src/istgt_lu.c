@@ -3346,7 +3346,8 @@ istgt_lu_reload_update(ISTGT_Ptr istgt)
 	return (0);
 }
 
-int istgt_lu_update_ig(ISTGT_Ptr istgt, INITIATOR_GROUP *igp_new)
+int
+istgt_lu_update_ig(ISTGT_Ptr istgt, INITIATOR_GROUP *igp_new)
 {
 	ISTGT_LU_Ptr lu;
 	int i, j;
