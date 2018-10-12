@@ -5093,7 +5093,7 @@ do_register:
                 rc = istgt_lu_disk_update_reservation(spec);
                 if (rc < 0) {
                         ISTGT_ERRLOG("c#%d istgt_lu_disk_update_reservation() failed\n", conn->id);
-                        /* Copy only if the backup was successfull */
+                        /* Copy only if the backup was successful */
                         if (bkp_success == 1) {
                                 rc = istgt_lu_disk_copy_reservation(spec, spec_bkp);
                                 if (rc < 0) {
@@ -6719,7 +6719,7 @@ istgt_lu_disk_clear_reservation(ISTGT_LU_Ptr lu, int lun)
 		rc = istgt_lu_disk_update_reservation(spec); 
 		if (rc < 0) {
 			ISTGT_ERRLOG("istgt_lu_disk_update_reservation() failed\n");
-			/* Copy only if the backup was successfull */
+			/* Copy only if the backup was successful */
 			if (bkp_success == 1) {
 				rc = istgt_lu_disk_copy_reservation(spec, spec_bkp);
 				if (rc < 0) {
