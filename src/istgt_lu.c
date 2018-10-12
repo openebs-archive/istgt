@@ -2827,18 +2827,18 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 	}
 
 	/* tsih 0 is reserved */
-	/*for (i = 0; i < MAX_LU_TSIH; i++) {
-		lu->tsih[i].tag = 0;
-		lu->tsih[i].tsih = 0;
-		lu->tsih[i].initiator_port = NULL;
-	}
-	lu->maxtsih = 1;
-	lu->last_tsih = 0;
+	// for (i = 0; i < MAX_LU_TSIH; i++) {
+	// 	lu->tsih[i].tag = 0;
+	// 	lu->tsih[i].tsih = 0;
+	// 	lu->tsih[i].initiator_port = NULL;
+	// }
+	// lu->maxtsih = 1;
+	// lu->last_tsih = 0;
 
-	MTX_LOCK(&lu->istgt->mutex);
-	lu->istgt->nlogical_unit++;
-	lu->istgt->logical_unit[lu->num] = lu;
-	MTX_UNLOCK(&lu->istgt->mutex); */
+	// MTX_LOCK(&lu->istgt->mutex);
+	// lu->istgt->nlogical_unit++;
+	// lu->istgt->logical_unit[lu->num] = lu;
+	// MTX_UNLOCK(&lu->istgt->mutex);
 	return (0);
 
 error_out:
@@ -3147,17 +3147,17 @@ istgt_lu_match_all(CF_SECTION *sp, CONFIG *config_old)
 	return (1);
 }
 
-/*static int
-istgt_lu_copy_sp(CF_SECTION *sp, CONFIG *config_old)
-{
-	CF_SECTION *sp_old;
+// static int
+// istgt_lu_copy_sp(CF_SECTION *sp, CONFIG *config_old)
+// {
+// 	CF_SECTION *sp_old;
 
-	sp_old = istgt_find_cf_section(config_old, sp->name);
-	if (sp_old == NULL)
-		return (-1);
-	istgt_copy_cf_item(sp, sp_old);
-	return (0);
-}*/
+// 	sp_old = istgt_find_cf_section(config_old, sp->name);
+// 	if (sp_old == NULL)
+// 		return (-1);
+// 	istgt_copy_cf_item(sp, sp_old);
+// 	return (0);
+// }
 
 static int istgt_lu_create_thread(ISTGT_Ptr istgt, ISTGT_LU_Ptr lu);
 
@@ -3237,9 +3237,9 @@ istgt_lu_reload_update(ISTGT_Ptr istgt)
 					}
 					MTX_LOCK(&lu->mutex);
 					if (lu->maxtsih > 1) {
-					/*	ISTGT_ERRLOG("update active LU%d: Name=%s, "
-						    "# of TSIH=%d\n",
-						    lu->num, lu->name, lu->maxtsih - 1);*/
+						// ISTGT_ERRLOG("update active LU%d: Name=%s, "
+						//     "# of TSIH=%d\n",
+						//     lu->num, lu->name, lu->maxtsih - 1);
 						//rc = istgt_lu_copy_sp(sp, istgt->config_old);
 					//	if (rc < 0) {
 							/* ignore error */
@@ -3633,12 +3633,13 @@ istgt_lu_reset(ISTGT_LU_Ptr lu, uint64_t lun, istgt_ua_type ua_type)
 	return (0);
 }
 
-/* SAM3: Page 79, The target port shall perform
-  * logical unit reset functions for every logical unit.
-  * A unit attention condition for all initiators that
-  * have access shall be created on each of
-  * these logical units.
-  */
+/*
+ * SAM3: Page 79, The target port shall perform
+ * logical unit reset functions for every logical unit.
+ * A unit attention condition for all initiators that
+ * have access shall be created on each of
+ * these logical units.
+ */
 
 int
 istgt_lu_reset_all(ISTGT_Ptr istgt, istgt_ua_type ua_type)
@@ -4578,7 +4579,8 @@ luscheduler(void *arg)
 		continue;
 	}
 	while (1) {
-		/* Take the scheduler mutex lock, find if any of the luworkers are free from spec->lu_free_matrix.
+		/*
+		 * Take the scheduler mutex lock, find if any of the luworkers are free from spec->lu_free_matrix.
  		 * If so find the index of the least significant bit set in the spec->lu_free_matrix to get the
  		 * luworker's id. If the all the luworkers are busy, then wait on schdler_cond variable.
  		 */
@@ -4637,7 +4639,8 @@ next_lu_worker:
 
 		clock_gettime(clockid, &sch4);
 
-		/* Try to schedule the blocked request and get the cmd_queue count,
+		/*
+		 * Try to schedule the blocked request and get the cmd_queue count,
 		 * if count is zero wait on spec->cmd_queue_cond. If count > 0, dequeue the
 		 * first request in the queue and assign it the luworker that is free and unset
 		 * the bit in the free_matrix
