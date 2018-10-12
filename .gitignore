@@ -27,6 +27,7 @@
 tags
 TAGS
 configure
+Makefile
 cscope.*
 *.patch
 *.orig
@@ -38,3 +39,4 @@ etc/istgt.conf
 etc/istgt.large.conf
 etc/istgt_linux.sh
 src/config.h.in
+src/build.h
