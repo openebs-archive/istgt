@@ -4254,8 +4254,7 @@ again:
 					lu_task = istgt_queue_dequeue(&spec->maint_cmd_queue);
 					if (lu_task != NULL) {
 						goto execute_task;
-					}
-					else {
+					} else {
 						MTX_UNLOCK(&spec->complete_queue_mutex);
 						sleep(1);
 						MTX_LOCK(&spec->complete_queue_mutex);
@@ -4274,8 +4273,7 @@ again:
 					lu_task = istgt_queue_dequeue(&spec->maint_cmd_queue);
 					if (lu_task != NULL) {
 						goto execute_task;
-					}
-					else {
+					} else {
 						MTX_UNLOCK(&spec->complete_queue_mutex);
 						sleep(1);
 						if (istgt_lu_get_state(lu) != ISTGT_STATE_RUNNING)
