@@ -250,7 +250,7 @@ istgt_lu_access(CONN_Ptr conn, ISTGT_LU_Ptr lu, const char *iqn, const char *add
 	pg_tag = conn->portal.tag;
 
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "pg=%d, iqn=%s, addr=%s\n",
-				  pg_tag, iqn, addr);
+				    pg_tag, iqn, addr);
 	for (i = 0; i < lu->maxmap; i++) {
 		/* skip excluding self portal group tag */
 		if (pg_tag != lu->map[i].pg_tag)
@@ -1443,7 +1443,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	}
 	lu->name = xstrdup(buf);
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "TargetName %s\n",
-				   lu->name);
+				    lu->name);
 
 	val = istgt_get_val(sp, "TargetAlias");
 	if (val == NULL) {
@@ -1495,7 +1495,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 			if (pgp == NULL) {
 				MTX_UNLOCK(&istgt->mutex);
 				ISTGT_ERRLOG("LU%d: PortalGroup%d not found\n",
-							 lu->num, pg_tag_i);
+							    lu->num, pg_tag_i);
 				goto error_return;
 			}
 			igp = istgt_lu_find_initiatorgroup(istgt, ig_tag_i);
@@ -1897,7 +1897,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 				}
 				lu->lun[i].u.device.file = xstrdup(file);
 				ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "Device file=%s\n",
-							   lu->lun[i].u.device.file);
+							    lu->lun[i].u.device.file);
 			} else if (strcasecmp(val, "Storage") == 0) {
 				if (lu->lun[i].type != ISTGT_LU_LUN_TYPE_NONE) {
 					ISTGT_ERRLOG("LU%d: duplicate LUN%d\n", lu->num, i);
@@ -1932,7 +1932,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 							case 'G': vall *= (uint64_t) 1024ULL;
 							case 'M': vall *= (uint64_t) 1024ULL;
 							case 'K': vall *= (uint64_t) 1024ULL;
-									  break;
+									    break;
 						}
 					}
 					if (vall > 131072)
@@ -2528,7 +2528,7 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 				}
 				lu->lun[i].u.device.file = xstrdup(file);
 				ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "Device file=%s\n",
-							   lu->lun[i].u.device.file);
+							    lu->lun[i].u.device.file);
 			} else if (strcasecmp(val, "Storage") == 0) {
 				file = istgt_get_nmval(sp, buf, j, 1);
 				size = istgt_get_nmval(sp, buf, j, 2);
@@ -2566,7 +2566,7 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 							case 'G': vall *= (uint64_t) 1024ULL;
 							case 'M': vall *= (uint64_t) 1024ULL;
 							case 'K': vall *= (uint64_t) 1024ULL;
-									  break;
+									    break;
 						}
 					}
 					if (vall > 131072)
@@ -3945,13 +3945,11 @@ istgt_lu_create_task(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, int lun, ISTGT_LU_D
 		}
 		lu_task->lu_cmd.lblen = lu_task->lblen;
 	}
-	/*
-	   if (lu_task->cdb0 != lu_task->lu_cmd.cdb0 ||
-	   lu_task->lba != lu_task->lu_cmd.lba ||
-	   lu_task->lblen != lu_task->lu_cmd.lblen) {
-	   log/fix
-	   }
-	 */
+	// if (lu_task->cdb0 != lu_task->lu_cmd.cdb0 ||
+	// 	lu_task->lba != lu_task->lu_cmd.lba ||
+	// 	lu_task->lblen != lu_task->lu_cmd.lblen) {
+	// 	log/fix
+	// }
 
 	/* creation time */
 	/* wait time */
