@@ -1626,7 +1626,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	val = istgt_get_val(sp, "ReadOnly");
 	if (val == NULL) {
 		lu->readonly = 0;
-	} else if (strcasecmp(val, "No") == 0){
+	} else if (strcasecmp(val, "No") == 0) {
 		lu->readonly = 0;
 	} else if (strcasecmp(val, "Yes") == 0) {
 		lu->readonly = 1;
@@ -2290,7 +2290,7 @@ istgt_lu_close_connection(ISTGT_LU_Ptr lu, INITIATOR_GROUP *igp_new)
 	CONN_Ptr conn;
 	int i, j, found;
 
-	if (igp_new == NULL){
+	if (igp_new == NULL) {
 		return (-1);
 	}
 	for (i = 0; i < igp_new->ninitiators; i++) {
@@ -2392,7 +2392,7 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 			ISTGT_NOTICELOG("initiator grp updated with new value %d\n", igp_new->tag);
 			rc = istgt_lu_close_connection(lu, igp_new);
 			MTX_UNLOCK(&lu->istgt->mutex);
-			if (rc < 0){
+			if (rc < 0) {
 				/* handle the error */
 				ISTGT_ERRLOG("Unable to close Unauthorised connections for LU%d\n", lu->num);
 				goto error_out;
@@ -4388,7 +4388,7 @@ luworker(void *arg)
 		MTX_LOCK(&spec->luworker_mutex[tind]);
 		if (likely(spec->inflight_io[tind] == NULL)) {
 			MTX_LOCK(&spec->schdler_mutex);
-			if (likely(BGET32(spec->lu_free_matrix[(tind >> 5)], (tind & 31)) == 0)){
+			if (likely(BGET32(spec->lu_free_matrix[(tind >> 5)], (tind & 31)) == 0)) {
 				BSET32(spec->lu_free_matrix[(tind >> 5)], (tind & 31));
 				pthread_cond_signal(&spec->schdler_cond);
 			} else {
@@ -4701,7 +4701,7 @@ next_lu_worker:
 			lu_task->conn->inflight++;
 			lu_task->lu_cmd.flags |= ISTGT_SCHEDULED;
 			MTX_UNLOCK(&spec->complete_queue_mutex);
-		}else {
+		} else {
 			spec->error_count++;
 			istgt_queue_enqueue_first(&spec->cmd_queue, lu_task);
 			MTX_UNLOCK(&spec->complete_queue_mutex);
@@ -4717,7 +4717,7 @@ next_lu_worker:
 		spec->inflight++;
 		BUNSET32(spec->lu_free_matrix[(worker_id >> 5)], (worker_id&31));
 		MTX_UNLOCK(&spec->schdler_mutex);
-		if (spec->luworker_waiting[worker_id]){
+		if (spec->luworker_waiting[worker_id]) {
 			MTX_UNLOCK(&spec->luworker_mutex[worker_id]);
 			pthread_cond_signal(&spec->luworker_cond[worker_id]);
 		} else {
