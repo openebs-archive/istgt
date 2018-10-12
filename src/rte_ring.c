@@ -124,8 +124,7 @@ rte_ring_init(struct rte_ring *r, const char *name, unsigned count,
 		r->capacity = count;
 	} else {
 		if ((!POWEROF2(count)) || (count > RTE_RING_SZ_MASK)) {
-			printf("Requested size is invalid, must be power of 2,
-				and not exceed the size limit %u\n",
+			printf("Requested size is invalid, must be power of 2, and not exceed the size limit %u\n",
 				RTE_RING_SZ_MASK);
 			return (-EINVAL);
 		}
