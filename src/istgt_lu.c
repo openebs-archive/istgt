@@ -561,7 +561,7 @@ istgt_lu_find_target_by_volname(ISTGT_Ptr istgt, const char *volname)
 	ISTGT_WARNLOG("can't find target %s\n",
 	    volname);
 	return NULL;
-} 
+}
 
 ISTGT_LU_Ptr
 istgt_lu_find_target(ISTGT_Ptr istgt, const char *target_name)
@@ -757,7 +757,7 @@ istgt_lu_get_devsize(const char *file)
 	rc = stat(file, &st);
 #else
 	rc = lstat(file, &st);
-#endif /* ALLOW_SYMLINK_DEVICE */ 
+#endif /* ALLOW_SYMLINK_DEVICE */
 	if (rc != 0)
 		return val;
 	if (!S_ISCHR(st.st_mode) && !S_ISBLK(st.st_mode))
@@ -765,7 +765,7 @@ istgt_lu_get_devsize(const char *file)
 
 	fd = open(file, O_RDONLY, 0);
 	if (fd >= 0) {
-#ifdef DIOCGMEDIASIZE 
+#ifdef DIOCGMEDIASIZE
 		if (val == 0) {
 			off_t offset;
 			rc = ioctl(fd, DIOCGMEDIASIZE, &offset);
@@ -1631,7 +1631,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	} else if (strcasecmp(val, "Yes") == 0) {
 		lu->readonly = 1;
 	}
-	
+
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "ReadOnly %s\n",
 	    lu->readonly ? "Yes" : "No");
 #ifdef REPLICATION
@@ -1827,7 +1827,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	lu->luworkersActive = 0;
 	lu->conns = 0;
 	lu->limit_q_size = 0;
- 
+
  	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "BlockLength %d, PhysRecordLength %d, QueueDepth %d\n",
  	    lu->blocklen, lu->recordsize, lu->queue_depth);
 
@@ -2289,7 +2289,7 @@ istgt_lu_close_connection(ISTGT_LU_Ptr lu, INITIATOR_GROUP *igp_new)
 {
 	CONN_Ptr conn;
 	int i,j,found;
-	
+
 	if (igp_new == NULL){
 		return -1;
 	}
@@ -2321,7 +2321,7 @@ istgt_lu_close_connection(ISTGT_LU_Ptr lu, INITIATOR_GROUP *igp_new)
 				}
 			}
 		}
-	
+
 	return 0;
 }
 
@@ -2399,7 +2399,7 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 			}
 			lu->map[i].ig_tag = ig_tag_i_new;
 			lu->maxmap = i + 1;
-			
+
 
 		}
 	}
@@ -2778,7 +2778,7 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 		/* update the quota */
 		if ((storagechange != 0) && (lu->lun[i].type == ISTGT_LU_LUN_TYPE_STORAGE)) {
 			ISTGT_NOTICELOG("LU%d: LUN%d: UPD Storage:%s, size=%lu rsz=%u rpm:%d %s%s%s%s%s%s%s%s\n",
-					lu->num, i, lu->lun[i].u.storage.file, lu->lun[i].u.storage.size, 
+					lu->num, i, lu->lun[i].u.storage.file, lu->lun[i].u.storage.size,
 					lu->lun[i].u.storage.rsize, lu->lun[i].rotationrate,
 					lu->lun[i].readcache ? "" : "RCD",
 					lu->lun[i].writecache ? " WCE" : "",
@@ -3340,7 +3340,7 @@ istgt_lu_reload_update(ISTGT_Ptr istgt)
 		xfree(lu);
 		istgt->logical_unit[sp->num] = NULL;
 		MTX_UNLOCK(&istgt->mutex);
-	
+
 	skip_lu:
 		sp = sp->next;
 	}
@@ -3398,7 +3398,7 @@ istgt_lu_create_thread(ISTGT_Ptr istgt, ISTGT_LU_Ptr lu)
 		ISTGT_ERRLOG("pthread_create() failed ,lun %d, rc = %d\n",
                 	lu->num, rc );
 		return -1;
-	}	
+	}
 
 	if (lu->queue_depth != 0) {
 		ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "thread for LU%d\n", lu->num);
@@ -3421,7 +3421,7 @@ istgt_lu_create_thread(ISTGT_Ptr istgt, ISTGT_LU_Ptr lu)
 		ISTGT_ERRLOG("pthread_create() failed for maintenance thread ,lun %d, rc = %d\n",
                 	lu->num, rc );
 		return -1;
-	}	
+	}
 
 	return 0;
 }
@@ -4151,7 +4151,7 @@ maintenance_io_worker(void *arg)
 		tind = i;
 		snprintf(tinfo, sizeof tinfo, "mt#%d.%ld.%d", lu->num, (uint64_t)(((uint64_t *)self)[0]), i);
 		pthread_set_name_np(lu->maintenance_thread, tinfo);
-		for (j = 0; j< lu->maxlun; j++) { 
+		for (j = 0; j< lu->maxlun; j++) {
 			spec = (ISTGT_LU_DISK *) lu->lun[j].spec;
 			spec->inflight_io[i] = NULL;
 		}
@@ -4196,7 +4196,7 @@ maintenance_io_worker(void *arg)
 			if (lu_num >= lu->maxlun) {
 				lu_num = 0;
 			}
-                
+
 			spec = (ISTGT_LU_DISK *) lu->lun[lu_num].spec;
 			MTX_LOCK(&spec->complete_queue_mutex);
 again:
@@ -4282,7 +4282,7 @@ again:
 					else {
 						MTX_UNLOCK(&spec->complete_queue_mutex);
 						sleep(1);
-						if (istgt_lu_get_state(lu) != ISTGT_STATE_RUNNING) 
+						if (istgt_lu_get_state(lu) != ISTGT_STATE_RUNNING)
 							goto loop_exit;
 					}
 				}
@@ -4362,7 +4362,7 @@ luworker(void *arg)
 			tind = i;
 			snprintf(tinfo, sizeof tinfo, "l#%d.%ld.%d", lu->num, (uint64_t)(((uint64_t *)self)[0]), i);
 			pthread_set_name_np(lu->luthread[i], tinfo);
-			for (j = 0; j< lu->maxlun; j++) { 
+			for (j = 0; j< lu->maxlun; j++) {
 				spec = (ISTGT_LU_DISK *) lu->lun[j].spec;
 				spec->inflight_io[i] = NULL;
 			}
@@ -4382,14 +4382,14 @@ luworker(void *arg)
 
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "LU%d loop start\n", lu->num);
 	lu_num = 0;
-	for (j = 0; j< lu->maxlun; j++) { 
+	for (j = 0; j< lu->maxlun; j++) {
 		spec = (ISTGT_LU_DISK *) lu->lun[j].spec;
 		MTX_LOCK(&spec->luworker_mutex[tind]);
 		if ( likely(spec->inflight_io[tind] == NULL)) {
 			MTX_LOCK(&spec->schdler_mutex);
-			if( likely(BGET32(spec->lu_free_matrix[(tind >> 5)], (tind & 31)) == 0)){ 
+			if( likely(BGET32(spec->lu_free_matrix[(tind >> 5)], (tind & 31)) == 0)){
 				BSET32(spec->lu_free_matrix[(tind >> 5)], (tind & 31));
-				pthread_cond_signal(&spec->schdler_cond);		
+				pthread_cond_signal(&spec->schdler_cond);
 			} else {
 				spec->error_count++;
 				ISTGT_ERRLOG("LU%d: Error thread %d\n", lu->num, tind);
@@ -4442,14 +4442,14 @@ luworker(void *arg)
 			if (lu_num >= lu->maxlun) {
 				lu_num = 0;
 			}
-                
+
 			spec = (ISTGT_LU_DISK *) lu->lun[lu_num].spec;
 			MTX_LOCK(&spec->luworker_mutex[tind]);
 			while ( spec->inflight_io[tind] == NULL) {
 				if(unlikely(BGET32(spec->lu_free_matrix[(tind >> 5)], (tind & 31)) == 0))
 				{
 					MTX_LOCK(&spec->schdler_mutex);
-					if( BGET32(spec->lu_free_matrix[(tind >> 5)], (tind & 31)) == 0) { 
+					if( BGET32(spec->lu_free_matrix[(tind >> 5)], (tind & 31)) == 0) {
 						spec->error_count++;
 						ISTGT_ERRLOG("LU%d: Error thread %d busy\n", lu->num, tind);
 						BSET32(spec->lu_free_matrix[(tind >> 5)], (tind & 31));
@@ -4473,7 +4473,7 @@ luworker(void *arg)
 					goto loop_exit;
 				}
 				spec->luworker_waiting[tind] = 1;
-				pthread_cond_wait(&spec->luworker_cond[tind], &spec->luworker_mutex[tind]);		
+				pthread_cond_wait(&spec->luworker_cond[tind], &spec->luworker_mutex[tind]);
 				spec->luworker_waiting[tind] = 0;
 
 				if(unlikely(spec->do_avg == 1))
@@ -4486,7 +4486,7 @@ luworker(void *arg)
 				id = 17;
 				tdiff(first, second2, r);
 				MTX_UNLOCK(&spec->luworker_mutex[tind]);
-        
+
 				if (istgt_lu_get_state(lu) != ISTGT_STATE_RUNNING)
 					goto loop_exit;
 				MTX_LOCK(&spec->luworker_mutex[tind]);
@@ -4579,7 +4579,7 @@ luscheduler(void *arg)
 	}
 	while(1) {
 		/* Take the scheduler mutex lock, find if any of the luworkers are free from spec->lu_free_matrix.
- 		 * If so find the index of the least significant bit set in the spec->lu_free_matrix to get the 
+ 		 * If so find the index of the least significant bit set in the spec->lu_free_matrix to get the
  		 * luworker's id. If the all the luworkers are busy, then wait on schdler_cond variable.
  		 */
 start:
@@ -4596,7 +4596,7 @@ start:
 		ind = 0;
 		MTX_LOCK(&spec->schdler_mutex);
 		while(ind <= (ISTGT_MAX_NUM_LUWORKERS/32)) {
-			found_worker = ((spec->lu_free_matrix[ind] != 0) && 
+			found_worker = ((spec->lu_free_matrix[ind] != 0) &&
 					((lu->limit_q_size == 0) || ((ind == 0) && ((spec->lu_free_matrix[ind] & 1) == 1))))
 					? 1 : 0;
 			if (found_worker == 0) {
@@ -4618,7 +4618,7 @@ start:
 				} else
 					ind++;
 			} else {
-				break; 
+				break;
 			}
 		}
 		MTX_UNLOCK(&spec->schdler_mutex);
@@ -4638,7 +4638,7 @@ next_lu_worker:
 		clock_gettime(clockid, &sch4);
 
 		/* Try to schedule the blocked request and get the cmd_queue count,
-		 * if count is zero wait on spec->cmd_queue_cond. If count > 0, dequeue the 
+		 * if count is zero wait on spec->cmd_queue_cond. If count > 0, dequeue the
 		 * first request in the queue and assign it the luworker that is free and unset
 		 * the bit in the free_matrix
 		 */
@@ -4695,7 +4695,7 @@ next_lu_worker:
 		MTX_LOCK(&spec->luworker_mutex[worker_id]);
 		if(likely(spec->inflight_io[worker_id] == NULL)) {
 			spec->inflight_io[worker_id] = lu_task;
-			lu_task->conn->inflight++;	
+			lu_task->conn->inflight++;
 			lu_task->lu_cmd.flags |= ISTGT_SCHEDULED;
 			MTX_UNLOCK(&spec->complete_queue_mutex);
 		}else {
@@ -4709,7 +4709,7 @@ next_lu_worker:
 			else
 				continue;
 		}
-			
+
 		MTX_LOCK(&spec->schdler_mutex);
 		spec->inflight++;
 		BUNSET32(spec->lu_free_matrix[(worker_id >> 5)], (worker_id&31));
@@ -4728,4 +4728,3 @@ next_lu_worker:
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "scheduler loop ended\n");
 	return NULL;
 }
-
