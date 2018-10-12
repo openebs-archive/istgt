@@ -2576,7 +2576,7 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 				}
 
 				if (old_size == new_size && new_rsize == old_rsize &&
-					spec != NULL &&  strcasecmp(file, spec->file) == 0)
+					spec != NULL && strcasecmp(file, spec->file) == 0)
 					continue;
 
 				lu->lun[i].u.storage.size = new_size;
