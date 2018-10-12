@@ -211,7 +211,7 @@ istgt_connection_status(CONN_Ptr conn, const char *status)
 	FILE *fp;
 	char *logfile = NULL;
 	time_t current_time;
-	char* c_time_string;
+	char *c_time_string;
 	char *time_val;
 
 	/* Obtain current time as seconds elapsed since the Epoch. */
@@ -602,7 +602,7 @@ istgt_lu_add_nexus(ISTGT_LU_Ptr lu, char *initiator_port)
 }
 
 int
-istgt_lu_remove_nexus(ISTGT_LU_Ptr lu, char* initiator_port)
+istgt_lu_remove_nexus(ISTGT_LU_Ptr lu, char *initiator_port)
 {
 	int lun = 0, rc = 0;
 
