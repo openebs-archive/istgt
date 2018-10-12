@@ -94,7 +94,7 @@ istgt_lu_allow_ipv6(const char *netmask, const char *addr)
 	if (p == NULL)
 		return (0);
 	n = p - (netmask + 1);
-	if (n + 1 > sizeof mask)
+	if (n + 1 > sizeof (mask))
 		return (0);
 
 	memcpy(mask, netmask + 1, n);
@@ -151,7 +151,7 @@ istgt_lu_allow_ipv4(const char *netmask, const char *addr)
 		p = netmask + strlen(netmask);
 	}
 	n = p - netmask;
-	if (n + 1 > sizeof mask)
+	if (n + 1 > sizeof (mask))
 		return (0);
 
 	memcpy(mask, netmask, n);
@@ -505,13 +505,13 @@ istgt_lu_sendtargets(CONN_Ptr conn, const char *iiqn, const char *iaddr, const c
 						if ((strcasecmp(host, "[::]") == 0
 							|| strcasecmp(host, "[*]") == 0)
 						    && conn->initiator_family == AF_INET6) {
-							snprintf(buf, sizeof buf, "[%s]",
+							snprintf(buf, sizeof (buf), "[%s]",
 							    conn->target_addr);
 							host = buf;
 						} else if ((strcasecmp(host, "0.0.0.0") == 0
 							|| strcasecmp(host, "*") == 0)
 						    && conn->initiator_family == AF_INET) {
-							snprintf(buf, sizeof buf, "%s",
+							snprintf(buf, sizeof (buf), "%s",
 							    conn->target_addr);
 							host = buf;
 						} else {
@@ -1097,7 +1097,7 @@ istgt_lu_get_nbserial(const char *nodebase)
 	int idx;
 	int i;
 
-	snprintf(buf, sizeof buf, "%s", nodebase);
+	snprintf(buf, sizeof (buf), "%s", nodebase);
 	if (strcasecmp(buf, "iqn.2007-09.jp.ne.peach.istgt") == 0
 	    || strcasecmp(buf, "iqn.2007-09.jp.ne.peach") == 0) {
 		/* always zero */
@@ -1403,8 +1403,8 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 		return (-1);
 	}
 
-	lu = xmalloc(sizeof *lu);
-	memset(lu, 0, sizeof *lu);
+	lu = xmalloc(sizeof (*lu));
+	memset(lu, 0, sizeof (*lu));
 	lu->num = sp->num;
 	lu->istgt = istgt;
 	lu->state = ISTGT_STATE_INVALID;
@@ -1430,9 +1430,9 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	if (strncasecmp(val, "iqn.", 4) != 0
 		&& strncasecmp(val, "eui.", 4) != 0
 		&& strncasecmp(val, "naa.", 4) != 0) {
-		snprintf(buf, sizeof buf, "%s:%s", istgt->nodebase, val);
+		snprintf(buf, sizeof (buf), "%s:%s", istgt->nodebase, val);
 	} else {
-		snprintf(buf, sizeof buf, "%s", val);
+		snprintf(buf, sizeof (buf), "%s", val);
 	}
 	if (istgt_lu_check_iscsi_name(buf) != 0) {
 		ISTGT_ERRLOG("TargetName %s contains an invalid character or format.\n",
@@ -1710,7 +1710,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 		if (revision == NULL || strlen(revision) == 0)
 			revision = DEFAULT_LU_REVISION_DISK;
 		if (serial == NULL || strlen(serial) == 0) {
-			snprintf(buf, sizeof buf, "%.8d", 10000000 + nbs + lu->num);
+			snprintf(buf, sizeof (buf), "%.8d", 10000000 + nbs + lu->num);
 			serial = (const char *) &buf[0];
 		}
 		break;
@@ -1722,7 +1722,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 		if (revision == NULL || strlen(revision) == 0)
 			revision = DEFAULT_LU_REVISION_DVD;
 		if (serial == NULL || strlen(serial) == 0) {
-			snprintf(buf, sizeof buf, "%.8d", 10000000 + nbs + lu->num);
+			snprintf(buf, sizeof (buf), "%.8d", 10000000 + nbs + lu->num);
 			serial = (const char *) &buf[0];
 		}
 		break;
@@ -1735,9 +1735,9 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 			revision = DEFAULT_LU_REVISION_TAPE;
 		if (serial == NULL || strlen(serial) == 0) {
 #ifdef USE_LU_TAPE_DLT8000
-			snprintf(buf, sizeof buf, "CX%.8d", 10000000 + nbs + lu->num);
+			snprintf(buf, sizeof (buf), "CX%.8d", 10000000 + nbs + lu->num);
 #else
-			snprintf(buf, sizeof buf, "%.8d", 10000000 + nbs + lu->num);
+			snprintf(buf, sizeof (buf), "%.8d", 10000000 + nbs + lu->num);
 #endif /* USE_LU_TAPE_DLT8000 */
 			serial = (const char *) &buf[0];
 		}
@@ -1750,7 +1750,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 		if (revision == NULL || strlen(revision) == 0)
 			revision = DEFAULT_LU_REVISION;
 		if (serial == NULL || strlen(serial) == 0) {
-			snprintf(buf, sizeof buf, "%.8d", 10000000 + nbs + lu->num);
+			snprintf(buf, sizeof (buf), "%.8d", 10000000 + nbs + lu->num);
 			serial = (const char *) &buf[0];
 		}
 		break;
@@ -1867,13 +1867,13 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 		lu->lun[i].serial = NULL;
 		lu->lun[i].spec = NULL;
 		lu->lun[i].opt_tlen = 1;
-		snprintf(buf, sizeof buf, "LUN%d", i);
+		snprintf(buf, sizeof (buf), "LUN%d", i);
 		val = istgt_get_val(sp, buf);
 		if (val == NULL)
 			continue;
 		if (i != 0) {
 			/* default LUN serial (except LUN0) */
-			snprintf(buf2, sizeof buf2, "%sL%d", lu->inq_serial, i);
+			snprintf(buf2, sizeof (buf2), "%sL%d", lu->inq_serial, i);
 			lu->lun[i].serial = xstrdup(buf2);
 			ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "LUN%d Serial %s (default)\n",
 			    i, buf2);
@@ -2501,7 +2501,7 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "ReadOnly %s\n",
 			lu->readonly ? "Yes" : "No");
 	for (i = 0; i < MAX_LU_LUN; i++) {
-		snprintf(buf, sizeof buf, "LUN%d", i);
+		snprintf(buf, sizeof (buf), "LUN%d", i);
 		val = istgt_get_val(sp, buf);
 		if (val == NULL)
 			continue;
@@ -3679,8 +3679,8 @@ istgt_lu_create_task(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, int lun, ISTGT_LU_D
 	int rc;
 #endif
 
-	alloc_len = ISCSI_ALIGN(sizeof *lu_task);
-	alloc_len += ISCSI_ALIGN(sizeof *lu_task->lu_cmd.pdu);
+	alloc_len = ISCSI_ALIGN(sizeof (*lu_task));
+	alloc_len += ISCSI_ALIGN(sizeof *lu_task->lu_cmd.pdu); // I'm not sure if this is 'sizeof (*lu_task)->lu_cmd.pdu' or 'sizeof (*lu_task->lu_cmd.pdu)'
 
 	lu_task = xmalloc(alloc_len);
 	if (lu_task == NULL)
@@ -3754,7 +3754,7 @@ istgt_lu_create_task(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, int lun, ISTGT_LU_D
 	}
 #endif
 	lu_task->lu_cmd.pdu = (ISCSI_PDU_Ptr) ((uintptr_t)lu_task
-				            + ISCSI_ALIGN(sizeof *lu_task));
+				            + ISCSI_ALIGN(sizeof (*lu_task)));
 	// lu_task->lu_cmd.pdu = xmalloc(sizeof *lu_task->lu_cmd.pdu);
 	// memset(lu_task->lu_cmd.pdu, 0, sizeof *lu_task->lu_cmd.pdu);
 
@@ -4150,7 +4150,7 @@ maintenance_io_worker(void *arg)
 	i = lu->luworkers + 0;
 	if (lu->maintenance_thread == self) {
 		tind = i;
-		snprintf(tinfo, sizeof tinfo, "mt#%d.%ld.%d", lu->num, (uint64_t)(((uint64_t *)self)[0]), i);
+		snprintf(tinfo, sizeof (tinfo), "mt#%d.%ld.%d", lu->num, (uint64_t)(((uint64_t *)self)[0]), i);
 		pthread_set_name_np(lu->maintenance_thread, tinfo);
 		for (j = 0; j< lu->maxlun; j++) {
 			spec = (ISTGT_LU_DISK *) lu->lun[j].spec;
@@ -4361,7 +4361,7 @@ luworker(void *arg)
 	for (i= 0; i < lu->luworkers; i++ ) {
 		if (lu->luthread[i] == self) {
 			tind = i;
-			snprintf(tinfo, sizeof tinfo, "l#%d.%ld.%d", lu->num, (uint64_t)(((uint64_t *)self)[0]), i);
+			snprintf(tinfo, sizeof (tinfo), "l#%d.%ld.%d", lu->num, (uint64_t)(((uint64_t *)self)[0]), i);
 			pthread_set_name_np(lu->luthread[i], tinfo);
 			for (j = 0; j< lu->maxlun; j++) {
 				spec = (ISTGT_LU_DISK *) lu->lun[j].spec;
@@ -4566,7 +4566,7 @@ luscheduler(void *arg)
 
 
 	pthread_t sf = pthread_self();
-	snprintf(tinfo, sizeof tinfo, "sh#%d.%ld.%d", lu->num, (uint64_t)(((uint64_t *)sf)[0]), 0);
+	snprintf(tinfo, sizeof (tinfo), "sh#%d.%ld.%d", lu->num, (uint64_t)(((uint64_t *)sf)[0]), 0);
 	pthread_set_name_np(lu->schdler_thread, tinfo);
 	while (istgt_get_state(lu->istgt) != ISTGT_STATE_RUNNING) {
 		if (istgt_get_state(lu->istgt) == ISTGT_STATE_EXITING
