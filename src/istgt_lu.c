@@ -223,7 +223,7 @@ istgt_connection_status(CONN_Ptr conn, const char *status)
 	MTX_LOCK(&conn->istgt->mutex);
 	logfile = xstrdup(conn->istgt->logfile);
 	MTX_UNLOCK(&conn->istgt->mutex);
-	fp = fopen (logfile, "a");
+	fp = fopen(logfile, "a");
 	if (fp == NULL) {
 		xfree(logfile);
 		fprintf(stderr, "Cannot open the file %s \n", logfile);
