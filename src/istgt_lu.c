@@ -2387,7 +2387,7 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 			igp_old = istgt_lu_find_initiatorgroup(lu->istgt, lu->map[i].ig_tag);
 			if (igp_old == NULL) {
                                ISTGT_NOTICELOG("LU%d: InitiatoGroup%d not found\n",
-					lu->num, lu->map[i].ig_tag );
+					lu->num, lu->map[i].ig_tag);
 			}
 			ISTGT_NOTICELOG("initiator grp updated with new value %d\n", igp_new->tag);
 			rc = istgt_lu_close_connection(lu, igp_new);
@@ -3396,19 +3396,19 @@ istgt_lu_create_thread(ISTGT_Ptr istgt, ISTGT_LU_Ptr lu)
                         (void *)lu);
 	if (rc != 0) {
 		ISTGT_ERRLOG("pthread_create() failed ,lun %d, rc = %d\n",
-                	lu->num, rc );
+                	lu->num, rc);
 		return (-1);
 	}
 
 	if (lu->queue_depth != 0) {
 		ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "thread for LU%d\n", lu->num);
 		/* create LU thread */
-		for ( i=0; i < lu->luworkers; i++ ) {
+		for (i=0; i < lu->luworkers; i++) {
 			rc = pthread_create(&lu->luthread[i], &istgt->attr, &luworker,
                                             (void *)lu);
 			if (rc != 0) {
 				ISTGT_ERRLOG("pthread_create() failed for thread %d, lun %d, rc = %d\n",
-                                              i, lu->num, rc );
+                                              i, lu->num, rc);
 				return (-1);
 			}
 			++lu->luworkersActive;
@@ -3419,7 +3419,7 @@ istgt_lu_create_thread(ISTGT_Ptr istgt, ISTGT_LU_Ptr lu)
                         (void *)lu);
 	if (rc != 0) {
 		ISTGT_ERRLOG("pthread_create() failed for maintenance thread ,lun %d, rc = %d\n",
-                	lu->num, rc );
+                	lu->num, rc);
 		return (-1);
 	}
 
@@ -4185,8 +4185,8 @@ maintenance_io_worker(void *arg)
 		if (lu->type != ISTGT_LU_TYPE_DISK)
 			break;
 		while (1) {
-			while ( (retry_runningstate_count < ISTGT_MAX_LU_RUNNING_STATE_RETRY_COUNT ) &&
-						(istgt_lu_get_state(lu) == ISTGT_STATE_INITIALIZED) ) {
+			while ((retry_runningstate_count < ISTGT_MAX_LU_RUNNING_STATE_RETRY_COUNT) &&
+						(istgt_lu_get_state(lu) == ISTGT_STATE_INITIALIZED)) {
 				sleep(1);
 				retry_runningstate_count++;
 			}
@@ -4218,7 +4218,7 @@ again:
 				}
 				if ((qcnt = istgt_queue_count(&spec->maint_cmd_queue)) == 0)
 					istgt_schedule_blocked_requests(spec, &spec->maint_cmd_queue, &spec->maint_blocked_queue, 1); // 1 for maintenance queues
-				if (((qcnt = istgt_queue_count(&spec->maint_cmd_queue)) == 0) && (spec->disk_modify_work_pending == 0) && (!(spec->rsv_pending & ISTGT_RSV_READ)) )
+				if (((qcnt = istgt_queue_count(&spec->maint_cmd_queue)) == 0) && (spec->disk_modify_work_pending == 0) && (!(spec->rsv_pending & ISTGT_RSV_READ)))
 				{
 					spec->maint_thread_waiting = 1;
 					pthread_cond_wait(&spec->maint_cmd_queue_cond, &spec->complete_queue_mutex);
@@ -4230,7 +4230,7 @@ again:
 						goto loop_exit;
 					}
 				}
-			} while (( (qcnt = istgt_queue_count(&spec->maint_cmd_queue)) == 0) && (spec->disk_modify_work_pending == 0) && (!(spec->rsv_pending & ISTGT_RSV_READ)));
+			} while (((qcnt = istgt_queue_count(&spec->maint_cmd_queue)) == 0) && (spec->disk_modify_work_pending == 0) && (!(spec->rsv_pending & ISTGT_RSV_READ)));
 
 			if (unlikely(spec->disk_modify_work_pending == 1))
 			{
@@ -4358,7 +4358,7 @@ luworker(void *arg)
 }
 
 	pthread_t self = pthread_self();
-	for (i= 0; i < lu->luworkers; i++ ) {
+	for (i= 0; i < lu->luworkers; i++) {
 		if (lu->luthread[i] == self) {
 			tind = i;
 			snprintf(tinfo, sizeof (tinfo), "l#%d.%ld.%d", lu->num, (uint64_t)(((uint64_t *)self)[0]), i);
@@ -4386,9 +4386,9 @@ luworker(void *arg)
 	for (j = 0; j< lu->maxlun; j++) {
 		spec = (ISTGT_LU_DISK *) lu->lun[j].spec;
 		MTX_LOCK(&spec->luworker_mutex[tind]);
-		if ( likely(spec->inflight_io[tind] == NULL)) {
+		if (likely(spec->inflight_io[tind] == NULL)) {
 			MTX_LOCK(&spec->schdler_mutex);
-			if ( likely(BGET32(spec->lu_free_matrix[(tind >> 5)], (tind & 31)) == 0)){
+			if (likely(BGET32(spec->lu_free_matrix[(tind >> 5)], (tind & 31)) == 0)){
 				BSET32(spec->lu_free_matrix[(tind >> 5)], (tind & 31));
 				pthread_cond_signal(&spec->schdler_cond);
 			} else {
@@ -4428,8 +4428,8 @@ luworker(void *arg)
 				 * RUNNING state, bail
 				 */
 			clock_gettime(clockid, &first);
-			while ( (retry_runningstate_count < ISTGT_MAX_LU_RUNNING_STATE_RETRY_COUNT ) &&
-						(istgt_lu_get_state(lu) == ISTGT_STATE_INITIALIZED) ) {
+			while ((retry_runningstate_count < ISTGT_MAX_LU_RUNNING_STATE_RETRY_COUNT) &&
+						(istgt_lu_get_state(lu) == ISTGT_STATE_INITIALIZED)) {
 				sleep(1);
 				retry_runningstate_count++;
 			}
@@ -4446,11 +4446,11 @@ luworker(void *arg)
 
 			spec = (ISTGT_LU_DISK *) lu->lun[lu_num].spec;
 			MTX_LOCK(&spec->luworker_mutex[tind]);
-			while ( spec->inflight_io[tind] == NULL) {
+			while (spec->inflight_io[tind] == NULL) {
 				if (unlikely(BGET32(spec->lu_free_matrix[(tind >> 5)], (tind & 31)) == 0))
 				{
 					MTX_LOCK(&spec->schdler_mutex);
-					if ( BGET32(spec->lu_free_matrix[(tind >> 5)], (tind & 31)) == 0) {
+					if (BGET32(spec->lu_free_matrix[(tind >> 5)], (tind & 31)) == 0) {
 						spec->error_count++;
 						ISTGT_ERRLOG("LU%d: Error thread %d busy\n", lu->num, tind);
 						BSET32(spec->lu_free_matrix[(tind >> 5)], (tind & 31));
@@ -4585,8 +4585,8 @@ luscheduler(void *arg)
  		 * luworker's id. If the all the luworkers are busy, then wait on schdler_cond variable.
  		 */
 start:
-		while ( (retry_runningstate_count < ISTGT_MAX_LU_RUNNING_STATE_RETRY_COUNT ) &&
-				(istgt_lu_get_state(lu) == ISTGT_STATE_INITIALIZED) ) {
+		while ((retry_runningstate_count < ISTGT_MAX_LU_RUNNING_STATE_RETRY_COUNT) &&
+				(istgt_lu_get_state(lu) == ISTGT_STATE_INITIALIZED)) {
 			sleep(1);
 			retry_runningstate_count++;
 		}
