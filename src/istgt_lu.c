@@ -1662,7 +1662,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "ConsistencyFactor %d\n",
 	    lu->consistency_factor);
 
-	if(lu->replication_factor <= 0 || lu->consistency_factor <= 0 ||
+	if (lu->replication_factor <= 0 || lu->consistency_factor <= 0 ||
 		lu->replication_factor < lu->consistency_factor) {
 		ISTGT_ERRLOG("Invalid ReplicationFactor/ConsistencyFactor or their ratio\n");
 		goto error_return;
@@ -2293,7 +2293,7 @@ istgt_lu_close_connection(ISTGT_LU_Ptr lu, INITIATOR_GROUP *igp_new)
 	if (igp_new == NULL){
 		return (-1);
 	}
-	for(i = 0; i < igp_new->ninitiators; i++) {
+	for (i = 0; i < igp_new->ninitiators; i++) {
 		if (strcasecmp(igp_new->initiators[i], "ALL") == 0)
 			return (0);
 	}
@@ -2305,7 +2305,7 @@ istgt_lu_close_connection(ISTGT_LU_Ptr lu, INITIATOR_GROUP *igp_new)
 				conn = istgt_find_conn(lu->tsih[j].initiator_port, lu->name, lu->tsih[j].tsih);
 				if (conn == NULL)
 					continue;
-				for(i = 0; i < igp_new->ninitiators; i++) {
+				for (i = 0; i < igp_new->ninitiators; i++) {
 					if (igp_new->initiators[i] == NULL)
 						continue;
 					if (strcasecmp(igp_new->initiators[i], conn->initiator_name) == 0) {
@@ -2505,7 +2505,7 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 		val = istgt_get_val(sp, buf);
 		if (val == NULL)
 			continue;
-		if(lu->lun[i].spec == NULL)
+		if (lu->lun[i].spec == NULL)
 			continue;
 		spec = lu->lun[i].spec;
 		storagechange = 0;
@@ -2790,7 +2790,7 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 					lu->lun[i].wzero ? " WZERO" : ""
 					);
 
-			if(lu->istgt->OperationalMode) {
+			if (lu->istgt->OperationalMode) {
 				clock_gettime(clockid, &spec->close_started);
 				rc = istgt_lu_disk_close(lu, i);
 			} else {
@@ -3714,7 +3714,7 @@ istgt_lu_create_task(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, int lun, ISTGT_LU_D
 		lu_task->lu_cmd.caller[i] = lu_cmd->caller[i];
 		lu_task->lu_cmd.line[i] = lu_cmd->line[i];
 	}
-	for(; i < _PSZ;i++) {
+	for (; i < _PSZ;i++) {
 		lu_task->lu_cmd.times[i].tv_sec = 0;
 		lu_task->lu_cmd.times[i].tv_nsec = 0;
 		lu_task->lu_cmd.caller[i] = 0;
@@ -3818,7 +3818,7 @@ istgt_lu_create_task(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, int lun, ISTGT_LU_D
 	lu_task->lblen = 0;
 	lu_task->lbE = 0;
 
-	switch(cdb[0]) {
+	switch (cdb[0]) {
 		case SBC_READ_6:
 		case SBC_WRITE_6:
 			lu_task->lba   = (uint64_t) (DGET24(&cdb[1]) & 0x001fffffU);
@@ -4147,7 +4147,7 @@ maintenance_io_worker(void *arg)
 	pthread_t self = pthread_self();
 
 	i = lu->luworkers + 0;
-	if(lu->maintenance_thread == self) {
+	if (lu->maintenance_thread == self) {
 		tind = i;
 		snprintf(tinfo, sizeof tinfo, "mt#%d.%ld.%d", lu->num, (uint64_t)(((uint64_t *)self)[0]), i);
 		pthread_set_name_np(lu->maintenance_thread, tinfo);
@@ -4206,18 +4206,18 @@ again:
 					MTX_UNLOCK(&spec->complete_queue_mutex);
 					goto loop_exit;
 				}
-				if(spec->schdler_cmd_waiting == 1)
+				if (spec->schdler_cmd_waiting == 1)
 				{
-					if(unlikely((qcnt = istgt_queue_count(&spec->cmd_queue)) != 0))
+					if (unlikely((qcnt = istgt_queue_count(&spec->cmd_queue)) != 0))
 						pthread_cond_signal(&spec->cmd_queue_cond);
 					else
 						istgt_schedule_blocked_requests(spec, &spec->cmd_queue, &spec->blocked_queue, 0);//0 for command queues
-					if((qcnt = istgt_queue_count(&spec->cmd_queue)) != 0)
+					if ((qcnt = istgt_queue_count(&spec->cmd_queue)) != 0)
 						pthread_cond_signal(&spec->cmd_queue_cond);
 				}
-				if((qcnt = istgt_queue_count(&spec->maint_cmd_queue)) == 0)
+				if ((qcnt = istgt_queue_count(&spec->maint_cmd_queue)) == 0)
 					istgt_schedule_blocked_requests(spec, &spec->maint_cmd_queue, &spec->maint_blocked_queue, 1);//1 for maintenance queues
-				if(((qcnt = istgt_queue_count(&spec->maint_cmd_queue)) == 0) && (spec->disk_modify_work_pending == 0) && (!(spec->rsv_pending & ISTGT_RSV_READ)) )
+				if (((qcnt = istgt_queue_count(&spec->maint_cmd_queue)) == 0) && (spec->disk_modify_work_pending == 0) && (!(spec->rsv_pending & ISTGT_RSV_READ)) )
 				{
 					spec->maint_thread_waiting = 1;
 					pthread_cond_wait(&spec->maint_cmd_queue_cond, &spec->complete_queue_mutex);
@@ -4231,7 +4231,7 @@ again:
 				}
 			} while (( (qcnt = istgt_queue_count(&spec->maint_cmd_queue)) == 0) && (spec->disk_modify_work_pending == 0) && (!(spec->rsv_pending & ISTGT_RSV_READ)));
 
-			if(unlikely(spec->disk_modify_work_pending == 1))
+			if (unlikely(spec->disk_modify_work_pending == 1))
 			{
 				MTX_UNLOCK(&spec->complete_queue_mutex);
 				do_open = 0; do_close = 0;
@@ -4256,7 +4256,7 @@ again:
 					spec->disk_modify_work_pending = 0;
 				else {
 					lu_task = istgt_queue_dequeue(&spec->maint_cmd_queue);
-					if(lu_task != NULL) {
+					if (lu_task != NULL) {
 						goto execute_task;
 					}
 					else {
@@ -4270,13 +4270,13 @@ again:
 			}
 			MTX_UNLOCK(&spec->complete_queue_mutex);
 			MTX_LOCK(&spec->pr_rsv_mutex);
-			if(unlikely(spec->rsv_pending & ISTGT_RSV_READ)) {
+			if (unlikely(spec->rsv_pending & ISTGT_RSV_READ)) {
 				MTX_UNLOCK(&spec->pr_rsv_mutex);
 				rc = istgt_lu_disk_post_open(spec);
 				if (rc != 0) {
 					MTX_LOCK(&spec->complete_queue_mutex);
 					lu_task = istgt_queue_dequeue(&spec->maint_cmd_queue);
-					if(lu_task != NULL) {
+					if (lu_task != NULL) {
 						goto execute_task;
 					}
 					else {
@@ -4293,7 +4293,7 @@ again:
 				MTX_UNLOCK(&spec->pr_rsv_mutex);
 			MTX_LOCK(&spec->complete_queue_mutex);
 			lu_task = istgt_queue_dequeue(&spec->maint_cmd_queue);
-			if(lu_task == NULL) {
+			if (lu_task == NULL) {
 				goto again;
 			}
 execute_task:
@@ -4337,7 +4337,7 @@ luworker(void *arg)
 	oldtime.tv_sec = 0;
 	oldtime.tv_nsec = 0;
 #define	tdiff(_s, _n, _r) {                     \
-	if(unlikely(spec->do_avg == 1))	\
+	if (unlikely(spec->do_avg == 1))	\
 	{	\
         	if ((_n.tv_nsec - _s.tv_nsec) < 0) {        \
                 	_r.tv_sec  = _n.tv_sec - _s.tv_sec-1;   \
@@ -4387,7 +4387,7 @@ luworker(void *arg)
 		MTX_LOCK(&spec->luworker_mutex[tind]);
 		if ( likely(spec->inflight_io[tind] == NULL)) {
 			MTX_LOCK(&spec->schdler_mutex);
-			if( likely(BGET32(spec->lu_free_matrix[(tind >> 5)], (tind & 31)) == 0)){
+			if ( likely(BGET32(spec->lu_free_matrix[(tind >> 5)], (tind & 31)) == 0)){
 				BSET32(spec->lu_free_matrix[(tind >> 5)], (tind & 31));
 				pthread_cond_signal(&spec->schdler_cond);
 			} else {
@@ -4446,10 +4446,10 @@ luworker(void *arg)
 			spec = (ISTGT_LU_DISK *) lu->lun[lu_num].spec;
 			MTX_LOCK(&spec->luworker_mutex[tind]);
 			while ( spec->inflight_io[tind] == NULL) {
-				if(unlikely(BGET32(spec->lu_free_matrix[(tind >> 5)], (tind & 31)) == 0))
+				if (unlikely(BGET32(spec->lu_free_matrix[(tind >> 5)], (tind & 31)) == 0))
 				{
 					MTX_LOCK(&spec->schdler_mutex);
-					if( BGET32(spec->lu_free_matrix[(tind >> 5)], (tind & 31)) == 0) {
+					if ( BGET32(spec->lu_free_matrix[(tind >> 5)], (tind & 31)) == 0) {
 						spec->error_count++;
 						ISTGT_ERRLOG("LU%d: Error thread %d busy\n", lu->num, tind);
 						BSET32(spec->lu_free_matrix[(tind >> 5)], (tind & 31));
@@ -4457,7 +4457,7 @@ luworker(void *arg)
 					MTX_UNLOCK(&spec->schdler_mutex);
 				}
 				clock_gettime(clockid, &first);
-				if(unlikely(spec->do_avg == 1))
+				if (unlikely(spec->do_avg == 1))
 				{
 		                	spec->avgs[8].count++;
 			                spec->avgs[9].count++;
@@ -4476,7 +4476,7 @@ luworker(void *arg)
 				pthread_cond_wait(&spec->luworker_cond[tind], &spec->luworker_mutex[tind]);
 				spec->luworker_waiting[tind] = 0;
 
-				if(unlikely(spec->do_avg == 1))
+				if (unlikely(spec->do_avg == 1))
 				{
 		                	spec->avgs[8].tot_nsec += istgt_queue_count(&spec->cmd_queue);
 			                spec->avgs[9].tot_nsec += istgt_queue_count(&spec->blocked_queue);
@@ -4494,7 +4494,7 @@ luworker(void *arg)
 			lu_task = spec->inflight_io[tind];
 			MTX_UNLOCK(&spec->luworker_mutex[tind]);
 
-			if(unlikely(lu->limit_q_size != 0 &&
+			if (unlikely(lu->limit_q_size != 0 &&
 				tind == 0))
 				usleep(50000); //50ms
 
@@ -4514,7 +4514,7 @@ luworker(void *arg)
 			clock_gettime(clockid, &now1);
 			id = 12;
 			tdiff(third, now1, r);
-			if(oldtimeset == 1)
+			if (oldtimeset == 1)
 			{
 				id = 13;
 				tdiff(oldtime, third, r);
@@ -4544,7 +4544,7 @@ luscheduler(void *arg)
 	int id, found_worker = 0;
 	unsigned long secs, nsecs;
 #define	tdiff(_s, _n, _r) {                     \
-	if(unlikely(spec->do_avg == 1))	\
+	if (unlikely(spec->do_avg == 1))	\
 	{	\
                 if ((_n.tv_nsec - _s.tv_nsec) < 0) {        \
                         _r.tv_sec  = _n.tv_sec - _s.tv_sec-1;   \
@@ -4577,7 +4577,7 @@ luscheduler(void *arg)
 		sleep(1);
 		continue;
 	}
-	while(1) {
+	while (1) {
 		/* Take the scheduler mutex lock, find if any of the luworkers are free from spec->lu_free_matrix.
  		 * If so find the index of the least significant bit set in the spec->lu_free_matrix to get the
  		 * luworker's id. If the all the luworkers are busy, then wait on schdler_cond variable.
@@ -4595,7 +4595,7 @@ start:
 		clock_gettime(clockid, &sch1);
 		ind = 0;
 		MTX_LOCK(&spec->schdler_mutex);
-		while(ind <= (ISTGT_MAX_NUM_LUWORKERS/32)) {
+		while (ind <= (ISTGT_MAX_NUM_LUWORKERS/32)) {
 			found_worker = ((spec->lu_free_matrix[ind] != 0) &&
 					((lu->limit_q_size == 0) || ((ind == 0) && ((spec->lu_free_matrix[ind] & 1) == 1))))
 					? 1 : 0;
@@ -4628,7 +4628,7 @@ next_lu_worker:
 		worker_id--; //Bits are numbered starting at 1, the least significant bit.
 		worker_id += (ind<<5);
 
-		if(worker_id >= spec->luworkers) //worker_id can't be >= luworkers
+		if (worker_id >= spec->luworkers) //worker_id can't be >= luworkers
 			goto start;
 
 		clock_gettime(clockid, &sch2);
@@ -4652,19 +4652,19 @@ next_lu_worker:
 				MTX_UNLOCK(&spec->complete_queue_mutex);
 				goto loop_exit;
 			}
-			if(spec->maint_thread_waiting == 1)
+			if (spec->maint_thread_waiting == 1)
 			{
-				if(unlikely((qcnt = istgt_queue_count(&spec->maint_cmd_queue)) != 0))
+				if (unlikely((qcnt = istgt_queue_count(&spec->maint_cmd_queue)) != 0))
 					pthread_cond_signal(&spec->maint_cmd_queue_cond);
 				else
 					istgt_schedule_blocked_requests(spec, &spec->maint_cmd_queue, &spec->maint_blocked_queue, 1);//1 for maint queues
-				if((qcnt = istgt_queue_count(&spec->maint_cmd_queue)) != 0)
+				if ((qcnt = istgt_queue_count(&spec->maint_cmd_queue)) != 0)
 					pthread_cond_signal(&spec->maint_cmd_queue_cond);
 			}
 
-			if((qcnt = istgt_queue_count(&spec->cmd_queue)) == 0)
+			if ((qcnt = istgt_queue_count(&spec->cmd_queue)) == 0)
 				istgt_schedule_blocked_requests(spec, &spec->cmd_queue, &spec->blocked_queue, 0);//0 for cmd queues
-			if((qcnt = istgt_queue_count(&spec->cmd_queue)) == 0) {
+			if ((qcnt = istgt_queue_count(&spec->cmd_queue)) == 0) {
 				spec->schdler_cmd_waiting = 1;
 				pthread_cond_wait(&spec->cmd_queue_cond, &spec->complete_queue_mutex);
 				spec->schdler_cmd_waiting = 0;
@@ -4693,7 +4693,7 @@ next_lu_worker:
 		tdiff(sch5, sch3, r);
 
 		MTX_LOCK(&spec->luworker_mutex[worker_id]);
-		if(likely(spec->inflight_io[worker_id] == NULL)) {
+		if (likely(spec->inflight_io[worker_id] == NULL)) {
 			spec->inflight_io[worker_id] = lu_task;
 			lu_task->conn->inflight++;
 			lu_task->lu_cmd.flags |= ISTGT_SCHEDULED;
@@ -4714,7 +4714,7 @@ next_lu_worker:
 		spec->inflight++;
 		BUNSET32(spec->lu_free_matrix[(worker_id >> 5)], (worker_id&31));
 		MTX_UNLOCK(&spec->schdler_mutex);
-		if(spec->luworker_waiting[worker_id]){
+		if (spec->luworker_waiting[worker_id]){
 			MTX_UNLOCK(&spec->luworker_mutex[worker_id]);
 			pthread_cond_signal(&spec->luworker_cond[worker_id]);
 		} else {
