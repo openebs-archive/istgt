@@ -172,6 +172,17 @@ istgt_uctl_snprintf(UCTL_Ptr uctl, const char *format, ...)
 }
 
 static int
+invalid_param_log(UCTL_Ptr uctl)
+{   int rc;
+   	istgt_uctl_snprintf(uctl, "ERR invalid parameters\n");
+   	rc = istgt_uctl_writeline(uctl);
+   	if (rc != UCTL_CMD_OK) {
+   			return (rc);
+   	}
+    return (UCTL_CMD_ERR);
+}
+
+static int
 istgt_uctl_get_media_present(ISTGT_LU_Ptr lu __attribute__((__unused__)),
     int lun __attribute__((__unused__)))
 {
@@ -226,12 +237,13 @@ istgt_uctl_cmd_auth(UCTL_Ptr uctl)
 	label = strsepq(&arg, delim);
 
 	if (label == NULL) {
-		istgt_uctl_snprintf(uctl, "ERR invalid parameters\n");
-		rc = istgt_uctl_writeline(uctl);
-		if (rc != UCTL_CMD_OK) {
-			return (rc);
-		}
-		return (UCTL_CMD_ERR);
+//		istgt_uctl_snprintf(uctl, "ERR invalid parameters\n");
+//		rc = istgt_uctl_writeline(uctl);
+//		if (rc != UCTL_CMD_OK) {
+//			return (rc);
+//		}
+//		return (UCTL_CMD_ERR);
+        return invalid_param_log(uctl);
 	}
 
 	if (strcasecmp(label, "CHAP_A") == 0) {
@@ -474,14 +486,15 @@ istgt_uctl_cmd_sync(UCTL_Ptr uctl)
 	arg = uctl->arg;
 	iqn = strsepq(&arg, delim);
 	lun = strsepq(&arg, delim);
-
+    
 	if (iqn == NULL || arg != NULL) {
-		istgt_uctl_snprintf(uctl, "ERR invalid parameters\n");
-		rc = istgt_uctl_writeline(uctl);
-		if (rc != UCTL_CMD_OK) {
-			return (rc);
-		}
-		return (UCTL_CMD_ERR);
+//		istgt_uctl_snprintf(uctl, "ERR invalid parameters\n");
+//		rc = istgt_uctl_writeline(uctl);
+//		if (rc != UCTL_CMD_OK) {
+//			return (rc);
+//		}
+//		return (UCTL_CMD_ERR);
+        return invalid_param_log(uctl);
 	}
 	if (lun == NULL) {
 		lun_i = 0;
@@ -1026,12 +1039,13 @@ istgt_uctl_cmd_persist(UCTL_Ptr uctl)
 	persistopt = strsepq(&arg, delim);
 
 	if (iqn == NULL || arg != NULL) {
-		istgt_uctl_snprintf(uctl, "ERR invalid parameters\n");
-		rc = istgt_uctl_writeline(uctl);
-		if (rc != UCTL_CMD_OK) {
-			return (rc);
-		}
-		return (UCTL_CMD_ERR);
+//		istgt_uctl_snprintf(uctl, "ERR invalid parameters\n");
+//		rc = istgt_uctl_writeline(uctl);
+//		if (rc != UCTL_CMD_OK) {
+//			return (rc);
+//		}
+//		return (UCTL_CMD_ERR);
+        return invalid_param_log(uctl);
 	}
 	if (lun == NULL) {
 		lun_i = 0;
@@ -1118,12 +1132,13 @@ istgt_uctl_cmd_list(UCTL_Ptr uctl)
 	lun = strsepq(&arg, delim);
 
 	if (arg != NULL) {
-		istgt_uctl_snprintf(uctl, "ERR invalid parameters\n");
-		rc = istgt_uctl_writeline(uctl);
-		if (rc != UCTL_CMD_OK) {
-			return (rc);
-		}
-		return (UCTL_CMD_ERR);
+//		istgt_uctl_snprintf(uctl, "ERR invalid parameters\n");
+//		rc = istgt_uctl_writeline(uctl);
+//		if (rc != UCTL_CMD_OK) {
+//			return (rc);
+//		}
+//		return (UCTL_CMD_ERR);
+       return invalid_param_log(uctl);
 	}
 
 	if (iqn == NULL) {
@@ -1267,12 +1282,13 @@ istgt_uctl_cmd_unload(UCTL_Ptr uctl)
 	lun = strsepq(&arg, delim);
 
 	if (iqn == NULL || arg != NULL) {
-		istgt_uctl_snprintf(uctl, "ERR invalid parameters\n");
-		rc = istgt_uctl_writeline(uctl);
-		if (rc != UCTL_CMD_OK) {
-			return (rc);
-		}
-		return (UCTL_CMD_ERR);
+//		istgt_uctl_snprintf(uctl, "ERR invalid parameters\n");
+//		rc = istgt_uctl_writeline(uctl);
+//		if (rc != UCTL_CMD_OK) {
+//			return (rc);
+//		}
+//		return (UCTL_CMD_ERR);
+        return invalid_param_log(uctl);
 	}
 
 	if (lun == NULL) {
@@ -1358,12 +1374,13 @@ istgt_uctl_cmd_load(UCTL_Ptr uctl)
 	lun = strsepq(&arg, delim);
 
 	if (iqn == NULL || arg != NULL) {
-		istgt_uctl_snprintf(uctl, "ERR invalid parameters\n");
-		rc = istgt_uctl_writeline(uctl);
-		if (rc != UCTL_CMD_OK) {
-			return (rc);
-		}
-		return (UCTL_CMD_ERR);
+//		istgt_uctl_snprintf(uctl, "ERR invalid parameters\n");
+//		rc = istgt_uctl_writeline(uctl);
+//		if (rc != UCTL_CMD_OK) {
+//			return (rc);
+//		}
+//		return (UCTL_CMD_ERR);
+        return invalid_param_log(uctl);
 	}
 
 	if (lun == NULL) {
@@ -1465,12 +1482,13 @@ istgt_uctl_cmd_change(UCTL_Ptr uctl)
 
 	if (iqn == NULL || lun == NULL || type == NULL || flags == NULL ||
 	    file == NULL || size == NULL || arg != NULL) {
-		istgt_uctl_snprintf(uctl, "ERR invalid parameters\n");
-		rc = istgt_uctl_writeline(uctl);
-		if (rc != UCTL_CMD_OK) {
-			return (rc);
-		}
-		return (UCTL_CMD_ERR);
+//		istgt_uctl_snprintf(uctl, "ERR invalid parameters\n");
+//		rc = istgt_uctl_writeline(uctl);
+//		if (rc != UCTL_CMD_OK) {
+//			return (rc);
+//		}
+//		return (UCTL_CMD_ERR);
+        return invalid_param_log(uctl);    
 	}
 
 	if (lun == NULL) {
@@ -1628,12 +1646,13 @@ istgt_uctl_cmd_reset(UCTL_Ptr uctl)
 	lun = strsepq(&arg, delim);
 
 	if (iqn == NULL || arg != NULL) {
-		istgt_uctl_snprintf(uctl, "ERR invalid parameters\n");
-		rc = istgt_uctl_writeline(uctl);
-		if (rc != UCTL_CMD_OK) {
-			return (rc);
-		}
-		return (UCTL_CMD_ERR);
+//		istgt_uctl_snprintf(uctl, "ERR invalid parameters\n");
+//		rc = istgt_uctl_writeline(uctl);
+//		if (rc != UCTL_CMD_OK) {
+//			return (rc);
+//		}
+//		return (UCTL_CMD_ERR);
+        return invalid_param_log(uctl);
 	}
 
 	if (lun == NULL) {
@@ -1717,12 +1736,13 @@ istgt_uctl_cmd_clear(UCTL_Ptr uctl)
 	lun = strsepq(&arg, delim);
 
 	if (iqn == NULL || arg != NULL) {
-		istgt_uctl_snprintf(uctl, "ERR invalid parameters\n");
-		rc = istgt_uctl_writeline(uctl);
-		if (rc != UCTL_CMD_OK) {
-			return (rc);
-		}
-		return (UCTL_CMD_ERR);
+//		istgt_uctl_snprintf(uctl, "ERR invalid parameters\n");
+//		rc = istgt_uctl_writeline(uctl);
+//		if (rc != UCTL_CMD_OK) {
+//			return (rc);
+//		}
+//		return (UCTL_CMD_ERR);
+        return invalid_param_log(uctl);
 	}
 
 	if (lun == NULL) {
@@ -1844,12 +1864,13 @@ istgt_uctl_cmd_start(UCTL_Ptr uctl)
 	lun = strsepq(&arg, delim);
 
 	if (iqn == NULL || arg != NULL) {
-		istgt_uctl_snprintf(uctl, "ERR invalid parameters\n");
-		rc = istgt_uctl_writeline(uctl);
-		if (rc != UCTL_CMD_OK) {
-			return (rc);
-		}
-		return (UCTL_CMD_ERR);
+//		istgt_uctl_snprintf(uctl, "ERR invalid parameters\n");
+//		rc = istgt_uctl_writeline(uctl);
+//		if (rc != UCTL_CMD_OK) {
+//			return (rc);
+//		}
+//		return (UCTL_CMD_ERR);
+        return invalid_param_log(uctl);
 	}
 
 	if (lun == NULL) {
@@ -1918,12 +1939,13 @@ istgt_uctl_cmd_stop(UCTL_Ptr uctl)
 	lun = strsepq(&arg, delim);
 
 	if (iqn == NULL || arg != NULL) {
-		istgt_uctl_snprintf(uctl, "ERR invalid parameters\n");
-		rc = istgt_uctl_writeline(uctl);
-		if (rc != UCTL_CMD_OK) {
-			return (rc);
-		}
-		return (UCTL_CMD_ERR);
+//		istgt_uctl_snprintf(uctl, "ERR invalid parameters\n");
+//		rc = istgt_uctl_writeline(uctl);
+//		if (rc != UCTL_CMD_OK) {
+//			return (rc);
+//		}
+//		return (UCTL_CMD_ERR);
+        return invalid_param_log(uctl);
 	}
 
 	if (lun == NULL) {
@@ -1996,12 +2018,13 @@ istgt_uctl_cmd_modify(UCTL_Ptr uctl)
 	if (dofake < 0 || arg != NULL) {
 		ISTGT_LOG("modify %d returning.. ERR invalid parameters\n",
 		    dofake);
-		istgt_uctl_snprintf(uctl, "ERR invalid parameters\n");
-		rc = istgt_uctl_writeline(uctl);
-		if (rc != UCTL_CMD_OK) {
-			return (rc);
-		}
-		return (UCTL_CMD_ERR);
+//		istgt_uctl_snprintf(uctl, "ERR invalid parameters\n");
+//		rc = istgt_uctl_writeline(uctl);
+//		if (rc != UCTL_CMD_OK) {
+//			return (rc);
+//		}
+//		return (UCTL_CMD_ERR);
+        return invalid_param_log(uctl);
 	}
 
 	MTX_LOCK(&uctl->istgt->state_mutex);
@@ -2175,12 +2198,13 @@ istgt_uctl_cmd_info(UCTL_Ptr uctl)
 	iqn = strsepq(&arg, delim);
 
 	if (arg != NULL) {
-		istgt_uctl_snprintf(uctl, "ERR invalid parameters\n");
-		rc = istgt_uctl_writeline(uctl);
-		if (rc != UCTL_CMD_OK) {
-			return (rc);
-		}
-		return (UCTL_CMD_ERR);
+//		istgt_uctl_snprintf(uctl, "ERR invalid parameters\n");
+//		rc = istgt_uctl_writeline(uctl);
+//		if (rc != UCTL_CMD_OK) {
+//			return (rc);
+//		}
+//		return (UCTL_CMD_ERR);
+        return invalid_param_log(uctl);
 	}
 
 	ncount = 0;
@@ -2295,12 +2319,13 @@ istgt_uctl_cmd_status(UCTL_Ptr uctl)
 	lun = strsepq(&arg, delim);
 
 	if (arg != NULL) {
-		istgt_uctl_snprintf(uctl, "ERR invalid parameters\n");
-		rc = istgt_uctl_writeline(uctl);
-		if (rc != UCTL_CMD_OK) {
-			return (rc);
-		}
-		return (UCTL_CMD_ERR);
+//		istgt_uctl_snprintf(uctl, "ERR invalid parameters\n");
+//		rc = istgt_uctl_writeline(uctl);
+//		if (rc != UCTL_CMD_OK) {
+//			return (rc);
+//		}
+//		return (UCTL_CMD_ERR);
+        return invalid_param_log(uctl);
 	}
 
 	if (lun == NULL) {
@@ -2381,12 +2406,13 @@ istgt_uctl_cmd_maxtime(UCTL_Ptr uctl)
 			setzero = 1;
 	}
 	if (arg != NULL) {
-		istgt_uctl_snprintf(uctl, "ERR invalid parameters\n");
-		rc = istgt_uctl_writeline(uctl);
-		if (rc != UCTL_CMD_OK) {
-			return (rc);
-		}
-		return (UCTL_CMD_ERR);
+//		istgt_uctl_snprintf(uctl, "ERR invalid parameters\n");
+//		rc = istgt_uctl_writeline(uctl);
+//		if (rc != UCTL_CMD_OK) {
+//			return (rc);
+//		}
+//		return (UCTL_CMD_ERR);
+        return invalid_param_log(uctl);
 	}
 	for (i = 1; i <= uctl->istgt->nlogical_unit; i++) {
 		lu = uctl->istgt->logical_unit[i];
@@ -2825,12 +2851,13 @@ istgt_uctl_cmd_dump(UCTL_Ptr uctl)
 	iqn = strsepq(&arg, delim);
 
 	if (arg != NULL) {
-		istgt_uctl_snprintf(uctl, "ERR invalid parameters\n");
-		rc = istgt_uctl_writeline(uctl);
-		if (rc != UCTL_CMD_OK) {
-			return (rc);
-		}
-		return (UCTL_CMD_ERR);
+//		istgt_uctl_snprintf(uctl, "ERR invalid parameters\n");
+//		rc = istgt_uctl_writeline(uctl);
+//		if (rc != UCTL_CMD_OK) {
+//			return (rc);
+//		}
+//		return (UCTL_CMD_ERR);
+        return invalid_param_log(uctl);
 	}
 
 	MTX_LOCK(&uctl->istgt->mutex);
@@ -3016,12 +3043,13 @@ istgt_uctl_cmd_rsv(UCTL_Ptr uctl)
 	iqn = strsepq(&arg, delim);
 
 	if (arg != NULL) {
-		istgt_uctl_snprintf(uctl, "ERR invalid parameters\n");
-		rc = istgt_uctl_writeline(uctl);
-		if (rc != UCTL_CMD_OK) {
-			return (rc);
-		}
-		return (UCTL_CMD_ERR);
+//		istgt_uctl_snprintf(uctl, "ERR invalid parameters\n");
+//		rc = istgt_uctl_writeline(uctl);
+//		if (rc != UCTL_CMD_OK) {
+//			return (rc);
+//		}
+//		return (UCTL_CMD_ERR);
+       return invalid_param_log(uctl);
 	}
 	MTX_LOCK(&uctl->istgt->mutex);
 	for (i = 0; i < MAX_LOGICAL_UNIT; i++) {
