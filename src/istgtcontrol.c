@@ -255,30 +255,30 @@ is_err_chap_seq(UCTL_Ptr uctl __attribute__((__unused__)), char *s)
 static int
 send_and_read_result(UCTL_Ptr uctl)
 {
-    const char *delim = ARGS_DELIM;
-    int rc;
-    char *result;
-    char *arg;
+	const char *delim = ARGS_DELIM;
+	int rc;
+	char *result;
+	char *arg;
 
-    rc = uctl_writeline(uctl);
-    if (rc != UCTL_CMD_OK) {
-        return (rc);
-    } 
+	rc = uctl_writeline(uctl);
+	if (rc != UCTL_CMD_OK) {
+		return (rc);
+	}
 
-    rc = uctl_readline(uctl);
-    if (rc != UCTL_CMD_OK) {
-        return (rc);
-    }
-    arg = trim_string(uctl->recvbuf);
-    result = strsepq(&arg, delim);
-    strupr(result);
-    if (strcmp(result, "OK") != 0) {
-        if (is_err_req_auth(uctl, arg))
-            return (UCTL_CMD_REQAUTH);
-        fprintf(stderr, "ERROR %s\n", arg);
-        return (UCTL_CMD_ERR);
-    }
-    return (UCTL_CMD_OK);
+	rc = uctl_readline(uctl);
+	if (rc != UCTL_CMD_OK) {
+		return (rc);
+	}
+	arg = trim_string(uctl->recvbuf);
+	result = strsepq(&arg, delim);
+	strupr(result);
+	if (strcmp(result, "OK") != 0) {
+		if (is_err_req_auth(uctl, arg))
+			return (UCTL_CMD_REQAUTH);
+		fprintf(stderr, "ERROR %s\n", arg);
+		return (UCTL_CMD_ERR);
+	}
+	return (UCTL_CMD_OK);
 }
 
 static int
@@ -288,7 +288,7 @@ exec_quit(UCTL_Ptr uctl)
 	uctl_snprintf(uctl, "QUIT\n");
 
 	/* send and receive result */
-	return send_and_read_result(uctl);
+	return (send_and_read_result(uctl));
 }
 
 static int
@@ -298,7 +298,7 @@ exec_noop(UCTL_Ptr uctl)
 	uctl_snprintf(uctl, "NOOP\n");
 
 	/* send and receive result */
-	return send_and_read_result(uctl);
+	return (send_and_read_result(uctl));
 }
 
 static int
@@ -354,7 +354,7 @@ exec_unload(UCTL_Ptr uctl)
 	    uctl->iqn, uctl->lun);
 
 	/* send and receive result */
-	return send_and_read_result(uctl);
+	return (send_and_read_result(uctl));
 }
 
 static int
@@ -368,7 +368,7 @@ exec_load(UCTL_Ptr uctl)
 	    uctl->iqn, uctl->lun);
 
 	/* send and receive result */
-	return send_and_read_result(uctl);
+	return (send_and_read_result(uctl));
 }
 
 static int
@@ -433,8 +433,8 @@ exec_change(UCTL_Ptr uctl)
 	    "\"%s\" \"%s\" \"%s\"\n",
 	    uctl->iqn, uctl->lun, uctl->mtype,
 	    uctl->mflags, uctl->mfile, uctl->msize);
-    /* send and receive result */
-    return send_and_read_result(uctl);
+	/* send and receive result */
+	return (send_and_read_result(uctl));
 }
 
 static int
@@ -448,7 +448,7 @@ exec_reset(UCTL_Ptr uctl)
 	    uctl->iqn, uctl->lun);
 
 	/* send and receive result */
-	return send_and_read_result(uctl);
+	return (send_and_read_result(uctl));
 }
 
 static int
@@ -462,7 +462,7 @@ exec_clear(UCTL_Ptr uctl)
 	    uctl->iqn, uctl->lun);
 
 	/* send and receive result */
-	return send_and_read_result(uctl);
+	return (send_and_read_result(uctl));
 }
 
 static int
@@ -473,7 +473,7 @@ exec_refresh(UCTL_Ptr uctl)
 	    uctl->iqn, uctl->lun);
 
 	/* send and receive result */
-	return send_and_read_result(uctl);
+	return (send_and_read_result(uctl));
 }
 
 static int
@@ -486,8 +486,8 @@ exec_sync(UCTL_Ptr uctl)
 
 	uctl_snprintf(uctl, "SYNC \"%s\" %d\n", uctl->iqn, uctl->lun);
 
-    /* send and receive result */
-    return send_and_read_result(uctl);
+	/* send and receive result */
+	return (send_and_read_result(uctl));
 }
 
 static int
@@ -502,7 +502,7 @@ exec_persist(UCTL_Ptr uctl)
 	    uctl->lun, uctl->persistopt);
 
 	/* send and receive result */
-	return send_and_read_result(uctl);
+	return (send_and_read_result(uctl));
 }
 
 static int
@@ -516,7 +516,7 @@ exec_start(UCTL_Ptr uctl)
 	    uctl->iqn, uctl->lun);
 
 	/* send and receive result */
-	return send_and_read_result(uctl);
+	return (send_and_read_result(uctl));
 }
 
 static int
@@ -530,7 +530,7 @@ exec_stop(UCTL_Ptr uctl)
 	    uctl->iqn, uctl->lun);
 
 	/* send and receive result */
-	return send_and_read_result(uctl);
+	return (send_and_read_result(uctl));
 }
 
 static int
@@ -540,7 +540,7 @@ exec_mem(UCTL_Ptr uctl)
 	uctl_snprintf(uctl, "%s\n", "MEM");
 
 	/* send and receive result */
-	return send_and_read_result(uctl);
+	return (send_and_read_result(uctl));
 }
 
 static int
@@ -553,7 +553,7 @@ exec_log(UCTL_Ptr uctl)
 	uctl->traceflag, uctl->delayus);
 
 	/* send and receive result */
-	return send_and_read_result(uctl);
+	return (send_and_read_result(uctl));
 }
 
 static int
@@ -563,7 +563,7 @@ exec_memdebug(UCTL_Ptr uctl)
 	uctl_snprintf(uctl, "%s\n", "MEMDEBUG");
 
 	/* send and receive result */
-	return send_and_read_result(uctl);
+	return (send_and_read_result(uctl));
 }
 
 static int
@@ -579,7 +579,7 @@ exec_modify(UCTL_Ptr uctl)
 	    uctl->OperationalMode);
 
 	/* send and receive result */
-	return send_and_read_result(uctl);
+	return (send_and_read_result(uctl));
 }
 
 static int
@@ -1456,7 +1456,7 @@ do_auth(UCTL_Ptr uctl)
 		fprintf(stderr, "ERROR %s\n", arg);
 		return (UCTL_CMD_ERR);
 	}
-    return (UCTL_CMD_OK);
+	return (UCTL_CMD_OK);
 }
 
 static char *
