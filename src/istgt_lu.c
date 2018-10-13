@@ -1006,7 +1006,7 @@ istgt_lu_parse_media_size(const char *file, const char *size, int *flags)
 	} else {
 		if (msize < ISTGT_LU_MEDIA_SIZE_MIN) {
 			ISTGT_ERRLOG("media size too small\n");
-			return (0ULL); // Shuld this be NULL?
+			return (0ULL);
 		}
 	}
 
@@ -2826,18 +2826,21 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 	}
 
 	/* tsih 0 is reserved */
-	// for (i = 0; i < MAX_LU_TSIH; i++) {
-	// 	lu->tsih[i].tag = 0;
-	// 	lu->tsih[i].tsih = 0;
-	// 	lu->tsih[i].initiator_port = NULL;
-	// }
-	// lu->maxtsih = 1;
-	// lu->last_tsih = 0;
+	/*
+	 * for (i = 0; i < MAX_LU_TSIH; i++) {
+	 * 	lu->tsih[i].tag = 0;
+	 * 	lu->tsih[i].tsih = 0;
+	 * 	lu->tsih[i].initiator_port = NULL;
+	 * }
+	 * lu->maxtsih = 1;
+	 * lu->last_tsih = 0;
+	 *
+	 * MTX_LOCK(&lu->istgt->mutex);
+	 * lu->istgt->nlogical_unit++;
+	 * lu->istgt->logical_unit[lu->num] = lu;
+	 * MTX_UNLOCK(&lu->istgt->mutex);
+	 */
 
-	// MTX_LOCK(&lu->istgt->mutex);
-	// lu->istgt->nlogical_unit++;
-	// lu->istgt->logical_unit[lu->num] = lu;
-	// MTX_UNLOCK(&lu->istgt->mutex);
 	return (0);
 
 error_out:
@@ -3146,17 +3149,19 @@ istgt_lu_match_all(CF_SECTION *sp, CONFIG *config_old)
 	return (1);
 }
 
-// static int
-// istgt_lu_copy_sp(CF_SECTION *sp, CONFIG *config_old)
-// {
-// 	CF_SECTION *sp_old;
-
-// 	sp_old = istgt_find_cf_section(config_old, sp->name);
-// 	if (sp_old == NULL)
-// 		return (-1);
-// 	istgt_copy_cf_item(sp, sp_old);
-// 	return (0);
-// }
+/*
+ * static int
+ * istgt_lu_copy_sp(CF_SECTION *sp, CONFIG *config_old)
+ * {
+ * 	CF_SECTION *sp_old;
+ *
+ * 	sp_old = istgt_find_cf_section(config_old, sp->name);
+ * 	if (sp_old == NULL)
+ * 		return (-1);
+ * 	istgt_copy_cf_item(sp, sp_old);
+ * 	return (0);
+ * }
+ */
 
 static int istgt_lu_create_thread(ISTGT_Ptr istgt, ISTGT_LU_Ptr lu);
 
@@ -3236,13 +3241,15 @@ istgt_lu_reload_update(ISTGT_Ptr istgt)
 					}
 					MTX_LOCK(&lu->mutex);
 					if (lu->maxtsih > 1) {
-						// ISTGT_ERRLOG("update active LU%d: Name=%s, "
-						//		"# of TSIH=%d\n",
-						//		lu->num, lu->name, lu->maxtsih - 1);
-						// rc = istgt_lu_copy_sp(sp, istgt->config_old);
-						// if (rc < 0) {
-							/* ignore error */
-						// }
+						/*
+						 * ISTGT_ERRLOG("update active LU%d: Name=%s, "
+						 *		"# of TSIH=%d\n",
+						 *		lu->num, lu->name, lu->maxtsih - 1);
+						 * rc = istgt_lu_copy_sp(sp, istgt->config_old);
+						 * if (rc < 0) {
+						 *	// ignore error
+						 * }
+						 */
 						MTX_UNLOCK(&lu->mutex);
 						MTX_UNLOCK(&istgt->mutex);
 						rc = istgt_lu_update_unit(lu, sp);
@@ -3945,11 +3952,13 @@ istgt_lu_create_task(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, int lun, ISTGT_LU_D
 		}
 		lu_task->lu_cmd.lblen = lu_task->lblen;
 	}
-	// if (lu_task->cdb0 != lu_task->lu_cmd.cdb0 ||
-	// 	lu_task->lba != lu_task->lu_cmd.lba ||
-	// 	lu_task->lblen != lu_task->lu_cmd.lblen) {
-	// 	log/fix
-	// }
+	/*
+	 * if (lu_task->cdb0 != lu_task->lu_cmd.cdb0 ||
+	 * 	lu_task->lba != lu_task->lu_cmd.lba ||
+	 * 	lu_task->lblen != lu_task->lu_cmd.lblen) {
+	 * 	log/fix
+	 * }
+	 */
 
 	/* creation time */
 	/* wait time */
