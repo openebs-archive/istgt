@@ -527,7 +527,8 @@ trigger_rebuild(spec_t *spec)
 		}
 
 		timesdiff(CLOCK_MONOTONIC, replica->create_time, now, diff);
-		if (diff.tv_sec <= (2 * replica_timeout)) {
+		if ((spec->replication_factor != 1) &&
+		    (diff.tv_sec <= (2 * replica_timeout))) {
 			REPLICA_LOG("Replica:%p added very recently, "
 			    "skipping rebuild.\n", replica);
 			continue;
