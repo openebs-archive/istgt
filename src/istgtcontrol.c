@@ -253,21 +253,18 @@ is_err_chap_seq(UCTL_Ptr uctl __attribute__((__unused__)), char *s)
 }
 
 static int
-exec_quit(UCTL_Ptr uctl)
+send_and_read_result(UCTL_Ptr uctl)
 {
 	const char *delim = ARGS_DELIM;
-	char *arg;
-	char *result;
 	int rc;
+	char *result;
+	char *arg;
 
-	/* send command */
-	uctl_snprintf(uctl, "QUIT\n");
 	rc = uctl_writeline(uctl);
 	if (rc != UCTL_CMD_OK) {
 		return (rc);
 	}
 
-	/* receive result */
 	rc = uctl_readline(uctl);
 	if (rc != UCTL_CMD_OK) {
 		return (rc);
@@ -285,35 +282,23 @@ exec_quit(UCTL_Ptr uctl)
 }
 
 static int
+exec_quit(UCTL_Ptr uctl)
+{
+	/* send command */
+	uctl_snprintf(uctl, "QUIT\n");
+
+	/* send and receive result */
+	return (send_and_read_result(uctl));
+}
+
+static int
 exec_noop(UCTL_Ptr uctl)
 {
-	const char *delim = ARGS_DELIM;
-	char *arg;
-	char *result;
-	int rc;
-
 	/* send command */
 	uctl_snprintf(uctl, "NOOP\n");
-	rc = uctl_writeline(uctl);
-	if (rc != UCTL_CMD_OK) {
-		return (rc);
-	}
 
-	/* receive result */
-	rc = uctl_readline(uctl);
-	if (rc != UCTL_CMD_OK) {
-		return (rc);
-	}
-	arg = trim_string(uctl->recvbuf);
-	result = strsepq(&arg, delim);
-	strupr(result);
-	if (strcmp(result, "OK") != 0) {
-		if (is_err_req_auth(uctl, arg))
-			return (UCTL_CMD_REQAUTH);
-		fprintf(stderr, "ERROR %s\n", arg);
-		return (UCTL_CMD_ERR);
-	}
-	return (UCTL_CMD_OK);
+	/* send and receive result */
+	return (send_and_read_result(uctl));
 }
 
 static int
@@ -361,73 +346,29 @@ exec_version(UCTL_Ptr uctl)
 static int
 exec_unload(UCTL_Ptr uctl)
 {
-	const char *delim = ARGS_DELIM;
-	char *arg;
-	char *result;
-	int rc;
-
 	/* send command */
 	if (uctl->iqn == NULL || uctl->lun < 0) {
 		return (UCTL_CMD_ERR);
 	}
 	uctl_snprintf(uctl, "UNLOAD \"%s\" %d\n",
 	    uctl->iqn, uctl->lun);
-	rc = uctl_writeline(uctl);
-	if (rc != UCTL_CMD_OK) {
-		return (rc);
-	}
 
-	/* receive result */
-	rc = uctl_readline(uctl);
-	if (rc != UCTL_CMD_OK) {
-		return (rc);
-	}
-	arg = trim_string(uctl->recvbuf);
-	result = strsepq(&arg, delim);
-	strupr(result);
-	if (strcmp(result, "OK") != 0) {
-		if (is_err_req_auth(uctl, arg))
-			return (UCTL_CMD_REQAUTH);
-		fprintf(stderr, "ERROR %s\n", arg);
-		return (UCTL_CMD_ERR);
-	}
-	return (UCTL_CMD_OK);
+	/* send and receive result */
+	return (send_and_read_result(uctl));
 }
 
 static int
 exec_load(UCTL_Ptr uctl)
 {
-	const char *delim = ARGS_DELIM;
-	char *arg;
-	char *result;
-	int rc;
-
 	/* send command */
 	if (uctl->iqn == NULL || uctl->lun < 0) {
 		return (UCTL_CMD_ERR);
 	}
 	uctl_snprintf(uctl, "LOAD \"%s\" %d\n",
 	    uctl->iqn, uctl->lun);
-	rc = uctl_writeline(uctl);
-	if (rc != UCTL_CMD_OK) {
-		return (rc);
-	}
 
-	/* receive result */
-	rc = uctl_readline(uctl);
-	if (rc != UCTL_CMD_OK) {
-		return (rc);
-	}
-	arg = trim_string(uctl->recvbuf);
-	result = strsepq(&arg, delim);
-	strupr(result);
-	if (strcmp(result, "OK") != 0) {
-		if (is_err_req_auth(uctl, arg))
-			return (UCTL_CMD_REQAUTH);
-		fprintf(stderr, "ERROR %s\n", arg);
-		return (UCTL_CMD_ERR);
-	}
-	return (UCTL_CMD_OK);
+	/* send and receive result */
+	return (send_and_read_result(uctl));
 }
 
 static int
@@ -482,11 +423,6 @@ exec_list(UCTL_Ptr uctl)
 static int
 exec_change(UCTL_Ptr uctl)
 {
-	const char *delim = ARGS_DELIM;
-	char *arg;
-	char *result;
-	int rc;
-
 	/* send command */
 	if (uctl->iqn == NULL || uctl->mfile == NULL ||
 		uctl->mtype == NULL || uctl->mflags == NULL ||
@@ -497,179 +433,66 @@ exec_change(UCTL_Ptr uctl)
 	    "\"%s\" \"%s\" \"%s\"\n",
 	    uctl->iqn, uctl->lun, uctl->mtype,
 	    uctl->mflags, uctl->mfile, uctl->msize);
-	rc = uctl_writeline(uctl);
-	if (rc != UCTL_CMD_OK) {
-		return (rc);
-	}
-
-	/* receive result */
-	rc = uctl_readline(uctl);
-	if (rc != UCTL_CMD_OK) {
-		return (rc);
-	}
-	arg = trim_string(uctl->recvbuf);
-	result = strsepq(&arg, delim);
-	strupr(result);
-	if (strcmp(result, "OK") != 0) {
-		if (is_err_req_auth(uctl, arg))
-			return (UCTL_CMD_REQAUTH);
-		fprintf(stderr, "ERROR %s\n", arg);
-		return (UCTL_CMD_ERR);
-	}
-	return (UCTL_CMD_OK);
+	/* send and receive result */
+	return (send_and_read_result(uctl));
 }
 
 static int
 exec_reset(UCTL_Ptr uctl)
 {
-	const char *delim = ARGS_DELIM;
-	char *arg;
-	char *result;
-	int rc;
-
 	/* send command */
 	if (uctl->iqn == NULL || uctl->lun < 0) {
 		return (UCTL_CMD_ERR);
 	}
 	uctl_snprintf(uctl, "RESET \"%s\" %d\n",
 	    uctl->iqn, uctl->lun);
-	rc = uctl_writeline(uctl);
-	if (rc != UCTL_CMD_OK) {
-		return (rc);
-	}
 
-	/* receive result */
-	rc = uctl_readline(uctl);
-	if (rc != UCTL_CMD_OK) {
-		return (rc);
-	}
-	arg = trim_string(uctl->recvbuf);
-	result = strsepq(&arg, delim);
-	strupr(result);
-	if (strcmp(result, "OK") != 0) {
-		if (is_err_req_auth(uctl, arg))
-			return (UCTL_CMD_REQAUTH);
-		fprintf(stderr, "ERROR %s\n", arg);
-		return (UCTL_CMD_ERR);
-	}
-	return (UCTL_CMD_OK);
+	/* send and receive result */
+	return (send_and_read_result(uctl));
 }
 
 static int
 exec_clear(UCTL_Ptr uctl)
 {
-	const char *delim = ARGS_DELIM;
-	char *arg;
-	char *result;
-	int rc;
-
 	/* send command */
 	if (uctl->iqn == NULL || uctl->lun < 0) {
 		return (UCTL_CMD_ERR);
 	}
 	uctl_snprintf(uctl, "CLEAR \"%s\" %d\n",
 	    uctl->iqn, uctl->lun);
-	rc = uctl_writeline(uctl);
-	if (rc != UCTL_CMD_OK) {
-		return (rc);
-	}
 
-	/* receive result */
-	rc = uctl_readline(uctl);
-	if (rc != UCTL_CMD_OK) {
-		return (rc);
-	}
-	arg = trim_string(uctl->recvbuf);
-	result = strsepq(&arg, delim);
-	strupr(result);
-	if (strcmp(result, "OK") != 0) {
-		if (is_err_req_auth(uctl, arg))
-			return (UCTL_CMD_REQAUTH);
-		fprintf(stderr, "ERROR %s\n", arg);
-		return (UCTL_CMD_ERR);
-	}
-	return (UCTL_CMD_OK);
+	/* send and receive result */
+	return (send_and_read_result(uctl));
 }
+
 static int
 exec_refresh(UCTL_Ptr uctl)
 {
-	const char *delim = ARGS_DELIM;
-	char *arg;
-	char *result;
-	int rc;
-
 	/* send command */
 	uctl_snprintf(uctl, "REFRESH \"%s\" %d\n",
 	    uctl->iqn, uctl->lun);
-	rc = uctl_writeline(uctl);
-	if (rc != UCTL_CMD_OK) {
-		return (rc);
-	}
 
-	/* receive result */
-	rc = uctl_readline(uctl);
-	if (rc != UCTL_CMD_OK) {
-		return (rc);
-	}
-	arg = trim_string(uctl->recvbuf);
-	result = strsepq(&arg, delim);
-	strupr(result);
-	if (strcmp(result, "OK") != 0) {
-		if (is_err_req_auth(uctl, arg))
-			return (UCTL_CMD_REQAUTH);
-		fprintf(stderr, "%s: %s\n", result, arg);
-		return (UCTL_CMD_ERR);
-	}
-	return (UCTL_CMD_OK);
+	/* send and receive result */
+	return (send_and_read_result(uctl));
 }
 
 static int
 exec_sync(UCTL_Ptr uctl)
 {
-	const char *delim = ARGS_DELIM;
-	char *arg;
-	char *result;
-	int rc;
-
 	/* send command */
 	if (uctl->iqn == NULL || uctl->lun < 0) {
 		return (UCTL_CMD_ERR);
 	}
 
 	uctl_snprintf(uctl, "SYNC \"%s\" %d\n", uctl->iqn, uctl->lun);
-	rc = uctl_writeline(uctl);
 
-	if (rc != UCTL_CMD_OK) {
-		return (rc);
-	}
-
-		/* receive result */
-
-	rc = uctl_readline(uctl);
-
-	if (rc != UCTL_CMD_OK) {
-		return (rc);
-	}
-	arg = trim_string(uctl->recvbuf);
-	result = strsepq(&arg, delim);
-	strupr(result);
-	if (strcmp(result, "OK") != 0) {
-		if (is_err_req_auth(uctl, arg))
-			return (UCTL_CMD_REQAUTH);
-		fprintf(stderr, "ERROR %s\n", arg);
-		return (UCTL_CMD_ERR);
-	}
-	return (UCTL_CMD_OK);
+	/* send and receive result */
+	return (send_and_read_result(uctl));
 }
 
 static int
 exec_persist(UCTL_Ptr uctl)
 {
-	const char *delim = ARGS_DELIM;
-	char *arg;
-	char *result;
-	int rc;
-
 	/* send command */
 	if (uctl->iqn == NULL || uctl->lun < 0) {
 	    return (UCTL_CMD_ERR);
@@ -677,206 +500,75 @@ exec_persist(UCTL_Ptr uctl)
 
 	uctl_snprintf(uctl, "PERSIST \"%s\" %d %d\n", uctl->iqn,
 	    uctl->lun, uctl->persistopt);
-	rc = uctl_writeline(uctl);
-	if (rc != UCTL_CMD_OK) {
-		return (rc);
-	}
 
-	/* receive result */
-	rc = uctl_readline(uctl);
-	if (rc != UCTL_CMD_OK) {
-		return (rc);
-	}
-	arg = trim_string(uctl->recvbuf);
-	result = strsepq(&arg, delim);
-	strupr(result);
-		if (strcmp(result, "OK") != 0) {
-			if (is_err_req_auth(uctl, arg))
-				return (UCTL_CMD_REQAUTH);
-		fprintf(stderr, "ERROR %s\n", arg);
-		return (UCTL_CMD_ERR);
-	}
-	return (UCTL_CMD_OK);
+	/* send and receive result */
+	return (send_and_read_result(uctl));
 }
 
 static int
 exec_start(UCTL_Ptr uctl)
 {
-	const char *delim = ARGS_DELIM;
-	char *arg;
-	char *result;
-	int rc;
-
 	/* send command */
 	if (uctl->iqn == NULL || uctl->lun < 0) {
 		return (UCTL_CMD_ERR);
 	}
 	uctl_snprintf(uctl, "START \"%s\" %d\n",
 	    uctl->iqn, uctl->lun);
-	rc = uctl_writeline(uctl);
-	if (rc != UCTL_CMD_OK) {
-		return (rc);
-	}
 
-	/* receive result */
-	rc = uctl_readline(uctl);
-	if (rc != UCTL_CMD_OK) {
-		return (rc);
-	}
-	arg = trim_string(uctl->recvbuf);
-	result = strsepq(&arg, delim);
-	strupr(result);
-	if (strcmp(result, "OK") != 0) {
-		if (is_err_req_auth(uctl, arg))
-			return (UCTL_CMD_REQAUTH);
-		fprintf(stderr, "ERROR %s\n", arg);
-		return (UCTL_CMD_ERR);
-	}
-	return (UCTL_CMD_OK);
+	/* send and receive result */
+	return (send_and_read_result(uctl));
 }
 
 static int
 exec_stop(UCTL_Ptr uctl)
 {
-	const char *delim = ARGS_DELIM;
-	char *arg;
-	char *result;
-	int rc;
-
 	/* send command */
 	if (uctl->iqn == NULL || uctl->lun < 0) {
 		return (UCTL_CMD_ERR);
 	}
 	uctl_snprintf(uctl, "STOP \"%s\" %d\n",
 	    uctl->iqn, uctl->lun);
-	rc = uctl_writeline(uctl);
-	if (rc != UCTL_CMD_OK) {
-		return (rc);
-	}
 
-	/* receive result */
-	rc = uctl_readline(uctl);
-	if (rc != UCTL_CMD_OK) {
-		return (rc);
-	}
-	arg = trim_string(uctl->recvbuf);
-	result = strsepq(&arg, delim);
-	strupr(result);
-	if (strcmp(result, "OK") != 0) {
-		if (is_err_req_auth(uctl, arg))
-			return (UCTL_CMD_REQAUTH);
-		fprintf(stderr, "ERROR %s\n", arg);
-		return (UCTL_CMD_ERR);
-	}
-	return (UCTL_CMD_OK);
+	/* send and receive result */
+	return (send_and_read_result(uctl));
 }
 
 static int
 exec_mem(UCTL_Ptr uctl)
 {
-	const char *delim = ARGS_DELIM;
-	char *arg;
-	char *result;
-	int rc;
-
 	/* Send Command */
 	uctl_snprintf(uctl, "%s\n", "MEM");
-	rc = uctl_writeline(uctl);
-	if (rc != UCTL_CMD_OK) {
-		return (rc);
-	}
 
-	/* receive result */
-	rc = uctl_readline(uctl);
-	if (rc != UCTL_CMD_OK) {
-		return (rc);
-	}
-	arg = trim_string(uctl->recvbuf);
-	result = strsepq(&arg, delim);
-	strupr(result);
-	if (strcmp(result, "OK") != 0) {
-		if (is_err_req_auth(uctl, arg))
-			return (UCTL_CMD_REQAUTH);
-		fprintf(stderr, "ERROR %s\n", arg);
-		return (UCTL_CMD_ERR);
-	}
-	return (UCTL_CMD_OK);
+	/* send and receive result */
+	return (send_and_read_result(uctl));
 }
 
 static int
 exec_log(UCTL_Ptr uctl)
 {
-	const char *delim = ARGS_DELIM;
-	char *arg;
-	char *result;
-	int rc;
-
 	/* Send Command */
 	printf("LOG %d %d %d\n", uctl->gottrace,
 	uctl->traceflag, uctl->delayus);
 	uctl_snprintf(uctl, "LOG %d %d %d\n", uctl->gottrace,
 	uctl->traceflag, uctl->delayus);
-	rc = uctl_writeline(uctl);
-	if (rc != UCTL_CMD_OK) {
-		return (rc);
-	}
 
-	/* receive result */
-	rc = uctl_readline(uctl);
-	if (rc != UCTL_CMD_OK) {
-		return (rc);
-	}
-	arg = trim_string(uctl->recvbuf);
-	result = strsepq(&arg, delim); strupr(result);
-	if (strcmp(result, "OK") != 0) {
-		if (is_err_req_auth(uctl, arg))
-			return (UCTL_CMD_REQAUTH);
-		fprintf(stderr, "ERROR %s\n", arg);
-		return (UCTL_CMD_ERR);
-	}
-	return (UCTL_CMD_OK);
+	/* send and receive result */
+	return (send_and_read_result(uctl));
 }
 
 static int
 exec_memdebug(UCTL_Ptr uctl)
 {
-	const char *delim = ARGS_DELIM;
-	char *arg;
-	char *result;
-	int rc;
-
 	/* Send Command */
 	uctl_snprintf(uctl, "%s\n", "MEMDEBUG");
-	rc = uctl_writeline(uctl);
-	if (rc != UCTL_CMD_OK) {
-		return (rc);
-	}
 
-	/* receive result */
-	rc = uctl_readline(uctl);
-	if (rc != UCTL_CMD_OK) {
-		return (rc);
-	}
-	arg = trim_string(uctl->recvbuf);
-	result = strsepq(&arg, delim);
-	strupr(result);
-	if (strcmp(result, "OK") != 0) {
-		if (is_err_req_auth(uctl, arg))
-			return (UCTL_CMD_REQAUTH);
-		fprintf(stderr, "ERROR %s\n", arg);
-		return (UCTL_CMD_ERR);
-	}
-	return (UCTL_CMD_OK);
+	/* send and receive result */
+	return (send_and_read_result(uctl));
 }
 
 static int
 exec_modify(UCTL_Ptr uctl)
 {
-	const char *delim = ARGS_DELIM;
-	char *arg;
-	char *result;
-	int rc;
-
 	/* send command */
 	if (uctl->OperationalMode < 0) {
 		return (UCTL_CMD_ERR);
@@ -885,30 +577,10 @@ exec_modify(UCTL_Ptr uctl)
 	/* Send Command */
 	uctl_snprintf(uctl, "MODIFY %d\n",
 	    uctl->OperationalMode);
-	rc = uctl_writeline(uctl);
-	if (rc != UCTL_CMD_OK) {
-		return (rc);
-	}
 
-	/* receive result */
-	rc = uctl_readline(uctl);
-	if (rc != UCTL_CMD_OK) {
-		return (rc);
-	}
-	arg = trim_string(uctl->recvbuf);
-	result = strsepq(&arg, delim);
-	strupr(result);
-	if (strcmp(result, "OK") != 0) {
-		if (is_err_req_auth(uctl, arg))
-			return (UCTL_CMD_REQAUTH);
-		fprintf(stderr, "ERROR %s\n", arg);
-		return (UCTL_CMD_ERR);
-	}
-	return (UCTL_CMD_OK);
+	/* send and receive result */
+	return (send_and_read_result(uctl));
 }
-
-
-
 
 static int
 exec_status(UCTL_Ptr uctl)
