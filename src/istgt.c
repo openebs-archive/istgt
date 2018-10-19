@@ -533,12 +533,12 @@ istgt_update_portal_group(ISTGT_Ptr istgt, CF_SECTION *sp, int *pgp_idx)
 					}
 					istgt->portal_group[idx].tag = 0;
 					MTX_UNLOCK(&istgt->mutex);
-					ISTGT_ERRLOG("parse portal error " +
+					ISTGT_ERRLOG("parse portal error "
 					    "(%s)\n", portal);
 					return (-1);
 				}
 				ISTGT_TRACELOG(ISTGT_TRACE_DEBUG,
-				    "RIndex=%d, Host=%s, Port=%s," +
+				    "RIndex=%d, Host=%s, Port=%s,"
 				    "Q=%d, Tag=%d\n",
 				    i, host, port, que, sp->num);
 
@@ -1993,7 +1993,7 @@ istgt_ig_reload_delete(ISTGT_Ptr istgt)
 		rc = istgt_ig_exist_num(istgt->config, igp->tag);
 		if (rc < 0) {
 			if (igp->ref != 0) {
-				ISTGT_ERRLOG("delete request for " +
+				ISTGT_ERRLOG("delete request for "
 				    "referenced IG%d\n", igp->tag);
 			} else {
 				ISTGT_NOTICELOG("delete IG%d\n", igp->tag);
@@ -2079,7 +2079,7 @@ istgt_ig_reload_update(ISTGT_Ptr istgt)
 			if (rc < 0) {
 				rc = istgt_add_initiator_group(istgt, sp);
 				if (rc < 0) {
-					ISTGT_ERRLOG("add_initiator_group() " +
+					ISTGT_ERRLOG("add_initiator_group() "
 					    "failed\n");
 					goto skip_ig;
 				}
@@ -2088,7 +2088,7 @@ istgt_ig_reload_update(ISTGT_Ptr istgt)
 				rc = istgt_update_initiator_group(istgt, sp);
 				if (rc < 0) {
 					ISTGT_ERRLOG(
-					    "update_initiator_group() " +
+					    "update_initiator_group() "
 					    "failed\n");
 					goto skip_ig;
 				} else if (rc == 0) {
@@ -2173,7 +2173,7 @@ istgt_reload(ISTGT_Ptr istgt)
 
 	istgt->config_old = NULL;
 	istgt_free_config(config_old);
-	ISTGT_NOTICELOG("reload configuration#%"PRIu32" end " +
+	ISTGT_NOTICELOG("reload configuration#%"PRIu32" end "
 	    "[%s]\n", gen, istgtvers);
 	return (0);
 }
@@ -2216,7 +2216,7 @@ istgt_pg_delete(ISTGT_Ptr istgt)
 		rc = istgt_pg_exist_num(istgt->config, pgp->tag);
 		if (rc < 0) {
 			if (pgp->ref != 0) {
-				ISTGT_ERRLOG("delete request for " +
+				ISTGT_ERRLOG("delete request for "
 				    "referenced PG%d\n", pgp->tag);
 			} else {
 				ISTGT_NOTICELOG("delete PG%d\n", pgp->tag);
@@ -2264,7 +2264,7 @@ istgt_pg_update(ISTGT_Ptr istgt)
 				rc = istgt_add_portal_group(istgt,
 				    sp, &pgp_idx);
 				if (rc < 0) {
-					ISTGT_ERRLOG("add_portal_group() " +
+					ISTGT_ERRLOG("add_portal_group() "
 					    "failed\n");
 					goto skip_pg;
 				}
@@ -2280,7 +2280,7 @@ istgt_pg_update(ISTGT_Ptr istgt)
 					ISTGT_TRACELOG(ISTGT_TRACE_DEBUG,
 					    "skip for PG%d\n", sp->num);
 				} else if (pgp->ref != 0) {
-					ISTGT_ERRLOG("update request for " +
+					ISTGT_ERRLOG("update request for "
 					    "referenced PG%d\n", pgp->tag);
 				} else {
 					/* delete old sock */
@@ -2292,7 +2292,7 @@ istgt_pg_update(ISTGT_Ptr istgt)
 					    sp, &pgp_idx);
 					if (rc < 0) {
 						ISTGT_ERRLOG(
-						    "update_portal_group() " +
+						    "update_portal_group() "
 						    "failed\n");
 						goto skip_pg;
 					} else if (rc == 0) {
@@ -2408,7 +2408,7 @@ reload:
 				    &event);
 				if (rc == -1) {
 					MTX_UNLOCK(&istgt->mutex);
-					ISTGT_ERRLOG("epoll_ctl() failed, " +
+					ISTGT_ERRLOG("epoll_ctl() failed, "
 					    "errno:%d\n", errno);
 					close(epfd);
 					return (-1);
@@ -2561,12 +2561,14 @@ reload:
 			continue;
 		}
 		// TODO
-		if (events.data.fd == SIGINT || events.data.fd == SIGTERM) {
-			ISTGT_TRACELOG(ISTGT_TRACE_DEBUG,
-					"kevent SIGNAL SIGINT/SIGTERM\n");
-			break;
-		}
-		*/
+		/*
+		 * if (events.data.fd == SIGINT || events.data.fd == SIGTERM) {
+		 * 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG,
+		 * 			"kevent SIGNAL SIGINT/SIGTERM\n");
+		 * 	break;
+		 * }
+		 */
+
 		/*
 		 * if (events.events == SIGINT || events.events == SIGTERM) {
 		 * 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "kevent SIGNAL\n");
@@ -2598,7 +2600,7 @@ reload:
 				rc = accept(events.data.fd,
 				    (struct sockaddr *) &sa, &salen);
 				if (rc < 0) {
-					ISTGT_ERRLOG("accept error errno:%d " +
+					ISTGT_ERRLOG("accept error errno:%d "
 					    "rc:%d\n", errno, rc);
 					continue;
 				}
@@ -2607,7 +2609,7 @@ reload:
 				    (struct sockaddr *) &sa, salen);
 				if (rc < 0) {
 					close(sock);
-					ISTGT_ERRLOG("istgt_create_conn() " +
+					ISTGT_ERRLOG("istgt_create_conn() "
 					    "failed\n");
 					continue;
 				}
@@ -2631,7 +2633,7 @@ reload:
 				rc = accept(events.data.fd,
 				    (struct sockaddr *) &sa, &salen);
 				if (rc < 0) {
-					ISTGT_ERRLOG("accept error errno:%d " +
+					ISTGT_ERRLOG("accept error errno:%d "
 					    "rc:%d\n", errno, rc);
 					continue;
 				}
@@ -2641,7 +2643,7 @@ reload:
 				    (struct sockaddr *) &sa, salen);
 				if (rc < 0) {
 					close(sock);
-					ISTGT_ERRLOG("istgt_create_uctl() " +
+					ISTGT_ERRLOG("istgt_create_uctl() "
 					    "failed\n");
 					continue;
 				}
@@ -2680,7 +2682,7 @@ reload:
 				rc2 =
 				    pthread_cond_broadcast(&istgt->reload_cond);
 				if (rc2 != 0) {
-					ISTGT_ERRLOG("cond_broadcast() " +
+					ISTGT_ERRLOG("cond_broadcast() "
 					"failed\n");
 				}
 				MTX_UNLOCK(&istgt->reload_mutex);
@@ -2696,7 +2698,7 @@ reload:
 				rc2 =
 				    pthread_cond_broadcast(&istgt->reload_cond);
 				if (rc2 != 0) {
-					ISTGT_ERRLOG("cond_broadcast() " +
+					ISTGT_ERRLOG("cond_broadcast() "
 					"failed\n");
 				}
 				MTX_UNLOCK(&istgt->reload_mutex);
@@ -2842,10 +2844,10 @@ void *timerfn(void
 					ms = diff.tv_sec * 1000;
 					ms += diff.tv_nsec / 1000000;
 					if (ms > check_interval) {
-						ISTGT_NOTICELOG("LU:%lu " +
-						    "CSN:0x%x TT:%x " +
-						    "OP:%2.2x:%x:%s(%lu+%u) " +
-						    "not responded since " +
+						ISTGT_NOTICELOG("LU:%lu "
+						    "CSN:0x%x TT:%x "
+						    "OP:%2.2x:%x:%s(%lu+%u) "
+						    "not responded since "
 						    "%d seconds\n",
 						    lu_cmd->lun,
 						    lu_cmd->CmdSN,
@@ -3028,7 +3030,7 @@ main(int argc, char **argv)
 			if ((g_num_luworkers > (ISTGT_MAX_NUM_LUWORKERS - 1)) ||
 			    (g_num_luworkers <= 0)) {
 				g_num_luworkers = 0;
-				fprintf(stderr, "Incorrect number of" +
+				fprintf(stderr, "Incorrect number of "
 				    "lu worker threads specified\n");
 				usage();
 				exit(EXIT_FAILURE);
