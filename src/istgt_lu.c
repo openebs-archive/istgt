@@ -1628,6 +1628,14 @@ update_unitInquiry(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 	char buf[MAX_TMPBUF];
 	const char *vendor, *product, *revision, *serial;
 	int nbs;
+	//uint64_t nbs64;
+#if 0
+	/* disabled now */
+	nbs64 = istgt_lu_get_nbserial(istgt->nodebase);
+	nbs = (int) (nbs64 % 900) * 100000;
+#else
+	nbs = 0;
+#endif
 	vendor = istgt_get_nmval(sp, "UnitInquiry", 0, 0);
 	product = istgt_get_nmval(sp, "UnitInquiry", 0, 1);
 	revision = istgt_get_nmval(sp, "UnitInquiry", 0, 2);
@@ -2177,7 +2185,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	//uint64_t nbs64;
 	int pg_tag_i, ig_tag_i;
 	int nbs;
-	int i, j, k;
+	int i, j;
 	int rc;
 	int ret;
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "add unit %d\n", sp->num);
