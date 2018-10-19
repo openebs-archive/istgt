@@ -1381,12 +1381,18 @@ sp_validate(ISTGT_Ptr istgt, ISTGT_LU_Ptr lu, CF_SECTION *sp)
 		ISTGT_ERRLOG("LU%d: duplicate unit\n", sp->num);
 		return (-1);
 	}
-
+	
 	val = istgt_get_val(sp, "Comment");
 	if (val != NULL) {
 		ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "Comment %s\n", val);
 	}
-
+	
+	val = istgt_get_val(sp, "TargetName");
+	if (val == NULL) {
+		ISTGT_ERRLOG("LU%d: TargetName not found\n", lu->num);
+		return (-1);	
+	}
+	return (0);
 }
 
 static int 
@@ -2191,11 +2197,6 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	nbs = 0;
 #endif
 
-	val = istgt_get_val(sp, "TargetName");
-	if (val == NULL) {
-		ISTGT_ERRLOG("LU%d: TargetName not found\n", lu->num);
-		goto error_return;	
-	}
 
 	lu->volname = xstrdup(val);
 	if (strncasecmp(val, "iqn.", 4) != 0
