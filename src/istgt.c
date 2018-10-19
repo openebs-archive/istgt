@@ -2625,6 +2625,7 @@ reload:
 				 *    "flags %x\n", kev.flags);
 				 * }
 				 */
+				n--;
 				memset(&sa, 0, sizeof (sa));
 				salen = sizeof (sa);
 				ISTGT_TRACELOG(ISTGT_TRACE_NET,
