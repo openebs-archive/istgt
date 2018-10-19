@@ -2200,6 +2200,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	nbs = 0;
 #endif
 
+	sp_validate(istgt, lu, *sp);
 
 	lu->volname = xstrdup(val);
 	if (strncasecmp(val, "iqn.", 4) != 0
