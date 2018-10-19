@@ -1369,91 +1369,35 @@ istgt_lu_set_local_settings(ISTGT_Ptr istgt, CF_SECTION *sp, ISTGT_LU_Ptr lu)
 
 extern int g_num_luworkers;
 
-static int
-istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
+static int 
+sp_validate(ISTGT_Ptr istgt, ISTGT_LU_Ptr lu, CF_SECTION *sp)
 {
-	char buf[MAX_TMPBUF], buf2[MAX_TMPBUF];
-	ISTGT_LU_Ptr lu;
-	PORTAL_GROUP *pgp;
-	INITIATOR_GROUP *igp;
-	const char *vendor, *product, *revision, *serial;
-	const char *pg_tag, *ig_tag;
-	const char *ag_tag;
-	const char *flags, *file, *size, *rsz;
-	const char *key, *val;
-	uint64_t msize;
-	//uint64_t nbs64;
-	int pg_tag_i, ig_tag_i;
-	int ag_tag_i;
-	int rpm, formfactor, opt_tlen;
-	int mflags;
-	int slot;
-	int nbs;
-	int i, j, k;
-	int rc;
-	int gotstorage = 0;
-	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "add unit %d\n", sp->num);
-
+	const char *val; 
 	if (sp->num >= MAX_LOGICAL_UNIT) {
 		ISTGT_ERRLOG("LU%d: over maximum unit number\n", sp->num);
-		return -1;
+		return (-1);
 	}
 	if (istgt->logical_unit[sp->num] != NULL) {
 		ISTGT_ERRLOG("LU%d: duplicate unit\n", sp->num);
-		return -1;
+		return (-1);
 	}
-
-	lu = xmalloc(sizeof *lu);
-	memset(lu, 0, sizeof *lu);
-	lu->num = sp->num;
-	lu->istgt = istgt;
-	lu->state = ISTGT_STATE_INVALID;
-#if 0
-	/* disabled now */
-	nbs64 = istgt_lu_get_nbserial(istgt->nodebase);
-	nbs = (int) (nbs64 % 900) * 100000;
-#else
-	nbs = 0;
-#endif
 
 	val = istgt_get_val(sp, "Comment");
 	if (val != NULL) {
 		ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "Comment %s\n", val);
 	}
 
-	val = istgt_get_val(sp, "TargetName");
-	if (val == NULL) {
-		ISTGT_ERRLOG("LU%d: TargetName not found\n", lu->num);
-		goto error_return;
-	}
-	lu->volname = xstrdup(val);
-	if (strncasecmp(val, "iqn.", 4) != 0
-		&& strncasecmp(val, "eui.", 4) != 0
-		&& strncasecmp(val, "naa.", 4) != 0) {
-		snprintf(buf, sizeof buf,"%s:%s", istgt->nodebase, val);
-	} else {
-		snprintf(buf, sizeof buf, "%s", val);
-	}
-	if (istgt_lu_check_iscsi_name(buf) != 0) {
-		ISTGT_ERRLOG("TargetName %s contains an invalid character or format.\n",
-		    buf);
-#if 0
-		goto error_return;
-#endif
-	}
-	lu->name = xstrdup(buf);
-	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "TargetName %s\n",
-				   lu->name);
+}
 
-	val = istgt_get_val(sp, "TargetAlias");
-	if (val == NULL) {
-		lu->alias = NULL;
-	} else {
-		lu->alias = xstrdup(val);
-	}
-	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "TargetAlias %s\n",
-	    lu->alias);
-
+static int 
+update_lu_mapping(ISTGT_Ptr istgt, CF_SECTION *sp, ISTGT_LU_Ptr lu)
+{
+	PORTAL_GROUP *pgp;
+	INITIATOR_GROUP *igp;
+	const char *val;
+	int i;
+	const char *pg_tag, *ig_tag;
+	int pg_tag_i, ig_tag_i;
 	val = istgt_get_val(sp, "Mapping");
 	if (val == NULL) {
 		/* no map */
@@ -1466,29 +1410,29 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 				break;
 			if (lu->maxmap >= MAX_LU_MAP) {
 				ISTGT_ERRLOG("LU%d: too many mapping\n", lu->num);
-				goto error_return;
+				return (-1);
 			}
 			pg_tag = istgt_get_nmval(sp, "Mapping", i, 0);
 			ig_tag = istgt_get_nmval(sp, "Mapping", i, 1);
 			if (pg_tag == NULL || ig_tag == NULL) {
 				ISTGT_ERRLOG("LU%d: mapping error\n", lu->num);
-				goto error_return;
+				return (-1);
 			}
 			if (strncasecmp(pg_tag, "PortalGroup",
 				strlen("PortalGroup")) != 0
 			    || sscanf(pg_tag, "%*[^0-9]%d", &pg_tag_i) != 1) {
 				ISTGT_ERRLOG("LU%d: mapping portal error\n", lu->num);
-				goto error_return;
+				return (-1);
 			}
 			if (strncasecmp(ig_tag, "InitiatorGroup",
 				strlen("InitiatorGroup")) != 0
 			    || sscanf(ig_tag, "%*[^0-9]%d", &ig_tag_i) != 1) {
 				ISTGT_ERRLOG("LU%d: mapping initiator error\n", lu->num);
-				goto error_return;
+				return (-1);
 			}
 			if (pg_tag_i < 1 || ig_tag_i < 1) {
 				ISTGT_ERRLOG("LU%d: invalid group tag\n", lu->num);
-				goto error_return;
+				return (-1);
 			}
 			MTX_LOCK(&istgt->mutex);
 			pgp = istgt_lu_find_portalgroup(istgt, pg_tag_i);
@@ -1496,14 +1440,14 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 				MTX_UNLOCK(&istgt->mutex);
 				ISTGT_ERRLOG("LU%d: PortalGroup%d not found\n",
 							 lu->num, pg_tag_i);
-				goto error_return;
+				return (-1);
 			}
 			igp = istgt_lu_find_initiatorgroup(istgt, ig_tag_i);
 			if (igp == NULL) {
 				MTX_UNLOCK(&istgt->mutex);
 				ISTGT_ERRLOG("LU%d: InitiatorGroup%d not found\n",
 				    lu->num, ig_tag_i);
-				goto error_return;
+				return (-1);
 			}
 			pgp->ref++;
 			igp->ref++;
@@ -1513,17 +1457,22 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 			//lu->map[i].pg_aas = AAS_ACTIVE_NON_OPTIMIZED;
 			lu->map[i].pg_aas |= AAS_STATUS_IMPLICIT;
 			lu->map[i].ig_tag = ig_tag_i;
-			ISTGT_TRACELOG(ISTGT_TRACE_DEBUG,
-			    "Mapping PortalGroup%d InitiatorGroup%d\n",
+			ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, 
+			    "Mapping PortalGroup%d InitiatorGroup%d\n", 
 			    lu->map[i].pg_tag, lu->map[i].ig_tag);
 			lu->maxmap = i + 1;
 		}
 	}
 	if (lu->maxmap == 0) {
 		ISTGT_ERRLOG("LU%d: no Mapping\n", lu->num);
-		goto error_return;
+		return (-1);
 	}
+	return (0);
+}
 
+static int
+verify_authMethod(ISTGT_Ptr istgt, ISTGT_LU_Ptr lu,CF_SECTION *sp)
+{
 	val = istgt_get_val(sp, "AuthMethod");
 	if (val == NULL) {
 		/* none */
@@ -1549,12 +1498,12 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 				lu->auth_chap_mutual = 0;
 			} else {
 				ISTGT_ERRLOG("LU%d: unknown auth\n", lu->num);
-				goto error_return;
+				return (-1);
 			}
 		}
 		if (lu->auth_chap_mutual && !lu->auth_chap) {
 			ISTGT_ERRLOG("LU%d: Mutual but not CHAP\n", lu->num);
-			goto error_return;
+			return (-1);
 		}
 	}
 	if (lu->no_auth_chap != 0) {
@@ -1566,7 +1515,13 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 		    lu->auth_chap ? "CHAP" : "",
 		    lu->auth_chap_mutual ? "Mutual" : "");
 	}
+	return (0);
+}
 
+static int
+verify_authGroup(ISTGT_Ptr istgt, ISTGT_LU_Ptr lu, CF_SECTION *sp)
+{
+	const char *val;
 	val = istgt_get_val(sp, "AuthGroup");
 	if (val == NULL) {
 		lu->auth_group = 0;
@@ -1579,12 +1534,12 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 				strlen("AuthGroup")) != 0
 			    || sscanf(ag_tag, "%*[^0-9]%d", &ag_tag_i) != 1) {
 				ISTGT_ERRLOG("LU%d: auth group error\n", lu->num);
-				goto error_return;
+				return (-1);
 			}
 			if (ag_tag_i == 0) {
 				ISTGT_ERRLOG("LU%d: invalid auth group %d\n", lu->num,
 				    ag_tag_i);
-				goto error_return;
+				return (-1);
 			}
 		}
 		lu->auth_group = ag_tag_i;
@@ -1595,7 +1550,14 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 		ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "AuthGroup AuthGroup%d\n",
 		    lu->auth_group);
 	}
+	return (0);
+}
 
+static int
+check_useDigest(ISTGT_LU_Ptr lu, CF_SECTION *sp)
+{
+	const char *val;
+	int i;
 	val = istgt_get_val(sp, "UseDigest");
 	if (val != NULL) {
 		for (i = 0; ; i++) {
@@ -1611,7 +1573,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 				lu->data_digest = 0;
 			} else {
 				ISTGT_ERRLOG("LU%d: unknown digest\n", lu->num);
-				goto error_return;
+				return (-1);
 			}
 		}
 	}
@@ -1622,56 +1584,17 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 		    lu->header_digest ? "Header" : "",
 		    lu->data_digest ? "Data" : "");
 	}
+	return (0);
+}
 
-	val = istgt_get_val(sp, "ReadOnly");
-	if (val == NULL) {
-		lu->readonly = 0;
-	} else if (strcasecmp(val, "No") == 0){
-		lu->readonly = 0;
-	} else if (strcasecmp(val, "Yes") == 0) {
-		lu->readonly = 1;
-	}
-	
-	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "ReadOnly %s\n",
-	    lu->readonly ? "Yes" : "No");
-#ifdef REPLICATION
-	val = istgt_get_val(sp, "ReplicationFactor");
-	if (val == NULL) {
-		ISTGT_ERRLOG("ReplicationFactor not found in conf file\n");
-		goto error_return;
-	} else {
-		lu->replication_factor = (int) strtol(val, NULL, 10);
-		if (lu->replication_factor > MAXREPLICA) {
-			ISTGT_ERRLOG("Max replication factor is %d.. "
-			    "given %d\n", MAXREPLICA, lu->replication_factor);
-			goto error_return;
-		}
-	}
-
-	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "ReplicationFactor %d\n",
-	    lu->replication_factor);
-
-	val = istgt_get_val(sp, "ConsistencyFactor");
-	if (val == NULL) {
-		ISTGT_ERRLOG("ConsistencyFactor not found in conf file\n");
-		goto error_return;
-	} else {
-		lu->consistency_factor = (int) strtol(val, NULL, 10);
-	}
-
-	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "ConsistencyFactor %d\n",
-	    lu->consistency_factor);
-
-	if(lu->replication_factor <= 0 || lu->consistency_factor <= 0 ||
-		lu->replication_factor < lu->consistency_factor) {
-		ISTGT_ERRLOG("Invalid ReplicationFactor/ConsistencyFactor or their ratio\n");
-		goto error_return;
-	}
-#endif
+static int 
+update_lu_unitType(ISTGT_LU_Ptr lu, CF_SECTION *sp)
+{
+	const char *val;
 	val = istgt_get_val(sp, "UnitType");
 	if (val == NULL) {
 		ISTGT_ERRLOG("LU%d: unknown unit type\n", lu->num);
-		goto error_return;
+		return (-1);
 	}
 	if (strcasecmp(val, "Pass") == 0) {
 		lu->type = ISTGT_LU_TYPE_PASS;
@@ -1683,20 +1606,19 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 		lu->type = ISTGT_LU_TYPE_TAPE;
 	} else {
 		ISTGT_ERRLOG("LU%d: unknown unit type\n", lu->num);
-		goto error_return;
+		return (-1);
 	}
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "UnitType %d (%s)\n",
 	    lu->type, val);
+	return (0);
+}
 
-	val = istgt_get_val(sp, "UnitOnline");
-	if (val == NULL) {
-		lu->online = 1;
-	} else if (strcasecmp(val, "Yes") == 0) {
-		lu->online = 1;
-	}
-	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "UnitOnline %s\n",
-	    lu->online ? "Yes" : "No");
-
+static int
+update_unitInquiry(ISTGT_LU_Ptr lu, CF_SECTION *sp)
+{
+	char buf[MAX_TMPBUF], buf2[MAX_TMPBUF];
+	const char *vendor, *product, *revision, *serial;
+	int nbs;
 	vendor = istgt_get_nmval(sp, "UnitInquiry", 0, 0);
 	product = istgt_get_nmval(sp, "UnitInquiry", 0, 1);
 	revision = istgt_get_nmval(sp, "UnitInquiry", 0, 2);
@@ -1762,7 +1684,13 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "UnitInquiry %s %s %s %s\n",
 	    lu->inq_vendor, lu->inq_product, lu->inq_revision,
 	    lu->inq_serial);
+	return (0);
+}
 
+static int
+update_blockLength(ISTGT_LU_Ptr lu, CF_SECTION *sp)
+{
+	const char *val;
 	val = istgt_get_val(sp, "BlockLength");
 	if (val == NULL) {
 		switch (lu->type) {
@@ -1782,9 +1710,13 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	} else {
 		lu->blocklen = (int) strtol(val, NULL, 10);
 	}
+	return (0);
+}
 
-	lu->rshift = 0;
-	lu->recordsize = lu->blocklen; //old volumes
+static int
+update_PhysRecordLength(ISTGT_LU_Ptr lu, CF_SECTION *sp)
+{
+	const char *val;
 	val = istgt_get_val(sp, "PhysRecordLength");
 	if (val != NULL) {
 		int lbPerRecord, lrsize;
@@ -1800,7 +1732,13 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 			}
 		}
 	}
+	return (0);
+}
 
+static int
+update_lu_queueDepth(ISTGT_LU_Ptr lu, CF_SECTION *sp)
+{
+	const char *val;
 	val = istgt_get_val(sp, "QueueDepth");
 	if (val == NULL) {
 		switch (lu->type) {
@@ -1818,19 +1756,18 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 		lu->queue_depth = (int) strtol(val, NULL, 10);
 	}
 	if (lu->queue_depth < 0 || lu->queue_depth >= MAX_LU_QUEUE_DEPTH) {
- 		ISTGT_ERRLOG("LU%d: queue depth %d is not in range, resetting to %d\n", lu->num, lu->queue_depth, DEFAULT_LU_QUEUE_DEPTH);
+ 		ISTGT_ERRLOG("LU%d: queue depth %d is not in range, resetting
+		    to %d\n", lu->num, lu->queue_depth, DEFAULT_LU_QUEUE_DEPTH);
  		lu->queue_depth = DEFAULT_LU_QUEUE_DEPTH;
-		goto error_return;
+		return (-1);
 	}
+	return (0);
+}
 
-	lu->luworkers = 0;
-	lu->luworkersActive = 0;
-	lu->conns = 0;
-	lu->limit_q_size = 0;
- 
- 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "BlockLength %d, PhysRecordLength %d, QueueDepth %d\n",
- 	    lu->blocklen, lu->recordsize, lu->queue_depth);
-
+static int 
+update_lu_workers(ISTGT_LU_Ptr lu, CF_SECTION *sp)
+{
+	const char *val;
 	val = istgt_get_val(sp, "Luworkers");
 	if (val == NULL) {
 		switch (lu->type) {
@@ -1850,8 +1787,21 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 		else if (lu->luworkers < 1)
 			lu->luworkers = 1;
 	}
+	return (0);
+}
 
-	lu->maxlun = 0;
+static int
+update_and_validate_lu_lunDetails(ISTGT_Ptr istgt,ISTGT_LU_Ptr, CF_SECTION *sp)
+{
+	char buf[MAX_TMPBUF], buf2[MAX_TMPBUF];
+	int i, j, k;
+	const char *key, *val;
+	const char *flags, *file, *size, *rsz;
+	int gotstorage = 0;
+	uint64_t msize;
+	int rpm, formfactor, opt_tlen;
+	int mflags;
+	int slot;
 	for (i = 0; i < MAX_LU_LUN; i++) {
 		lu->lun[i].type = ISTGT_LU_LUN_TYPE_NONE;
 		lu->lun[i].rotationrate = DEFAULT_LU_ROTATIONRATE;
@@ -1867,7 +1817,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 		lu->lun[i].serial = NULL;
 		lu->lun[i].spec = NULL;
 		lu->lun[i].opt_tlen = 1;
-		snprintf(buf, sizeof buf, "LUN%d", i);
+		snprintf(buf, sizeof(buf), "LUN%d", i);
 		val = istgt_get_val(sp, buf);
 		if (val == NULL)
 			continue;
@@ -1886,14 +1836,14 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 			if (strcasecmp(val, "Device") == 0) {
 				if (lu->lun[i].type != ISTGT_LU_LUN_TYPE_NONE) {
 					ISTGT_ERRLOG("LU%d: duplicate LUN%d\n", lu->num, i);
-					goto error_return;
+					return (-1);
 				}
 				lu->lun[i].type = ISTGT_LU_LUN_TYPE_DEVICE;
 
 				file = istgt_get_nmval(sp, buf, j, 1);
 				if (file == NULL) {
 					ISTGT_ERRLOG("LU%d: LUN%d: format error\n", lu->num, i);
-					goto error_return;
+					return (-1);
 				}
 				lu->lun[i].u.device.file = xstrdup(file);
 				ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "Device file=%s\n",
@@ -1901,7 +1851,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 			} else if (strcasecmp(val, "Storage") == 0) {
 				if (lu->lun[i].type != ISTGT_LU_LUN_TYPE_NONE) {
 					ISTGT_ERRLOG("LU%d: duplicate LUN%d\n", lu->num, i);
-					goto error_return;
+					return (-1);
 				}
 				lu->lun[i].type = ISTGT_LU_LUN_TYPE_STORAGE;
 
@@ -1913,7 +1863,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 				if (file == NULL || size == NULL) {
 #endif
 					ISTGT_ERRLOG("LU%d: LUN%d: format error\n", lu->num, i);
-					goto error_return;
+					return (-1);
 				}
 				if (rsz == NULL) {
 					lu->lun[i].u.storage.rsize = 0;
@@ -1952,7 +1902,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 #endif
 				if (lu->lun[i].u.storage.size == 0) {
 					ISTGT_ERRLOG("LU%d: LUN%d: Auto size error (%s)\n", lu->num, i, file);
-					goto error_return;
+					return (-1);
 				}
 				lu->lun[i].u.storage.fd = -1;
 #ifdef	REPLICATION
@@ -1964,7 +1914,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 			} else if (strcasecmp(val, "Removable") == 0) {
 				if (lu->lun[i].type != ISTGT_LU_LUN_TYPE_NONE) {
 					ISTGT_ERRLOG("LU%d: duplicate LUN%d\n", lu->num, i);
-					goto error_return;
+					return (-1);
 				}
 				lu->lun[i].type = ISTGT_LU_LUN_TYPE_REMOVABLE;
 
@@ -1973,7 +1923,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 				size = istgt_get_nmval(sp, buf, j, 3);
 				if (flags == NULL || file == NULL || size == NULL) {
 					ISTGT_ERRLOG("LU%d: LUN%d: format error\n", lu->num, i);
-					goto error_return;
+					return (-1);
 				}
 				mflags = istgt_lu_parse_media_flags(flags);
 				msize = istgt_lu_parse_media_size(file, size, &mflags);
@@ -1981,7 +1931,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 					/* empty media */
 				} else if (msize == 0) {
 					ISTGT_ERRLOG("LU%d: LUN%d: format error\n", lu->num, i);
-					goto error_return;
+					return (-1);
 				}
 				lu->lun[i].u.removable.type = 0;
 				lu->lun[i].u.removable.id = 0;
@@ -2005,20 +1955,20 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 					}
 				} else if (lu->lun[i].type != ISTGT_LU_LUN_TYPE_SLOT) {
 					ISTGT_ERRLOG("LU%d: duplicate LUN%d\n", lu->num, i);
-					goto error_return;
+					return (-1);
 				}
 				lu->lun[i].type = ISTGT_LU_LUN_TYPE_SLOT;
 				if (sscanf(val, "%*[^0-9]%d", &slot) != 1) {
 					ISTGT_ERRLOG("LU%d: slot number error\n", lu->num);
-					goto error_return;
+					return (-1);
 				}
 				if (slot < 0 || slot >= MAX_LU_LUN_SLOT) {
 					ISTGT_ERRLOG("LU%d: slot number range error\n", lu->num);
-					goto error_return;
+					return (-1);
 				}
 				if (lu->lun[i].u.slot.present[slot]) {
 					ISTGT_ERRLOG("LU%d: duplicate slot %d\n", lu->num, slot);
-					goto error_return;
+					return (-1);
 				}
 				lu->lun[i].u.slot.present[slot] = 1;
 				if (slot + 1 > lu->lun[i].u.slot.maxslot) {
@@ -2030,13 +1980,13 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 				size = istgt_get_nmval(sp, buf, j, 3);
 				if (flags == NULL || file == NULL || size == NULL) {
 					ISTGT_ERRLOG("LU%d: LUN%d: format error\n", lu->num, i);
-					goto error_return;
+					return (-1);
 				}
 				mflags = istgt_lu_parse_media_flags(flags);
 				msize = istgt_lu_parse_media_size(file, size, &mflags);
 				if (msize == 0) {
 					ISTGT_ERRLOG("LU%d: LUN%d: format error\n", lu->num, i);
-					goto error_return;
+					return (-1);
 				}
 				lu->lun[i].u.slot.flags[slot] = mflags;
 				lu->lun[i].u.slot.file[slot] = xstrdup(file);
@@ -2052,14 +2002,14 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 				val = istgt_get_nmval(sp, buf, j, 2);
 				if (key == NULL || val == NULL) {
 					ISTGT_ERRLOG("LU%d: LUN%d: format error\n", lu->num, i);
-					goto error_return;
+					return (-1);
 				}
 				if (strcasecmp(key, "Serial") == 0) {
 					/* set LUN serial */
 					if (strlen(val) == 0) {
 						ISTGT_ERRLOG("LU%d: LUN%d: no serial\n",
 						    lu->num, i);
-						goto error_return;
+						return (-1);
 					}
 					xfree(lu->lun[i].serial);
 					lu->lun[i].serial = xstrdup(val);
@@ -2111,7 +2061,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 					if (strcasecmp(val, "Enable") == 0) {
 						if (lu->lun[i].unmap == 0) {
                                                         ISTGT_ERRLOG("LU%d: LUN%d: Wzero enabled while Unmap disabled\n", lu->num, i);
-                                                        goto error_return;
+                                                        return (-1);
                                                 }
 						lu->lun[i].wzero = 1;
 					} else if (strcasecmp(val, "Disable") == 0) {
@@ -2176,13 +2126,13 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 				continue;
 			} else {
 				ISTGT_ERRLOG("LU%d: unknown lun type\n", lu->num);
-				goto error_return;
+				return (-1);
 			}
 		}
 		if (lu->lun[i].type == ISTGT_LU_LUN_TYPE_SLOT) {
 			if (lu->lun[i].u.slot.maxslot == 0) {
 				ISTGT_ERRLOG("LU%d: no slot\n", lu->num);
-				goto error_return;
+				return (-1);
 			}
 			ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "maxslot=%d\n",
 			    lu->lun[i].u.slot.maxslot);
@@ -2204,6 +2154,180 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 		}
 		lu->maxlun = i + 1;
 	}
+	return (0);
+}
+
+static int
+istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
+{
+	char buf[MAX_TMPBUF], buf2[MAX_TMPBUF];
+	ISTGT_LU_Ptr lu;
+	PORTAL_GROUP *pgp;
+	INITIATOR_GROUP *igp;
+	const char *pg_tag, *ig_tag;
+	const char *ag_tag;
+	const char *key, *val;
+	uint64_t msize;
+	//uint64_t nbs64;
+	int pg_tag_i, ig_tag_i;
+	int ag_tag_i;
+	int mflags;
+	int nbs;
+	int i, j, k;
+	int rc;
+	int ret;
+	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "add unit %d\n", sp->num);
+
+	lu = xmalloc(sizeof *lu);
+	memset(lu, 0, sizeof *lu);
+	lu->num = sp->num;
+	lu->istgt = istgt;
+	lu->state = ISTGT_STATE_INVALID;
+#if 0
+	/* disabled now */
+	nbs64 = istgt_lu_get_nbserial(istgt->nodebase);
+	nbs = (int) (nbs64 % 900) * 100000;
+#else
+	nbs = 0;
+#endif
+
+	val = istgt_get_val(sp, "TargetName");
+	if (val == NULL) {
+		ISTGT_ERRLOG("LU%d: TargetName not found\n", lu->num);
+		goto error_return;	
+	}
+
+	lu->volname = xstrdup(val);
+	if (strncasecmp(val, "iqn.", 4) != 0
+		&& strncasecmp(val, "eui.", 4) != 0
+		&& strncasecmp(val, "naa.", 4) != 0) {
+		snprintf(buf, sizeof buf,"%s:%s", istgt->nodebase, val);
+	} else {
+		snprintf(buf, sizeof buf, "%s", val);
+	}
+	if (istgt_lu_check_iscsi_name(buf) != 0) {
+		ISTGT_ERRLOG("TargetName %s contains an invalid character or format.\n",
+		    buf);
+#if 0
+		goto error_return;
+#endif
+	}
+	lu->name = xstrdup(buf);
+	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "TargetName %s\n",
+				   lu->name);
+
+	val = istgt_get_val(sp, "TargetAlias");
+	if (val == NULL) {
+		lu->alias = NULL;
+	} else {
+		lu->alias = xstrdup(val);
+	}
+	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "TargetAlias %s\n",
+	    lu->alias);
+
+	ret = update_lu_mapping(istgt, sp, lu);
+	if(ret == -1)
+		goto error_return;
+	
+	ret = verify_authMethod(istgt, lu, sp);
+	if(ret == -1)
+		goto error_return;
+
+	ret = verify_authGroup(istgt, lu, sp);
+	if(ret == -1)
+		goto error_return;
+
+	ret = check_useDigest(lu, sp);
+	if(ret == -1)
+		goto error_return;
+
+	val = istgt_get_val(sp, "ReadOnly");
+	if (val == NULL) {
+		lu->readonly = 0;
+	} else if (strcasecmp(val, "No") == 0){
+		lu->readonly = 0;
+	} else if (strcasecmp(val, "Yes") == 0) {
+		lu->readonly = 1;
+	}
+	
+	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "ReadOnly %s\n",
+	    lu->readonly ? "Yes" : "No");
+
+#ifdef REPLICATION
+	val = istgt_get_val(sp, "ReplicationFactor");
+	if (val == NULL) {
+		ISTGT_ERRLOG("ReplicationFactor not found in conf file\n");
+		goto error_return;
+	} else {
+		lu->replication_factor = (int) strtol(val, NULL, 10);
+		if (lu->replication_factor > MAXREPLICA) {
+			ISTGT_ERRLOG("Max replication factor is %d.. "
+			    "given %d\n", MAXREPLICA, lu->replication_factor);
+			goto error_return;
+		}
+	}
+
+	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "ReplicationFactor %d\n",
+	    lu->replication_factor);
+
+	val = istgt_get_val(sp, "ConsistencyFactor");
+	if (val == NULL) {
+		ISTGT_ERRLOG("ConsistencyFactor not found in conf file\n");
+		goto error_return;
+	} else {
+		lu->consistency_factor = (int) strtol(val, NULL, 10);
+	}
+
+	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "ConsistencyFactor %d\n",
+	    lu->consistency_factor);
+
+	if(lu->replication_factor <= 0 || lu->consistency_factor <= 0 ||
+		lu->replication_factor < lu->consistency_factor) {
+		ISTGT_ERRLOG("Invalid ReplicationFactor/ConsistencyFactor or their ratio\n");
+		goto error_return;
+	}
+#endif
+	ret = update_lu_unitType(lu, sp);
+	if(ret == -1)
+		goto error_return;
+
+	val = istgt_get_val(sp, "UnitOnline");
+	if (val == NULL) {
+		lu->online = 1;
+	} else if (strcasecmp(val, "Yes") == 0) {
+		lu->online = 1;
+	}
+	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "UnitOnline %s\n",
+	    lu->online ? "Yes" : "No");
+
+	ret = update_unitType(lu, sp);
+
+	ret = update_blockLength(lu, sp);
+
+	lu->rshift = 0;
+	lu->recordsize = lu->blocklen; //old volumes
+	
+	ret = upadte_PhysRecordLength(lu, sp);
+
+	ret = update_lu_queueDepth(lu, sp);
+	if(ret == -1)
+		goto error_return;
+
+	lu->luworkers = 0;
+	lu->luworkersActive = 0;
+	lu->conns = 0;
+	lu->limit_q_size = 0;
+ 
+ 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "BlockLength %d, PhysRecordLength %d, QueueDepth %d\n",
+ 	    lu->blocklen, lu->recordsize, lu->queue_depth);
+
+	ret =upadate_lu_workers(lu, sp);
+
+	lu->maxlun = 0;
+	ret = update_and_validate_lu_lunDetails(istgt, lu, sp);
+	if(ret == -1)
+		goto error_return;
+
 	if (lu->maxlun == 0) {
 		ISTGT_ERRLOG("LU%d: no LUN\n", lu->num);
 		goto error_return;
