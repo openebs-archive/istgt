@@ -3202,7 +3202,7 @@ initialize_error:
 	memset(&sigoldact_int, 0, sizeof (sigoldact_int));
 	memset(&sigoldact_term, 0, sizeof (sigoldact_term));
 	memset(&sigoldact_hup, 0, sizeof (sigoldact_hup));
-	memset(&sigoldact_info, 0, sizeof (sigoldact_info);
+	memset(&sigoldact_info, 0, sizeof (sigoldact_info));
 	memset(&sigoldact_wakeup, 0, sizeof (sigoldact_wakeup));
 	memset(&sigoldact_io, 0, sizeof (sigoldact_io));
 	sigact.sa_handler = SIG_IGN;
