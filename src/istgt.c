@@ -3304,8 +3304,7 @@ initialize_error:
 	rc = pthread_create(&timerthread, &istgt->attr, &timerfn, (void *)NULL);
 	if (rc != 0) {
 	    ISTGT_ERRLOG("pthread_create(timerthread) failed\n");
-	}
-	goto initialize_error;
+	    goto initialize_error;
 	}
 
 	rc = istgt_lu_create_threads(istgt);
