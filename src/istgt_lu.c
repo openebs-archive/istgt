@@ -1800,7 +1800,7 @@ update_lu_workers(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 }
 
 static int
-update_and_validate_lu_lunDetails(ISTGT_Ptr istgt,ISTGT_LU_Ptr, CF_SECTION *sp)
+update_and_validate_lu_lunDetails(ISTGT_Ptr istgt,ISTGT_LU_Ptr lu, CF_SECTION *sp)
 {
 	char buf[MAX_TMPBUF], buf2[MAX_TMPBUF];
 	int i, j, k;
@@ -2169,18 +2169,13 @@ update_and_validate_lu_lunDetails(ISTGT_Ptr istgt,ISTGT_LU_Ptr, CF_SECTION *sp)
 static int
 istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 {
-	char buf[MAX_TMPBUF], buf2[MAX_TMPBUF];
+	char buf[MAX_TMPBUF];
 	ISTGT_LU_Ptr lu;
 	PORTAL_GROUP *pgp;
 	INITIATOR_GROUP *igp;
-	const char *pg_tag, *ig_tag;
-	const char *ag_tag;
-	const char *key, *val;
-	uint64_t msize;
+	const char *val;
 	//uint64_t nbs64;
 	int pg_tag_i, ig_tag_i;
-	int ag_tag_i;
-	int mflags;
 	int nbs;
 	int i, j, k;
 	int rc;
@@ -2200,7 +2195,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	nbs = 0;
 #endif
 
-	sp_validate(istgt, lu, *sp);
+	sp_validate(istgt, lu, sp);
 
 	lu->volname = xstrdup(val);
 	if (strncasecmp(val, "iqn.", 4) != 0
@@ -2234,11 +2229,11 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	if(ret == -1)
 		goto error_return;
 	
-	ret = verify_authMethod(istgt, lu, sp);
+	ret = verify_authMethod(lu, sp);
 	if(ret == -1)
 		goto error_return;
 
-	ret = verify_authGroup(istgt, lu, sp);
+	ret = verify_authGroup(lu, sp);
 	if(ret == -1)
 		goto error_return;
 
@@ -2305,14 +2300,16 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "UnitOnline %s\n",
 	    lu->online ? "Yes" : "No");
 
-	ret = update_unitType(lu, sp);
+	ret = update_unitInquiry(lu, sp);
+
+	ret = update_lu_unitType(lu, sp);
 
 	ret = update_blockLength(lu, sp);
 
 	lu->rshift = 0;
 	lu->recordsize = lu->blocklen; //old volumes
 	
-	ret = upadte_PhysRecordLength(lu, sp);
+	ret = update_PhysRecordLength(lu, sp);
 
 	ret = update_lu_queueDepth(lu, sp);
 	if(ret == -1)
@@ -2326,7 +2323,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
  	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "BlockLength %d, PhysRecordLength %d, QueueDepth %d\n",
  	    lu->blocklen, lu->recordsize, lu->queue_depth);
 
-	ret =upadate_lu_workers(lu, sp);
+	ret =update_lu_workers(lu, sp);
 
 	lu->maxlun = 0;
 	ret = update_and_validate_lu_lunDetails(istgt, lu, sp);
