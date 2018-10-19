@@ -1477,8 +1477,9 @@ update_lu_mapping(ISTGT_Ptr istgt, CF_SECTION *sp, ISTGT_LU_Ptr lu)
 }
 
 static int
-verify_authMethod(ISTGT_Ptr istgt, ISTGT_LU_Ptr lu,CF_SECTION *sp)
+verify_authMethod(ISTGT_LU_Ptr lu,CF_SECTION *sp)
 {
+	const char *val;
 	val = istgt_get_val(sp, "AuthMethod");
 	if (val == NULL) {
 		/* none */
@@ -1487,7 +1488,7 @@ verify_authMethod(ISTGT_Ptr istgt, ISTGT_LU_Ptr lu,CF_SECTION *sp)
 		lu->auth_chap_mutual = 0;
 	} else {
 		lu->no_auth_chap = 0;
-		for (i = 0; ; i++) {
+		for (int i = 0; ; i++) {
 			val = istgt_get_nmval(sp, "AuthMethod", 0, i);
 			if (val == NULL)
 				break;
@@ -1525,9 +1526,11 @@ verify_authMethod(ISTGT_Ptr istgt, ISTGT_LU_Ptr lu,CF_SECTION *sp)
 }
 
 static int
-verify_authGroup(ISTGT_Ptr istgt, ISTGT_LU_Ptr lu, CF_SECTION *sp)
+verify_authGroup(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 {
 	const char *val;
+	const char *ag_tag;
+	int ag_tag_i;
 	val = istgt_get_val(sp, "AuthGroup");
 	if (val == NULL) {
 		lu->auth_group = 0;
@@ -1622,7 +1625,7 @@ update_lu_unitType(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 static int
 update_unitInquiry(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 {
-	char buf[MAX_TMPBUF], buf2[MAX_TMPBUF];
+	char buf[MAX_TMPBUF];
 	const char *vendor, *product, *revision, *serial;
 	int nbs;
 	vendor = istgt_get_nmval(sp, "UnitInquiry", 0, 0);
@@ -1762,8 +1765,8 @@ update_lu_queueDepth(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 		lu->queue_depth = (int) strtol(val, NULL, 10);
 	}
 	if (lu->queue_depth < 0 || lu->queue_depth >= MAX_LU_QUEUE_DEPTH) {
- 		ISTGT_ERRLOG("LU%d: queue depth %d is not in range, resetting
-		    to %d\n", lu->num, lu->queue_depth, DEFAULT_LU_QUEUE_DEPTH);
+ 		ISTGT_ERRLOG("LU%d: queue depth %d is not in range, resetting to %d\n", 
+		    lu->num, lu->queue_depth, DEFAULT_LU_QUEUE_DEPTH);
  		lu->queue_depth = DEFAULT_LU_QUEUE_DEPTH;
 		return (-1);
 	}
@@ -2184,8 +2187,8 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	int ret;
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "add unit %d\n", sp->num);
 
-	lu = xmalloc(sizeof *lu);
-	memset(lu, 0, sizeof *lu);
+	lu = xmalloc(sizeof (*lu));
+	memset(lu, 0, sizeof (*lu));
 	lu->num = sp->num;
 	lu->istgt = istgt;
 	lu->state = ISTGT_STATE_INVALID;
@@ -2202,9 +2205,9 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	if (strncasecmp(val, "iqn.", 4) != 0
 		&& strncasecmp(val, "eui.", 4) != 0
 		&& strncasecmp(val, "naa.", 4) != 0) {
-		snprintf(buf, sizeof buf,"%s:%s", istgt->nodebase, val);
+		snprintf(buf, sizeof (buf),"%s:%s", istgt->nodebase, val);
 	} else {
-		snprintf(buf, sizeof buf, "%s", val);
+		snprintf(buf, sizeof (buf), "%s", val);
 	}
 	if (istgt_lu_check_iscsi_name(buf) != 0) {
 		ISTGT_ERRLOG("TargetName %s contains an invalid character or format.\n",
