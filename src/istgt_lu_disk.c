@@ -190,6 +190,117 @@ macroname:
 			##__VA_ARGS__);								\
 }
 
+#define getdata2(data, lu_cmd) {		\
+	if (lu_cmd->iobufindx == -1) {		\
+		data = NULL;					\
+		ISTGT_ERRLOG("data null\n");	\
+		lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;\
+		return -1;							\
+	} else {							\
+		/*?? malloc and copy over all data to data = lu_c*/\
+	    uint64_t _nb = 0; uint8_t *dptr; int i;				\
+	    for (i = 0; i <= lu_cmd->iobufindx; i++)  \
+		        _nb += lu_cmd->iobuf[i].iov_len; \
+		dptr = data = xmalloc(_nb);		\
+	    for (i = 0; i <= lu_cmd->iobufindx; (dptr += lu_cmd->iobuf[i].iov_len), i++)  \
+			memcpy(dptr, lu_cmd->iobuf[i].iov_base, lu_cmd->iobuf[i].iov_len);	\
+		freedata = 1;					\
+	}									\
+}
+#define getdata(data, lu_cmd) {			\
+	if (lu_cmd->iobufindx == -1) {		\
+		data = NULL;					\
+		ISTGT_ERRLOG("data null\n");	\
+		lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;\
+		break;							\
+	} else {							\
+		/*?? malloc and copy over all data to data = lu_c*/\
+	    uint64_t _nb = 0; uint8_t *dptr; int i;				\
+	    for (i = 0; i <= lu_cmd->iobufindx; i++)  \
+		        _nb += lu_cmd->iobuf[i].iov_len; \
+		dptr = data = xmalloc(_nb);		\
+	    for (i = 0; i <= lu_cmd->iobufindx; (dptr += lu_cmd->iobuf[i].iov_len), i++)  \
+			memcpy(dptr, lu_cmd->iobuf[i].iov_base, lu_cmd->iobuf[i].iov_len);	\
+		freedata = 1;					\
+	}									\
+}
+
+#define checklength2 \
+	if(transfer_len*spec->blocklen > (uint64_t)lu->MaxBurstLength) { \
+		ISTGT_WARNLOG("c#%d checklength error: transferlen %lu should be < maxburstlen %lu\n", \
+			conn->id, transfer_len*spec->blocklen, (uint64_t)(lu->MaxBurstLength)); \
+		lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION; \
+		BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);\
+		return 0;\
+	}
+#define checklength \
+	if(transfer_len*spec->blocklen > (uint64_t)lu->MaxBurstLength) { \
+		ISTGT_WARNLOG("c#%d checklength error: transferlen %lu should be < maxburstlen %lu\n", \
+			conn->id, transfer_len*spec->blocklen, (uint64_t)(lu->MaxBurstLength)); \
+		lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION; \
+		BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);\
+		break;\
+	}
+
+#define CHECK_LU_CMD_R_BIT( OPCODE )							\
+{											\
+	if (lu_cmd->R_bit == 0) {						\
+		ISTGT_ERRLOG("c#%d %s R_bit == 0\n", conn->id, OPCODE);		\
+		lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;		\
+		return -1;							\
+	}									\
+}
+
+#define CHECK_LU_CMD_W_BIT( OPCODE )							\
+{											\
+	if (lu_cmd->W_bit == 0) {						\
+		ISTGT_ERRLOG("c#%d %s W_bit == 0\n", conn->id, OPCODE);		\
+		lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;		\
+		return -1;							\
+	}									\
+}
+
+#define CHECK_RSV_KEY( rsv_key )						\
+	if (rsv_key) {									\
+		rc = istgt_lu_disk_check_pr(spec, conn, PR_ALLOW(0,0,1,0,0));			\
+		if (rc != 0) {									\
+			ISTGT_ERRLOG("c#%d ISTGT_SCSI_STATUS_RESERVATION_CONFLICT\n", conn->id);\
+			lu_cmd->status = ISTGT_SCSI_STATUS_RESERVATION_CONFLICT;		\
+			return 0;									\
+		}										\
+	}
+
+#define CHECK_ERRNO		\
+	if(errno == EBUSY)		\
+		lu_cmd->status = ISTGT_SCSI_STATUS_BUSY;	\
+	else					\
+		lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;	\
+	return 0;
+
+#define CHECK_DATA_LEN(build_sense, log, msg)							\
+{												\
+	/* INVALID FIELD IN CDB */								\
+	if ( build_sense == 1 )									\
+		BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);					\
+	if (data_len < 0) {									\
+		CHECK_ERRNO;										\
+		if ( log == 1 )									\
+			ISTGT_TRACELOG(ISTGT_TRACE_SCSI, "c#%d %s :%d\n", conn->id, msg, data_len);\
+		return 0;							\
+		}		\
+}
+
+#define CHECK_ALLOC_LEN( msg )									\
+{														\
+	int max_allocation_size = 1024*1024*1;										\
+	if (allocation_len > (size_t) max_allocation_size) {								\
+		ISTGT_ERRLOG("c#%d %s data_alloc_len(%d) is too small\n", conn->id, msg, data_alloc_len); 	\
+		lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;						\
+		return -1;											\
+        }									\
+}
+
+
 typedef enum {
 	ISTGT_LU_PR_TYPE_WRITE_EXCLUSIVE = 0x01,
 	ISTGT_LU_PR_TYPE_EXCLUSIVE_ACCESS = 0x03,
@@ -259,6 +370,7 @@ find_first_bit(ISTGT_LU_CMD_Ptr lu_cmd)
 	}	
 	return res_final;
 }
+
 static int
 istgt_lu_disk_open_raw(ISTGT_LU_DISK *spec, int flags, int mode)
 {
@@ -2903,7 +3015,6 @@ istgt_lu_disk_scsi_mode_sense6(ISTGT_LU_DISK *spec, CONN_Ptr conn, uint8_t *cdb,
 		cp += len;
 	}
 	data[3] = len;                  /* Block Descripter Length */
-
 	plen = istgt_lu_disk_scsi_mode_sense_page(spec, conn, cdb, pc, page, subpage, &cp[0], alloc_len);
 	if (plen < 0) {
 		return -1;
@@ -5343,40 +5454,6 @@ istgt_lu_disk_scsi_release(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr 
 
 #define timediffw(lu_cmd, ch) timediff(lu_cmd, ch, __LINE__)
 
-#define getdata2(data, lu_cmd) {		\
-	if (lu_cmd->iobufindx == -1) {		\
-		data = NULL;					\
-		ISTGT_ERRLOG("data null\n");	\
-		lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;\
-		return -1;							\
-	} else {							\
-		/*?? malloc and copy over all data to data = lu_c*/\
-	    uint64_t _nb = 0; uint8_t *dptr; int i;				\
-	    for (i = 0; i <= lu_cmd->iobufindx; i++)  \
-		        _nb += lu_cmd->iobuf[i].iov_len; \
-		dptr = data = xmalloc(_nb);		\
-	    for (i = 0; i <= lu_cmd->iobufindx; (dptr += lu_cmd->iobuf[i].iov_len), i++)  \
-			memcpy(dptr, lu_cmd->iobuf[i].iov_base, lu_cmd->iobuf[i].iov_len);	\
-		freedata = 1;					\
-	}									\
-}
-#define getdata(data, lu_cmd) {			\
-	if (lu_cmd->iobufindx == -1) {		\
-		data = NULL;					\
-		ISTGT_ERRLOG("data null\n");	\
-		lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;\
-		break;							\
-	} else {							\
-		/*?? malloc and copy over all data to data = lu_c*/\
-	    uint64_t _nb = 0; uint8_t *dptr; int i;				\
-	    for (i = 0; i <= lu_cmd->iobufindx; i++)  \
-		        _nb += lu_cmd->iobuf[i].iov_len; \
-		dptr = data = xmalloc(_nb);		\
-	    for (i = 0; i <= lu_cmd->iobufindx; (dptr += lu_cmd->iobuf[i].iov_len), i++)  \
-			memcpy(dptr, lu_cmd->iobuf[i].iov_base, lu_cmd->iobuf[i].iov_len);	\
-		freedata = 1;					\
-	}									\
-}
 
 static int
 istgt_lu_disk_unmap(ISTGT_LU_DISK *spec, CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, uint8_t *data, int pllen)
@@ -8270,11 +8347,8 @@ istgt_lu_disk_queue(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 */
 		if (cdb[0] == SPC_INQUIRY) {
 			allocation_len = DGET16(&cdb[3]);
-			if (allocation_len > (size_t) data_alloc_len) {
-				ISTGT_ERRLOG("alloc_len %d too big\n", allocation_len);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				return -1;
-			}
+			CHECK_ALLOC_LEN ("SPC_INQUIRY")
+
 			data_len = 96;
 			data = lu_cmd->data = xmalloc(data_len + 200);
 			memset(data, 0, data_len+200);
@@ -9061,14 +9135,1152 @@ istgt_lu_disk_busy_excused(int opcode)
 	return ret;
 	
 }
-#define checklength \
-	if(transfer_len*spec->blocklen > (uint64_t)lu->MaxBurstLength) { \
-		ISTGT_WARNLOG("c#%d checklength error: transferlen %lu should be < maxburstlen %lu\n", \
-			conn->id, transfer_len*spec->blocklen, (uint64_t)(lu->MaxBurstLength)); \
-		lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION; \
-		BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);\
-		break;\
+
+static int
+execute_spc_inquiry(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, ISTGT_LU_DISK *spec) 
+{
+	uint8_t *data = NULL;
+	uint8_t *cdb;
+	uint32_t allocation_len;
+	int data_len;
+	int data_alloc_len;
+	cdb = lu_cmd->cdb;
+
+	CHECK_LU_CMD_R_BIT("INQUIRY")
+	allocation_len = DGET16(&cdb[3]);
+	data_alloc_len = allocation_len + 2048;
+	CHECK_ALLOC_LEN("SPC_INQUIRY")
+	data = lu_cmd->data = xmalloc(data_alloc_len);
+	memset(data, 0, allocation_len);
+	data_len = istgt_lu_disk_scsi_inquiry(spec, conn, cdb,
+		    data, data_alloc_len);
+	CHECK_DATA_LEN(0, 1, "INQUIRY error")
+	if (data_len > data_alloc_len) {
+		ISTGT_ERRLOG("c#%d INQUIRY mem-error:%d-%d\n", conn->id, data_len, data_alloc_len);
+			lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
+			return 0;
 	}
+	ISTGT_TRACEDUMP(ISTGT_TRACE_DEBUG, "INQUIRY", data, data_len);
+	lu_cmd->data_len = DMIN32((size_t)data_len, lu_cmd->transfer_len);
+	lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
+	return 0;
+}
+
+static int
+execute_spc_report_luns(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd) 
+{
+	ISTGT_LU_Ptr lu;
+	uint8_t *data = NULL;
+	uint8_t *cdb;
+	uint32_t allocation_len;
+	int data_len;
+	int data_alloc_len;
+	cdb = lu_cmd->cdb;
+	int sel;
+	lu = lu_cmd->lu;
+
+	CHECK_LU_CMD_R_BIT("REPORT_LUNS")
+	sel = cdb[2];
+	allocation_len = DGET32(&cdb[6]);
+	data_alloc_len = allocation_len + 2048;
+	CHECK_ALLOC_LEN("SPC_REPORT_LUNS")
+	if (allocation_len < 16) {
+	/* INVALID FIELD IN CDB */
+		BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);
+		lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
+		return 0;
+	}
+	data = lu_cmd->data = xmalloc(data_alloc_len);
+	memset(data, 0, allocation_len);
+	data_len = istgt_lu_disk_scsi_report_luns(lu, conn, cdb, sel,
+			    data, data_alloc_len);
+	CHECK_DATA_LEN(1, 0, "")
+	ISTGT_TRACEDUMP(ISTGT_TRACE_DEBUG, "REPORT LUNS", data, data_len);
+	lu_cmd->data_len = DMIN32((size_t)data_len, lu_cmd->transfer_len);
+	lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
+	ISTGT_TRACELOG(ISTGT_TRACE_SCSI, "c#%d REPORT_LUNS sel:%x len:%lu (%d/%u/%u)\n",
+			conn->id, sel, lu_cmd->data_len, data_len, lu_cmd->transfer_len, allocation_len);
+	return 0;
+}
+
+static int
+execute_sbc_read_capacity_10(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, ISTGT_LU_DISK *spec) 
+{
+	uint8_t *data = NULL;
+	uint8_t *cdb;
+	int data_len;
+	uint64_t *tptr;
+	cdb = lu_cmd->cdb;
+
+	CHECK_LU_CMD_R_BIT("READ_CAPACITY_10")
+	data = lu_cmd->data = xmalloc(200);
+	if (spec->blockcnt - 1 > 0xffffffffULL) {
+		DSET32(&data[0], 0xffffffffUL);
+		ISTGT_TRACELOG(ISTGT_TRACE_SCSI, "c#%d READ_CAPACITY_10 blklen:%lu\n", conn->id, spec->blocklen);
+	} else {
+		DSET32(&data[0], (uint32_t) (spec->blockcnt - 1));
+		ISTGT_TRACELOG(ISTGT_TRACE_SCSI, "c#%d READ_CAPACITY_10 blkcnt:%lu blklen:%lu\n", conn->id, spec->blockcnt, spec->blocklen);
+	}
+	DSET32(&data[4], (uint32_t) spec->blocklen);
+	tptr = (uint64_t *)&(data[8]);
+	*tptr = 0; *(tptr+1) = 0;
+	data_len = 8;
+	lu_cmd->data_len = data_len;
+	lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
+	ISTGT_TRACEDUMP(ISTGT_TRACE_DEBUG,
+		"SBC_READ_CAPACITY_10", data, data_len);
+	return 0;
+}
+
+static int
+execute_sbc_sai_read_capacity_16(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, ISTGT_LU_DISK *spec)
+{
+	uint8_t *data = NULL;
+	uint8_t *cdb;
+	uint32_t allocation_len;
+	int data_len;
+	int data_alloc_len = 0;
+	uint64_t *tptr;
+	cdb = lu_cmd->cdb;
+
+	CHECK_LU_CMD_R_BIT("SBC_SAI_READ_CAPACITY_16")
+	allocation_len = DGET32(&cdb[10]);
+	CHECK_ALLOC_LEN("SPC_SERVICE_ACTION")
+	ISTGT_TRACELOG(ISTGT_TRACE_SCSI, "c#%d READ_CAPACITY_16 blkcnt:%lu  blklen:%lu rshift:%u/%u %s\n",
+		conn->id, spec->blockcnt, spec->blocklen, spec->rshift, spec->rshiftreal, spec->unmap ? "thin" : "-");
+	data_len = 32;
+	lu_cmd->data_len = DMIN32((size_t)data_len, lu_cmd->transfer_len);
+	data = lu_cmd->data = xmalloc(data_len + 20);
+	memset(data, 0, data_len+20);
+	DSET64(&data[0], spec->blockcnt - 1);
+	DSET32(&data[8], (uint32_t) spec->blocklen);
+	data[12] = 0;                   /* RTO_EN(1) PROT_EN(0) */
+	data[13] = 0;
+	data[13] = spec->rshift & 0x0f;
+	//if (spec->rshift > 0)
+	//	BDSET8W(&data[13], spec->rshift, 3, 4);
+	if (spec->unmap)
+		data[14] = 0x80;
+	else
+		data[14] = 0;
+	data[15] = 0;
+	tptr = (uint64_t *)(&(data[16]));
+	*tptr = 0;
+	*(tptr+1) = 0;
+	lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
+	return 0;
+}
+
+static int
+execute_spc_mode_select_6(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, ISTGT_LU_DISK *spec)
+{
+	uint8_t *data = NULL;
+	uint8_t *cdb;
+	int data_len;
+	int rc;
+	cdb = lu_cmd->cdb;
+	int pf, sp, pllen;
+	int bdlen;
+	int freedata = 0;
+#if 0
+	istgt_scsi_dump_cdb(cdb);
+#endif
+
+	CHECK_RSV_KEY(spec->rsv_key)
+	pf = BGET8(&cdb[1], 4);
+	sp = BGET8(&cdb[1], 0);
+	pllen = cdb[4];             /* Parameter List Length */
+	if (pllen == 0) {
+		lu_cmd->data_len = 0;
+		lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
+		return 0;
+	}
+	/* Data-Out */
+	rc = istgt_lu_disk_transfer_data(conn, lu_cmd, pllen);
+	if (rc < 0) {
+		ISTGT_ERRLOG("c#%d lu_disk_transfer_data() failed\n", conn->id);
+		lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
+		return 0;
+	}
+	if (pllen < 4) {
+		/* INVALID FIELD IN CDB */
+		BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);
+		lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
+		return 0;
+	}
+#if 0
+	istgt_dump("MODE SELECT(6)", lu_cmd->iobuf, pllen);
+#endif
+	getdata2(data, lu_cmd)
+	bdlen = data[3];            /* Block Descriptor Length */
+	/* Short LBA mode parameter block descriptor */
+	/* data[4]-data[7] Number of Blocks */
+	/* data[8]-data[11] Block Length */
+
+	/* page data */
+	data_len = istgt_lu_disk_scsi_mode_select_page(spec, conn, cdb, pf, sp, &data[4 + bdlen], pllen - (4 + bdlen));
+	if (data_len != 0) {
+		CHECK_ERRNO;
+	}
+	lu_cmd->data_len = pllen;
+	lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
+	return 0;
+}
+
+static int
+execute_spc_mode_select_10(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, ISTGT_LU_DISK *spec)
+{
+	uint8_t *data = NULL;
+	uint8_t *cdb;
+	int data_len;
+	int rc;
+	cdb = lu_cmd->cdb;
+	int pf, sp, pllen;
+	int  bdlen;
+	int llba;
+	int freedata = 0;
+
+	CHECK_RSV_KEY(spec->rsv_key)
+	pf = BGET8(&cdb[1], 4);
+	sp = BGET8(&cdb[1], 0);
+	pllen = DGET16(&cdb[7]);    /* Parameter List Length */
+	if (pllen == 0) {
+		lu_cmd->data_len = 0;
+		lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
+		return 0;
+	}
+	/* Data-Out */
+	rc = istgt_lu_disk_transfer_data(conn, lu_cmd, pllen);
+	if (rc < 0) {
+		ISTGT_ERRLOG("c#%d lu_disk_transfer_data() failed\n", conn->id);
+			lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
+		return 0;
+	}
+	if (pllen < 4) {
+		/* INVALID FIELD IN CDB */
+		BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);
+		lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
+		return 0;
+	}
+#if 0
+	istgt_dump("MODE SELECT(10)", lu_cmd->iobuf, pllen);
+#endif
+	getdata2(data, lu_cmd) //data = lu_cmd->iobuf;
+	llba = BGET8(&data[4], 0);  /* Long LBA */
+	bdlen = DGET16(&data[6]);   /* Block Descriptor Length */
+	if (llba) {
+		/* Long LBA mode parameter block descriptor */
+		/* data[8]-data[15] Number of Blocks */
+		/* data[16]-data[19] Reserved */
+		/* data[20]-data[23] Block Length */
+	} else {
+		/* Short LBA mode parameter block descriptor */
+		/* data[8]-data[11] Number of Blocks */
+		/* data[12]-data[15] Block Length */
+	}
+	/* page data */
+	data_len = istgt_lu_disk_scsi_mode_select_page(spec, conn, cdb, pf, sp, &data[8 + bdlen], pllen - (8 + bdlen));
+	if (data_len != 0) {
+		CHECK_ERRNO;
+	}
+	lu_cmd->data_len = pllen;
+	lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
+	return 0;
+}
+
+static int
+execute_spc_mode_sense_6(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, ISTGT_LU_DISK *spec)
+{
+	uint8_t *data = NULL;
+	uint8_t *cdb;
+	uint32_t allocation_len;
+	int data_len;
+	int data_alloc_len;
+	int rc;
+	cdb = lu_cmd->cdb;
+	int dbd, pc, page, subpage;
+#if 0
+	istgt_scsi_dump_cdb(cdb);
+#endif
+	CHECK_RSV_KEY(spec->rsv_key)
+	if (lu_cmd->R_bit == 0) {
+		ISTGT_ERRLOG("R_bit == 0\n");
+		lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
+		return -1;
+	}
+	dbd = BGET8(&cdb[1], 3);
+	pc = BGET8W(&cdb[2], 7, 2);
+	page = BGET8W(&cdb[2], 5, 6);
+	subpage = cdb[3];
+	allocation_len = cdb[4];
+	data_alloc_len = allocation_len + 2048;
+	CHECK_ALLOC_LEN("SPC_MODE_SENSE_6")
+	data = lu_cmd->data = xmalloc(data_alloc_len);
+	memset(data, 0, data_alloc_len);
+	data_len = istgt_lu_disk_scsi_mode_sense6(spec, conn, cdb, dbd, pc, page, subpage, data, data_alloc_len);
+	/* CHECKING FOR INVALID FIELD IN CDB */
+	CHECK_DATA_LEN(1, 0, "")
+	if (data_len > data_alloc_len) {
+		ISTGT_ERRLOG("c#%d MODE SENSE6 dbd:%x pc:%x page:%x subpage:%x alen:%d dlen:%d/%d tlen:%d mem-issue",
+				conn->id, dbd,  pc, page, subpage,
+		allocation_len, data_len, data_alloc_len, lu_cmd->transfer_len);
+		lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
+		return 0;
+	}
+#if 0
+		istgt_dump("MODE SENSE(6)", data, data_len);
+#endif
+	lu_cmd->data_len = DMIN32((size_t)data_len, lu_cmd->transfer_len);
+	ISTGT_TRACELOG(ISTGT_TRACE_SCSI, "c#%d MODE SENSE6 dbd:%x pc:%x page:%x subpage:%x alen:%d dlen:%d tlen:%d",
+			conn->id, dbd,  pc, page, subpage,
+	allocation_len, data_len, lu_cmd->transfer_len);
+	lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
+	return 0;
+}
+
+static int
+execute_spc_mode_sense_10(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, ISTGT_LU_DISK *spec)
+{
+	uint8_t *data = NULL;
+	uint8_t *cdb;
+	uint32_t allocation_len;
+	int data_len;
+	int data_alloc_len;
+	int rc;
+	cdb = lu_cmd->cdb;
+
+#if 0
+	istgt_scsi_dump_cdb(cdb);
+#endif
+	int dbd, pc, page, subpage;
+	int llbaa;
+
+	CHECK_RSV_KEY(spec->rsv_key)
+
+	CHECK_LU_CMD_R_BIT("SPC_MODE_SENSE_10")
+
+	llbaa = BGET8(&cdb[1], 4);
+	dbd = BGET8(&cdb[1], 3);
+	pc = BGET8W(&cdb[2], 7, 2);
+	page = BGET8W(&cdb[2], 5, 6);
+	subpage = cdb[3];
+
+	allocation_len = DGET16(&cdb[7]);
+	data_alloc_len = allocation_len + 2048;
+	CHECK_ALLOC_LEN("SPC_MODE_SENSE_10")
+	data = lu_cmd->data = xmalloc(data_alloc_len);
+	memset(data, 0, data_alloc_len);
+
+	data_len = istgt_lu_disk_scsi_mode_sense10(spec, conn, cdb, llbaa, dbd, pc, page, subpage, data, data_alloc_len);
+	CHECK_DATA_LEN(1, 0, "")
+
+	if (data_len > data_alloc_len) {
+		ISTGT_ERRLOG("c#%d MODE SENSE10 dbd:%x pc:%x page:%x subpage:%x alen:%d dlen:%d/%d tlen:%d mem-issue",
+			conn->id, dbd,  pc, page, subpage,
+			allocation_len, data_len, data_alloc_len, lu_cmd->transfer_len);
+		lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
+		return 0;
+	}
+#if 0
+	istgt_dump("MODE SENSE(10)", data, data_len);
+#endif
+	lu_cmd->data_len = DMIN32((size_t)data_len, lu_cmd->transfer_len);
+	ISTGT_NOTICELOG("c#%d MODE SENSE10 dbd:%x pc:%x page:%x subpage:%x alen:%d dlen:%d tlen:%d",
+		conn->id, dbd,  pc, page, subpage, allocation_len, data_len, lu_cmd->transfer_len);
+	lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
+	return 0;
+}
+
+static int
+execute_spc_request_sense(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, ISTGT_LU_DISK *spec)
+{
+	uint8_t *data = NULL;
+	uint8_t *cdb;
+	uint32_t allocation_len;
+	int data_len;
+	int data_alloc_len;
+	cdb = lu_cmd->cdb;
+	int desc;
+	int sk, asc, ascq;
+
+	CHECK_LU_CMD_R_BIT("SPC_REQUEST_SENSE")
+
+	desc = BGET8(&cdb[1], 0);
+	if (desc != 0) {
+		/* INVALID FIELD IN CDB */
+		BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);
+		lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
+		return 0;
+	}
+
+	allocation_len = cdb[4];
+	data_alloc_len = allocation_len + 2048;
+	CHECK_ALLOC_LEN("SPC_REQUEST_SENSE")
+	data = lu_cmd->data = xmalloc(data_alloc_len);
+
+	if (!spec->sense) {
+		/* NO ADDITIONAL SENSE INFORMATION */
+		sk = ISTGT_SCSI_SENSE_NO_SENSE;
+		asc = 0x00;
+		ascq = 0x00;
+	} else {
+		sk = (spec->sense >> 16) & 0xffU;
+		asc = (spec->sense >> 8) & 0xffU;
+		ascq = spec->sense & 0xffU;
+	}
+	istgt_lu_scsi_build_sense_data(lu_cmd, sk, asc, ascq);
+	data_len = lu_cmd->sense_data_len;
+	if (data_len < 0 || data_len < 2) {
+		CHECK_ERRNO;
+	}
+	/* omit SenseLength */
+	data_len -= 2;
+	memcpy(data, lu_cmd->sense_data + 2, data_len);
+#if 0
+	istgt_dump("REQUEST SENSE", data, data_len);
+#endif
+	lu_cmd->data_len = DMIN32((size_t)data_len, lu_cmd->transfer_len);
+	if (lu_cmd->data_len > (size_t)data_len)
+		memset(data+data_len, 0, lu_cmd->data_len - data_len);
+	lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
+	return 0;
+}
+
+static int
+execute_spc_receive_copy_results(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, ISTGT_LU_DISK *spec)
+{
+	uint8_t *cdb;
+	uint32_t allocation_len;
+	int data_len;
+	int data_alloc_len;
+	int rc;
+	cdb = lu_cmd->cdb;
+
+	CHECK_RSV_KEY(spec->rsv_key)
+	allocation_len = DGET32(&cdb[10]);
+	CHECK_ALLOC_LEN("SPC_RECEIVE_COPY_RESULTS")
+	if (allocation_len == 0) {
+		lu_cmd->data_len = 0;
+		lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
+		return 0;
+	}
+	data_len = istgt_lu_disk_receive_copy_results(conn, lu_cmd);
+	CHECK_DATA_LEN(0, 1, "lu_disk_receive_copy_results() failed\n")
+	lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
+	return 0;
+}
+
+static int
+execute_sbc_read_6(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, ISTGT_LU_DISK *spec)
+{
+	ISTGT_LU_Ptr lu;
+	uint8_t *cdb;
+	uint32_t transfer_len;
+	int rc;
+	uint64_t lba;
+	cdb = lu_cmd->cdb;
+	lu = lu_cmd->lu;
+
+	CHECK_RSV_KEY(spec->rsv_key)
+	CHECK_LU_CMD_R_BIT("SBC_READ_6")
+
+	lba = (uint64_t) (DGET24(&cdb[1]) & 0x001fffffU);
+	transfer_len = (uint32_t) DGET8(&cdb[4]);
+	if (transfer_len == 0) {
+		transfer_len = 256;
+	}
+	checklength2;
+	ISTGT_TRACELOG(ISTGT_TRACE_SCSI,
+		"c#%d READ_6(lba %"PRIu64", len %u blocks)\n",
+		conn->id, lba, transfer_len);
+	rc = istgt_lu_disk_lbread(spec, conn, lu_cmd, lba, transfer_len);
+	if (rc < 0) {
+		ISTGT_ERRLOG("c#%d lu_disk_lbread() failed\n", conn->id);
+		CHECK_ERRNO;
+		return 0;
+	}
+	lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
+	return 0;
+}
+
+
+static int
+execute_sbc_read_10(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, ISTGT_LU_DISK *spec)
+{
+	ISTGT_LU_Ptr lu;
+	uint8_t *cdb;
+	uint32_t transfer_len;
+	int rc;
+	uint64_t lba;
+	cdb = lu_cmd->cdb;
+	lu = lu_cmd->lu;
+
+	CHECK_RSV_KEY(spec->rsv_key)
+	CHECK_LU_CMD_R_BIT("SBC_READ_6")
+
+	lba = (uint64_t) DGET32(&cdb[2]);
+	transfer_len = (uint32_t) DGET16(&cdb[7]);
+	checklength2;
+	ISTGT_TRACELOG(ISTGT_TRACE_SCSI,
+		"c#%d READ_10(lba %"PRIu64", len %u blocks)\n",
+		conn->id, lba, transfer_len);
+	rc = istgt_lu_disk_lbread(spec, conn, lu_cmd, lba, transfer_len);
+	if (rc < 0) {
+		ISTGT_ERRLOG("c#%d lu_disk_lbread() failed\n", conn->id);
+		CHECK_ERRNO;
+	}
+	lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
+	return 0;
+}
+
+static int
+execute_sbc_read_12(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, ISTGT_LU_DISK *spec)
+{
+	ISTGT_LU_Ptr lu;
+	uint8_t *cdb;
+	uint32_t transfer_len;
+	int rc;
+	uint64_t lba;
+	cdb = lu_cmd->cdb;
+	lu = lu_cmd->lu;
+
+	CHECK_RSV_KEY(spec->rsv_key)
+	CHECK_LU_CMD_R_BIT("SBC_READ_12")
+
+	lba = (uint64_t) DGET32(&cdb[2]);
+	transfer_len = (uint32_t) DGET32(&cdb[6]);
+	checklength2;
+	ISTGT_TRACELOG(ISTGT_TRACE_SCSI,
+		"c#%d READ_12(lba %"PRIu64", len %u blocks)\n",
+		conn->id, lba, transfer_len);
+	rc = istgt_lu_disk_lbread(spec, conn, lu_cmd, lba, transfer_len);
+	if (rc < 0) {
+		ISTGT_ERRLOG("c#%d lu_disk_lbread() failed\n", conn->id);
+		CHECK_ERRNO;
+	}
+	lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
+	return 0;
+}
+
+static int
+execute_sbc_read_16(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, ISTGT_LU_DISK *spec)
+{
+	ISTGT_LU_Ptr lu;
+	uint8_t *cdb;
+	uint32_t transfer_len;
+	uint64_t lba;
+	int rc;
+	cdb = lu_cmd->cdb;
+	lu = lu_cmd->lu;
+
+	CHECK_RSV_KEY(spec->rsv_key)
+	CHECK_LU_CMD_R_BIT("SBC_READ_16")
+
+	lba = (uint64_t) DGET64(&cdb[2]);
+	transfer_len = (uint32_t) DGET32(&cdb[10]);
+	checklength2;
+	ISTGT_TRACELOG(ISTGT_TRACE_SCSI,
+		"c#%d READ_16(lba %"PRIu64", len %u blocks)\n",
+		conn->id, lba, transfer_len);
+	rc = istgt_lu_disk_lbread(spec, conn, lu_cmd, lba, transfer_len);
+	if (rc < 0) {
+		ISTGT_ERRLOG("c#%d lu_disk_lbread() failed\n", conn->id);
+		CHECK_ERRNO;
+	}
+	lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
+	return 0;
+}
+
+static int
+execute_sbc_write_6(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, ISTGT_LU_DISK *spec)
+{
+	ISTGT_LU_Ptr lu;
+	uint8_t *cdb;
+	uint32_t transfer_len;
+	int rc;
+	uint64_t lba;
+	cdb = lu_cmd->cdb;
+	lu = lu_cmd->lu;
+
+	CHECK_RSV_KEY(spec->rsv_key)
+	CHECK_LU_CMD_W_BIT("SBC_WRITE_6")
+
+	lba = (uint64_t) (DGET24(&cdb[1]) & 0x001fffffU);
+	transfer_len = (uint32_t) DGET8(&cdb[4]);
+	if (transfer_len == 0) {
+		transfer_len = 256;
+	}
+	checklength2;
+	ISTGT_TRACELOG(ISTGT_TRACE_SCSI,
+	    "c#%d WRITE_6(lba %"PRIu64", len %u blocks)\n",
+	    conn->id, lba, transfer_len);
+	rc = istgt_lu_disk_lbwrite(spec, conn, lu_cmd, lba, transfer_len);
+	if (rc < 0) {
+		ISTGT_ERRLOG("c#%d lu_disk_lbwrite() failed\n", conn->id);
+		CHECK_ERRNO;
+	}
+	lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
+	return 0;
+}
+
+static int
+execute_sbc_write_10(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, ISTGT_LU_DISK *spec)
+{
+	ISTGT_LU_Ptr lu;
+	uint8_t *cdb;
+	uint32_t transfer_len;
+	int rc;
+	uint64_t lba;
+	cdb = lu_cmd->cdb;
+	lu = lu_cmd->lu;
+
+	CHECK_RSV_KEY(spec->rsv_key)
+	CHECK_LU_CMD_W_BIT("SBC_WRITE_10")
+
+	lba = (uint64_t) DGET32(&cdb[2]);
+	transfer_len = (uint32_t) DGET16(&cdb[7]);
+	checklength2;
+	ISTGT_TRACELOG(ISTGT_TRACE_SCSI,
+		"c#%d WRITE_10(lba %"PRIu64", len %u blocks)\n",
+		conn->id, lba, transfer_len);
+	rc = istgt_lu_disk_lbwrite(spec, conn, lu_cmd, lba, transfer_len);
+	if (rc < 0) {
+		ISTGT_ERRLOG("c#%d lu_disk_lbwrite() failed\n", conn->id);
+		CHECK_ERRNO;
+	}
+	lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
+	return 0;
+}
+
+static int
+execute_sbc_write_12(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, ISTGT_LU_DISK *spec)
+{
+	ISTGT_LU_Ptr lu;
+	uint8_t *cdb;
+	uint32_t transfer_len;
+	int rc;
+	uint64_t lba;
+	cdb = lu_cmd->cdb;
+	lu = lu_cmd->lu;
+
+	CHECK_RSV_KEY(spec->rsv_key)
+	CHECK_LU_CMD_W_BIT("SBC_WRITE_12")
+
+	lba = (uint64_t) DGET32(&cdb[2]);
+	transfer_len = (uint32_t) DGET32(&cdb[6]);
+	checklength2;
+	ISTGT_TRACELOG(ISTGT_TRACE_SCSI,
+		"c#%d WRITE_12(lba %"PRIu64", len %u blocks)\n",
+		conn->id, lba, transfer_len);
+	rc = istgt_lu_disk_lbwrite(spec, conn, lu_cmd, lba, transfer_len);
+	if (rc < 0) {
+		ISTGT_ERRLOG("c#%d lu_disk_lbwrite() failed\n", conn->id);
+		CHECK_ERRNO;
+	}
+	lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
+	return 0;
+}
+
+static int
+execute_sbc_write_16(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, ISTGT_LU_DISK *spec)
+{
+	ISTGT_LU_Ptr lu;
+	uint8_t *cdb;
+	uint32_t transfer_len;
+	int rc;
+	uint64_t lba;
+	cdb = lu_cmd->cdb;
+	lu = lu_cmd->lu;
+
+	CHECK_RSV_KEY(spec->rsv_key)
+	CHECK_LU_CMD_W_BIT("SBC_WRITE_16")
+
+	lba = (uint64_t) DGET64(&cdb[2]);
+	transfer_len = (uint32_t) DGET32(&cdb[10]);
+	checklength2;
+	ISTGT_TRACELOG(ISTGT_TRACE_SCSI,
+		"c#%d WRITE_16(lba %"PRIu64", len %u blocks)\n",
+		conn->id, lba, transfer_len);
+	rc = istgt_lu_disk_lbwrite(spec, conn, lu_cmd, lba, transfer_len);
+	if (rc < 0) {
+		ISTGT_ERRLOG("c#%d lu_disk_lbwrite() failed\n", conn->id);
+		CHECK_ERRNO;
+	}
+	lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
+	return 0;
+}
+
+static int
+execute_sbc_write_same_10(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, ISTGT_LU_DISK *spec)
+{
+	ISTGT_LU_Ptr lu;
+	uint8_t *cdb;
+	uint32_t transfer_len;
+	int rc;
+	uint64_t lba;
+	cdb = lu_cmd->cdb;
+	int pbdata, lbdata;
+	lu = lu_cmd->lu;
+
+	CHECK_RSV_KEY(spec->rsv_key)
+	CHECK_LU_CMD_W_BIT("SBC_WRITE_SAME_10")
+
+	pbdata = BGET8(&cdb[1], 2);
+	lbdata = BGET8(&cdb[1], 1);
+	lba = (uint64_t) DGET32(&cdb[2]);
+	transfer_len = (uint32_t) DGET16(&cdb[7]);
+	checklength2;
+	//group_no = BGET8W(&cdb[6], 4, 5)
+	/* only PBDATA=0 and LBDATA=0 support */
+	if (pbdata || lbdata) {
+	/* INVALID FIELD IN CDB */
+		BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);
+		lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
+		return 0;
+	}
+	ISTGT_TRACELOG(ISTGT_TRACE_SCSI,
+		"c#%d WRITE_SAME_10(lba %"PRIu64", len %u blocks)\n",
+		conn->id, lba, transfer_len);
+	rc = istgt_lu_disk_lbwrite_same(spec, conn, lu_cmd, lba, transfer_len);
+	if (rc < 0) {
+		ISTGT_ERRLOG("c#%d lu_disk_lbwrite_same() failed\n", conn->id);
+		CHECK_ERRNO;
+	}
+	lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
+	return 0;
+}
+
+static int
+execute_sbc_write_same_16(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, ISTGT_LU_DISK *spec)
+{
+	ISTGT_LU_Ptr lu;
+	uint8_t *cdb;
+	uint32_t transfer_len;
+	int rc;
+	uint64_t lba;
+	cdb = lu_cmd->cdb;
+	int anchor, unmap, pbdata, lbdata;
+	lu = lu_cmd->lu;
+
+#if 0
+	istgt_scsi_dump_cdb(cdb);
+#endif
+	CHECK_RSV_KEY(spec->rsv_key)
+
+	CHECK_LU_CMD_W_BIT("SBC_WRITE_SAME_16")
+
+	anchor = BGET8(&cdb[1], 4);
+	unmap = BGET8(&cdb[1], 3);
+	pbdata = BGET8(&cdb[1], 2);
+	lbdata = BGET8(&cdb[1], 1);
+	lba = (uint64_t) DGET64(&cdb[2]);
+	transfer_len = (uint32_t) DGET32(&cdb[10]);
+	checklength2;
+	//group_no = BGET8W(&cdb[14], 4, 5);
+	/* only PBDATA=0 and LBDATA=0 support */
+	if (pbdata || lbdata) {
+		/* INVALID FIELD IN CDB */
+		BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);
+		lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
+		return 0;
+	}
+	if (anchor) {
+		/* INVALID FIELD IN CDB */
+		BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);
+		lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
+		return 0;
+	}
+	ISTGT_TRACELOG(ISTGT_TRACE_SCSI,
+		"c#%d WRITE_SAME_16(lba %"PRIu64", len %u blocks) %s\n",
+		conn->id, lba, transfer_len, unmap ? "UNMAP bit" : " ");
+	rc = istgt_lu_disk_lbwrite_same(spec, conn, lu_cmd, lba, transfer_len);
+	if (rc < 0) {
+		ISTGT_ERRLOG("c#%d WRITE_SAME_16(lba %"PRIu64", len %u blocks) failed. %s\n",
+			conn->id, lba, transfer_len, unmap ? "UNMAP bit" : " ");
+		CHECK_ERRNO;
+	}
+	lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
+	return 0;
+}
+
+static int
+execute_sbc_compare_and_write(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, ISTGT_LU_DISK *spec)
+{
+	uint8_t *cdb;
+	uint32_t transfer_len;
+	int rc;
+	uint64_t lba;
+	cdb = lu_cmd->cdb;
+	int64_t maxlen;
+#if 0
+			istgt_scsi_dump_cdb(cdb);
+#endif
+	if (spec->lu->istgt->swmode == ISTGT_SWMODE_TRADITIONAL) {
+	/* INVALID COMMAND OPERATION CODE */
+		BUILD_SENSE(ILLEGAL_REQUEST, 0x20, 0x00);
+		lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
+		return 0;
+	}
+
+	CHECK_RSV_KEY(spec->rsv_key)
+	CHECK_LU_CMD_W_BIT("SBC_COMPARE_AND_WRITE")
+
+	lba = (uint64_t) DGET64(&cdb[2]);
+	transfer_len = (uint32_t) DGET8(&cdb[13]);
+	maxlen = ISTGT_LU_WORK_ATS_BLOCK_SIZE / spec->blocklen;
+	if (maxlen > 0xff) {
+		maxlen = 0xff;
+	}
+	if (transfer_len > maxlen) {
+		/* INVALID FIELD IN CDB */
+		BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);
+		lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
+		return 0;
+	}
+
+	ISTGT_TRACELOG(ISTGT_TRACE_SCSI,
+		"c#%d COMPARE_AND_WRITE(lba %"PRIu64", len %u blocks)\n",
+		conn->id, lba, transfer_len);
+	rc = istgt_lu_disk_lbwrite_ats(spec, conn, lu_cmd, lba, transfer_len);
+	if (rc < 0) {
+		//ISTGT_ERRLOG("lu_disk_lbwrite_ats() failed\n");
+		/* sense data build by function */
+		CHECK_ERRNO;
+	}
+	lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
+	return 0;
+}
+
+static int
+execute_sbc_synchronize_cache_10(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, ISTGT_LU_DISK *spec)
+{
+	uint8_t *cdb;
+	uint32_t len;
+	int rc;
+	uint64_t lba;
+	cdb = lu_cmd->cdb;
+
+	CHECK_RSV_KEY(spec->rsv_key)
+
+	lba = (uint64_t) DGET32(&cdb[2]);
+	len = (uint32_t) DGET16(&cdb[7]);
+	if (len == 0) {
+		len = spec->blockcnt;
+	}
+	ISTGT_TRACELOG(ISTGT_TRACE_SCSI,
+		"c#%d SYNCHRONIZE_CACHE_10(lba %"PRIu64
+		", len %u blocks)\n",conn->id, lba, len);
+	rc = istgt_lu_disk_lbsync(spec, conn, lu_cmd, lba, len);
+	if (rc < 0) {
+		ISTGT_ERRLOG("c#%d lu_disk_lbsync() failed\n", conn->id);
+		CHECK_ERRNO;
+	}
+	lu_cmd->data_len = 0;
+	lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
+	return 0;
+}
+
+static int
+execute_sbc_synchronize_cache_16(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, ISTGT_LU_DISK *spec)
+{
+	uint8_t *cdb;
+	uint32_t len;
+	int rc;
+	uint64_t lba;
+	cdb = lu_cmd->cdb;
+
+	CHECK_RSV_KEY(spec->rsv_key)
+
+	lba = (uint64_t) DGET64(&cdb[2]);
+	len = (uint32_t) DGET32(&cdb[10]);
+	if (len == 0) {
+		len = spec->blockcnt;
+	}
+	ISTGT_TRACELOG(ISTGT_TRACE_SCSI,
+		"c#%d SYNCHRONIZE_CACHE_10(lba %"PRIu64", len %u blocks)\n",
+		conn->id, lba, len);
+	rc = istgt_lu_disk_lbsync(spec, conn, lu_cmd, lba, len);
+	if (rc < 0) {
+		ISTGT_ERRLOG("c#%d lu_disk_lbsync() failed\n", conn->id);
+		CHECK_ERRNO;
+	}
+	lu_cmd->data_len = 0;
+	lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
+	return 0;
+}
+
+static int
+execute_sbc_read_defect_data_10(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, ISTGT_LU_DISK *spec)
+{
+	uint8_t *data = NULL;
+	uint8_t *cdb;
+	uint32_t allocation_len;
+	int data_len;
+	int data_alloc_len;
+	cdb = lu_cmd->cdb;
+	int req_plist, req_glist, list_format;
+
+	CHECK_LU_CMD_R_BIT("SBC_READ_DEFECT_DATA_10")
+
+	req_plist = BGET8(&cdb[2], 4);
+	req_glist = BGET8(&cdb[2], 3);
+	list_format = BGET8W(&cdb[2], 2, 3);
+
+	allocation_len = (uint32_t) DGET16(&cdb[7]);
+	data_alloc_len = allocation_len + 8192;
+	CHECK_ALLOC_LEN("SBC_READ_DEFECT_DATA_10")
+	data = lu_cmd->data = xmalloc(data_alloc_len);
+	memset(data, 0, allocation_len);
+
+	data_len = istgt_lu_disk_scsi_read_defect10(spec, conn, cdb,
+		    req_plist, req_glist, list_format, data, data_alloc_len);
+
+	CHECK_DATA_LEN(0, 0, "")
+	if (data_len > data_alloc_len) {
+		ISTGT_ERRLOG("c#%d READ_DEFECT_DATA10  alen:%d dlen:%d/%d tlen:%d mem-issue",
+			conn->id, allocation_len, data_len, data_alloc_len, lu_cmd->transfer_len);
+			lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
+		return 0;
+	}
+	lu_cmd->data_len = DMIN32((size_t)data_len, lu_cmd->transfer_len);
+	lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
+	return 0;
+}
+
+static int
+execute_sbc_read_defect_12(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, ISTGT_LU_DISK *spec)
+{
+	uint8_t *data = NULL;
+	uint8_t *cdb;
+	uint32_t allocation_len;
+	int data_len;
+	int data_alloc_len;
+	cdb = lu_cmd->cdb;
+	int req_plist, req_glist, list_format;
+
+	CHECK_LU_CMD_R_BIT("SBC_READ_DEFECT_DATA_12")
+
+	req_plist = BGET8(&cdb[2], 4);
+	req_glist = BGET8(&cdb[2], 3);
+	list_format = BGET8W(&cdb[2], 2, 3);
+
+	allocation_len = DGET32(&cdb[6]);
+	data_alloc_len = allocation_len + 8192;
+	CHECK_ALLOC_LEN("SBC_READ_DEFECT_DATA_12")
+	data = lu_cmd->data = xmalloc(data_alloc_len);
+	memset(data, 0, allocation_len);
+	data_len = istgt_lu_disk_scsi_read_defect12(spec, conn, cdb,
+		    req_plist, req_glist, list_format, data, data_alloc_len);
+	CHECK_DATA_LEN(0, 0, "")
+	if (data_len > data_alloc_len) {
+		ISTGT_ERRLOG("c#%d READ_DEFECT_DATA12  alen:%d dlen:%d/%d tlen:%d mem-issue",
+			conn->id, allocation_len, data_len, data_alloc_len, lu_cmd->transfer_len);
+		lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
+		return 0;
+	}
+	lu_cmd->data_len = DMIN32((size_t)data_len, lu_cmd->transfer_len);
+	lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
+	return 0;
+}
+
+static int
+execute_spc_report_target_portal_group(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, ISTGT_LU_DISK *spec, int sa)
+{
+	uint8_t *data = NULL;
+	uint8_t *cdb;
+	uint32_t allocation_len;
+	int data_len;
+	int data_alloc_len;
+	cdb = lu_cmd->cdb;
+
+	ISTGT_TRACELOG(ISTGT_TRACE_SCSI, "c#%d MAINTENANCE_IN: sa:0x%2.2x:REPORT_TARGET_PORT_GROUPS\n", conn->id, sa);
+	CHECK_LU_CMD_R_BIT("SCC_MAINTENANCE_IN")
+	allocation_len = DGET32(&cdb[6]);
+	data_alloc_len = allocation_len + 8192;
+	CHECK_ALLOC_LEN("SCC_MAINTENANCE_IN")
+	data = lu_cmd->data = xmalloc(data_alloc_len);
+	memset(data, 0, allocation_len);
+	data_len = istgt_lu_disk_scsi_report_target_port_groups(spec, conn, cdb, data, data_alloc_len);
+	CHECK_DATA_LEN(0, 0, "")
+	if (data_len > data_alloc_len) {
+		ISTGT_ERRLOG("c#%d REPORT_TPGs alen:%d dlen:%d/%d tlen:%d mem-issue",
+			conn->id, allocation_len, data_len, data_alloc_len, lu_cmd->transfer_len);
+		lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
+		return 0;
+	}
+
+	ISTGT_TRACEDUMP(ISTGT_TRACE_DEBUG,
+	    "REPORT_TARGET_PORT_GROUPS", data, data_len);
+	lu_cmd->data_len = DMIN32((size_t)data_len, lu_cmd->transfer_len);
+	lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
+	return 0;
+}
+
+static int
+execute_set_target_port_groups(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, ISTGT_LU_DISK *spec, int sa)
+{
+	uint8_t *data = NULL;
+	uint8_t *cdb;
+	uint32_t parameter_len;
+	int data_len;
+	int rc, freedata = 0;
+	cdb = lu_cmd->cdb;
+
+	ISTGT_TRACELOG(ISTGT_TRACE_SCSI, "c#%d MAINTENANCE_OUT: 0x%2.2x:SET_TARGET_PORT_GROUPS\n", conn->id, sa);
+	CHECK_RSV_KEY(spec->rsv_key)
+	CHECK_LU_CMD_W_BIT("SCC_MAINTENANCE_OUT")
+	parameter_len = DGET32(&cdb[6]);
+	if (parameter_len == 0) {
+		lu_cmd->data_len = 0;
+		lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
+		return 0;
+	}
+	/* Data-Out */
+	rc = istgt_lu_disk_transfer_data(conn, lu_cmd, parameter_len);
+	if (rc < 0) {
+		ISTGT_ERRLOG("c#%d lu_disk_transfer_data() failed\n", conn->id);
+		lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
+		return 0;
+	}
+	if (parameter_len < 4) {
+		/* INVALID FIELD IN CDB */
+		BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);
+		lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
+		return 0;
+	}
+	/*ISTGT_TRACEDUMP(ISTGT_TRACE_DEBUG,
+	    "SET_TARGET_PORT_GROUPS",
+	    lu_cmd->iobuf, parameter_len);*/
+	getdata2(data, lu_cmd)
+	/* data[0]-data[3] Reserved */
+	/* Set target port group descriptor(s) */
+	data_len = istgt_lu_disk_scsi_set_target_port_groups(spec, conn, cdb, &data[4], parameter_len - 4);
+	CHECK_DATA_LEN(1, 0, "")
+	lu_cmd->data_len = parameter_len;
+	lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
+	return 0;
+}
+
+static int
+execute_spc_persistent_reserve_in(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, ISTGT_LU_DISK *spec)
+{
+	uint8_t *data = NULL;
+	uint8_t *cdb;
+	uint32_t allocation_len;
+	int data_len;
+	int data_alloc_len;
+	int rc;
+	int sa = 0;
+	cdb = lu_cmd->cdb;
+#ifdef	REPLICATION
+	ISTGT_TRACELOG(ISTGT_TRACE_SCSI, "c#%d RESERVE_IN not handled\n", conn->id);
+	/* INVALID COMMAND OPERATION CODE */
+	BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);
+	lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
+#else
+	sa = BGET8W(&cdb[1], 4, 5);
+	if (lu_cmd->R_bit == 0) {
+		ISTGT_ERRLOG("c#%d PERSISTENT_RESERVE_IN: sa:0x%2.2x R_bit == 0\n", conn->id, sa);
+		lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
+		return -1;
+	}
+	allocation_len = DGET16(&cdb[7]);
+	data_alloc_len = allocation_len + 8192;
+	CHECK_ALLOC_LEN("SPC_PERSISTENT_RESERVE_IN")
+	data = lu_cmd->data = xmalloc(data_alloc_len);
+	memset(data, 0, allocation_len);
+	MTX_LOCK(&spec->pr_rsv_mutex);
+	data_len = istgt_lu_disk_scsi_persistent_reserve_in(spec, conn, lu_cmd, sa, data, allocation_len);
+	MTX_UNLOCK(&spec->pr_rsv_mutex);
+	if (data_len < 0) {
+		/* status build by function */
+		return 0;
+	}
+	if (data_len > data_alloc_len) {
+		ISTGT_ERRLOG("c#%d PRIN alen:%d dlen:%d/%d tlen:%d mem-issue",
+			conn->id, allocation_len, data_len, data_alloc_len, lu_cmd->transfer_len);
+		lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
+		return 0;
+	}
+	ISTGT_TRACEDUMP(ISTGT_TRACE_DEBUG,
+	    "PERSISTENT_RESERVE_IN", data, data_len);
+	lu_cmd->data_len = DMIN32((size_t)data_len, lu_cmd->transfer_len);
+	lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
+	ISTGT_TRACELOG(ISTGT_TRACE_SCSI, "c#%d PERSISTENT_RESERVE_IN sa:0x%2.2x data:%u/%u/%u\n", conn->id, sa, data_len, 			lu_cmd->transfer_len, allocation_len);
+#endif
+	return 0;
+}
+
+static int
+execute_spc_persistent_reserve_out(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, ISTGT_LU_DISK *spec)
+{
+	uint8_t *data = NULL;
+	uint8_t *cdb;
+	uint32_t allocation_len;
+	uint32_t transfer_len;
+	uint32_t parameter_len;
+	int data_len;
+	int data_alloc_len;
+	int rc;
+	int sa =0;
+	int freedata = 0;
+	cdb = lu_cmd->cdb;
+#ifdef	REPLICATION
+	ISTGT_TRACELOG(ISTGT_TRACE_SCSI, "c#%d RESERVE_OUT not handled\n", conn->id);
+	/* INVALID COMMAND OPERATION CODE */
+	BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);
+	lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
+#else
+	int scope, type;
+	sa = BGET8W(&cdb[1], 4, 5);
+	if (lu_cmd->W_bit == 0) {
+		ISTGT_ERRLOG("c#%d PERSISTENT_RESERVE_OUT sa:0x%2.2x W_bit == 0\n", conn->id, sa);
+		lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
+		return -1;
+	}
+
+	scope = BGET8W(&cdb[2], 7, 4);
+	type = BGET8W(&cdb[2], 3, 4);
+	parameter_len = DGET32(&cdb[5]);
+
+	/* Data-Out */
+	rc = istgt_lu_disk_transfer_data(conn, lu_cmd, parameter_len);
+	if (rc < 0) {
+		ISTGT_ERRLOG("c#%d PERSISTENT_RESERVE_OUT sa:0x%2.2x scope:%x type:%x plen:%d - disk_transfer_data failed:%d\n",
+				conn->id, sa, scope, type, parameter_len, rc);
+		lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
+		return 0;
+	}
+	if (parameter_len < 24) {
+		ISTGT_ERRLOG("c#%d PERSISTENT_RESERVE_OUT sa:0x%2.2x scope:%x type:%x plen:%d less than 24\n",
+				conn->id, sa, scope, type, parameter_len);
+		/* INVALID FIELD IN CDB */
+		BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);
+		lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
+		return 0;
+	}
+
+	/*ISTGT_TRACEDUMP(ISTGT_TRACE_DEBUG,
+	    "PERSISTENT_RESERVE_OUT",
+	    lu_cmd->iobuf, parameter_len);*/
+	getdata2(data, lu_cmd)
+	MTX_LOCK(&spec->pr_rsv_mutex);
+	data_len = istgt_lu_disk_scsi_persistent_reserve_out(spec, conn, lu_cmd, sa, scope, type, &data[0], parameter_len, 0);
+	MTX_UNLOCK(&spec->pr_rsv_mutex);
+	if (data_len < 0) {
+		ISTGT_ERRLOG("c#%d PERSISTENT_RESERVE_OUT sa:0x%2.2x scope:%x type:%x plen:%d, function failed:%d\n",
+				conn->id, sa, scope, type, parameter_len, data_len);
+		/* status build by function */
+		return 0;
+	}
+	lu_cmd->data_len = parameter_len;
+	lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
+	ISTGT_ERRLOG("c#%d PERSISTENT_RESERVE_OUT sa:0x%2.2x scope:%x type:%x plen:%d success (%d)",
+				conn->id, sa, scope, type, parameter_len, data_len);
+#endif
+	return 0;
+}
+
 
 int
 istgt_lu_disk_execute(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
@@ -9082,17 +10294,12 @@ istgt_lu_disk_execute(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 	uint8_t *cdb;
 	uint32_t allocation_len;
 	int data_len;
-	int data_alloc_len = 1024*1024*1;
-	int max_alloc_size = 1024*1024*1;
 	uint64_t lba;
 	uint32_t len;
-	uint32_t transfer_len;
-	uint32_t parameter_len;
 	int lun_i;
 	int rc = 0;
 	int lunum, dolog = 0;
 	const char *msg = "";
-	uint64_t *tptr;
 	int sa= 0;
 	if (lu_cmd == NULL)
 		return -1;
@@ -9214,98 +10421,21 @@ istgt_lu_disk_execute(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 
 	switch (cdb[0]) {
 	case SPC_INQUIRY:
-		if (lu_cmd->R_bit == 0) {
-			ISTGT_ERRLOG("c#%d INQUIRY R_bit == 0\n", conn->id);
-			lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
+		rc = execute_spc_inquiry(conn, lu_cmd, spec);
+		if ( rc < 0 )
 			return -1;
-		}
-		allocation_len = DGET16(&cdb[3]);
-		data_alloc_len = allocation_len + 2048;
-		if (allocation_len > (size_t) max_alloc_size) {
-			ISTGT_ERRLOG("c#%d data_alloc_len(%d) too small\n",
-					conn->id, data_alloc_len);
-			lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-			return -1;
-		}
-		data = lu_cmd->data = xmalloc(data_alloc_len);
-		memset(data, 0, allocation_len);
-		data_len = istgt_lu_disk_scsi_inquiry(spec, conn, cdb,
-		    data, data_alloc_len);
-		if (data_len < 0) {
-			if(errno == EBUSY)
-				lu_cmd->status = ISTGT_SCSI_STATUS_BUSY;
-			else
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-			ISTGT_TRACELOG(ISTGT_TRACE_SCSI, "c#%d INQUIRY error:%d\n", conn->id, data_len);
-			break;
-		}
-		if (data_len > data_alloc_len) {
-			ISTGT_ERRLOG("c#%d INQUIRY mem-error:%d-%d\n", conn->id, data_len, data_alloc_len);
-			lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-			break;
-		}
-		ISTGT_TRACEDUMP(ISTGT_TRACE_DEBUG, "INQUIRY", data, data_len);
-		lu_cmd->data_len = DMIN32((size_t)data_len, lu_cmd->transfer_len);
-		lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
 		break;
 
 	case SPC_REPORT_LUNS:
-		{
-			int sel;
-
-			if (lu_cmd->R_bit == 0) {
-				ISTGT_ERRLOG("c#%d REPORT_LUNS R_bit == 0\n", conn->id);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				return -1;
-			}
-
-			sel = cdb[2];
-			allocation_len = DGET32(&cdb[6]);
-			data_alloc_len = allocation_len + 2048;
-			if (allocation_len > (size_t) max_alloc_size) {
-				ISTGT_ERRLOG("c#%d data_alloc_len(%d) too small\n",
-				    conn->id, data_alloc_len);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				return -1;
-			}
-			if (allocation_len < 16) {
-				/* INVALID FIELD IN CDB */
-				BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-			data = lu_cmd->data = xmalloc(data_alloc_len);
-			memset(data, 0, allocation_len);
-			data_len = istgt_lu_disk_scsi_report_luns(lu, conn, cdb, sel,
-			    data, data_alloc_len);
-			if (data_len < 0) {
-				if(errno == EBUSY)
-					lu_cmd->status = ISTGT_SCSI_STATUS_BUSY;
-				else {
-					BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);
-					lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				}
-				break;
-			}
-			ISTGT_TRACEDUMP(ISTGT_TRACE_DEBUG, "REPORT LUNS", data, data_len);
-			lu_cmd->data_len = DMIN32((size_t)data_len, lu_cmd->transfer_len);
-			lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
-
-			ISTGT_TRACELOG(ISTGT_TRACE_SCSI, "c#%d REPORT_LUNS sel:%x len:%lu (%d/%u/%u)\n",
-					conn->id, sel, lu_cmd->data_len, data_len, lu_cmd->transfer_len, allocation_len);
-		}
+		rc = execute_spc_report_luns(conn, lu_cmd);
+		if ( rc < 0 )
+			return -1;
 		break;
 
 	case SPC_TEST_UNIT_READY:
 		ISTGT_TRACELOG(ISTGT_TRACE_SCSI, "c#%d TEST_UNIT_READY\n", conn->id);
-		if (spec->rsv_key) {
-			rc = istgt_lu_disk_check_pr(spec, conn, PR_ALLOW(0,0,1,0,0));
-			if (rc != 0) {
-				ISTGT_ERRLOG("c#%d ISTGT_SCSI_STATUS_RESERVATION_CONFLICT\n", conn->id);
-				lu_cmd->status = ISTGT_SCSI_STATUS_RESERVATION_CONFLICT;
-				break;
-			}
-		}
+		CHECK_RSV_KEY(spec->rsv_key)
+
 		lu_cmd->data_len = 0;
 		lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
 		break;
@@ -9319,16 +10449,7 @@ istgt_lu_disk_execute(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 			start = BGET8(&cdb[4], 0);
 
 			if (start != 0 || pc != 0) {
-				if (spec->rsv_key) {
-					rc = istgt_lu_disk_check_pr(spec, conn,
-					    PR_ALLOW(0,0,1,0,0));
-					if (rc != 0) {
-						ISTGT_ERRLOG("c#%d ISTGT_SCSI_STATUS_RESERVATION_CONFLICT\n", conn->id);
-						lu_cmd->status
-							= ISTGT_SCSI_STATUS_RESERVATION_CONFLICT;
-						break;
-					}
-				}
+				CHECK_RSV_KEY(spec->rsv_key)
 			}
 
 			lu_cmd->data_len = 0;
@@ -9337,67 +10458,18 @@ istgt_lu_disk_execute(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 		break;
 
 	case SBC_READ_CAPACITY_10:
-		if (lu_cmd->R_bit == 0) {
-			ISTGT_ERRLOG("c#%d READ_CAPACITY_10 R_bit == 0\n", conn->id);
-			lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
+		rc = execute_sbc_read_capacity_10(conn, lu_cmd, spec);
+		if ( rc < 0 )
 			return -1;
-		}
-		data = lu_cmd->data = xmalloc(200);
-		if (spec->blockcnt - 1 > 0xffffffffULL) {
-			DSET32(&data[0], 0xffffffffUL);
-			ISTGT_TRACELOG(ISTGT_TRACE_SCSI, "c#%d READ_CAPACITY_10 blklen:%lu\n", conn->id, spec->blocklen);
-		} else {
-			DSET32(&data[0], (uint32_t) (spec->blockcnt - 1));
-			ISTGT_TRACELOG(ISTGT_TRACE_SCSI, "c#%d READ_CAPACITY_10 blkcnt:%lu blklen:%lu\n", conn->id, spec->blockcnt, spec->blocklen);
-		}
-		DSET32(&data[4], (uint32_t) spec->blocklen);
-		tptr = (uint64_t *)&(data[8]);
-		*tptr = 0; *(tptr+1) = 0;
-		data_len = 8;
-		lu_cmd->data_len = data_len;
-		lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
-		ISTGT_TRACEDUMP(ISTGT_TRACE_DEBUG,
-		    "SBC_READ_CAPACITY_10", data, data_len);
 		break;
 
 	case SPC_SERVICE_ACTION_IN_16:
 		sa = BGET8W(&cdb[1], 4, 5); /* SERVICE ACTION */
 		switch (sa) {
 		case SBC_SAI_READ_CAPACITY_16:
-			if (lu_cmd->R_bit == 0) {
-				ISTGT_ERRLOG("c#%d READ_CAPACITY_16 R_bit == 0\n", conn->id);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
+			rc = execute_sbc_sai_read_capacity_16(conn, lu_cmd, spec);
+			if ( rc < 0 )
 				return -1;
-			}
-			allocation_len = DGET32(&cdb[10]);
-			if (allocation_len > (size_t) max_alloc_size) {
-				ISTGT_ERRLOG("c#%d READ_CAPACITY_16 data_alloc_len(%d) too small\n",
-				    conn->id, data_alloc_len);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				return -1;
-			}
- 			ISTGT_TRACELOG(ISTGT_TRACE_SCSI, "c#%d READ_CAPACITY_16 blkcnt:%lu  blklen:%lu rshift:%u/%u %s\n",
- 					conn->id, spec->blockcnt, spec->blocklen, spec->rshift, spec->rshiftreal, spec->unmap ? "thin" : "-");
-
-			data_len = 32;
-			lu_cmd->data_len = DMIN32((size_t)data_len, lu_cmd->transfer_len);
-			data = lu_cmd->data = xmalloc(data_len + 20);
-			memset(data, 0, data_len+20);
-			DSET64(&data[0], spec->blockcnt - 1);
-			DSET32(&data[8], (uint32_t) spec->blocklen);
-			data[12] = 0;                   /* RTO_EN(1) PROT_EN(0) */
-			data[13] = 0;
- 			data[13] = spec->rshift & 0x0f;
- 			//if (spec->rshift > 0)
- 			//	BDSET8W(&data[13], spec->rshift, 3, 4);
-			if (spec->unmap)
-				data[14] = 0x80;
-			else 
-				data[14] = 0;
-			data[15] = 0;
-			tptr = (uint64_t *)(&(data[16]));
-			*tptr = 0; *(tptr+1) = 0;
-			lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
 			break;
 		case SBC_SAI_READ_LONG_16:
 		default:
@@ -9410,271 +10482,33 @@ istgt_lu_disk_execute(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 		break;
 
 	case SPC_MODE_SELECT_6:
-#if 0
-		istgt_scsi_dump_cdb(cdb);
-#endif
-		{
-			int pf, sp, pllen;
-			int bdlen;
-
-			if (spec->rsv_key) {
-				rc = istgt_lu_disk_check_pr(spec, conn, PR_ALLOW(0,0,1,0,0));
-				if (rc != 0) {
-					ISTGT_ERRLOG("c#%d ISTGT_SCSI_STATUS_RESERVATION_CONFLICT\n", conn->id);
-					lu_cmd->status = ISTGT_SCSI_STATUS_RESERVATION_CONFLICT;
-					break;
-				}
-			}
-
-			pf = BGET8(&cdb[1], 4);
-			sp = BGET8(&cdb[1], 0);
-			pllen = cdb[4];             /* Parameter List Length */
-
-			if (pllen == 0) {
-				lu_cmd->data_len = 0;
-				lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
-				break;
-			}
-			/* Data-Out */
-			rc = istgt_lu_disk_transfer_data(conn, lu_cmd, pllen);
-			if (rc < 0) {
-				ISTGT_ERRLOG("c#%d lu_disk_transfer_data() failed\n", conn->id);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-			if (pllen < 4) {
-				/* INVALID FIELD IN CDB */
-				BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-#if 0
-			istgt_dump("MODE SELECT(6)", lu_cmd->iobuf, pllen);
-#endif
-			getdata(data, lu_cmd)
-			bdlen = data[3];            /* Block Descriptor Length */
-
-			/* Short LBA mode parameter block descriptor */
-			/* data[4]-data[7] Number of Blocks */
-			/* data[8]-data[11] Block Length */
-
-			/* page data */
-			data_len = istgt_lu_disk_scsi_mode_select_page(spec, conn, cdb, pf, sp, &data[4 + bdlen], pllen - (4 + bdlen));
-			if (data_len != 0) {
-				if(errno == EBUSY)
-					lu_cmd->status = ISTGT_SCSI_STATUS_BUSY;
-				else
-					lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-			lu_cmd->data_len = pllen;
-			lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
-			break;
-		}
-
+		rc = execute_spc_mode_select_6(conn, lu_cmd, spec);
+		if ( rc < 0 )
+			return -1;
+		break;
 	case SPC_MODE_SELECT_10:
 #if 0
 		istgt_scsi_dump_cdb(cdb);
 #endif
 		{
-			int pf, sp, pllen;
-			int  bdlen;
-			int llba;
-
-			if (spec->rsv_key) {
-				rc = istgt_lu_disk_check_pr(spec, conn, PR_ALLOW(0,0,1,0,0));
-				if (rc != 0) {
-					ISTGT_ERRLOG("c#%d ISTGT_SCSI_STATUS_RESERVATION_CONFLICT\n", conn->id);
-					lu_cmd->status = ISTGT_SCSI_STATUS_RESERVATION_CONFLICT;
-					break;
-				}
-			}
-
-			pf = BGET8(&cdb[1], 4);
-			sp = BGET8(&cdb[1], 0);
-			pllen = DGET16(&cdb[7]);    /* Parameter List Length */
-
-			if (pllen == 0) {
-				lu_cmd->data_len = 0;
-				lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
-				break;
-			}
-			/* Data-Out */
-			rc = istgt_lu_disk_transfer_data(conn, lu_cmd, pllen);
-			if (rc < 0) {
-				ISTGT_ERRLOG("c#%d lu_disk_transfer_data() failed\n", conn->id);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-			if (pllen < 4) {
-				/* INVALID FIELD IN CDB */
-				BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-#if 0
-			istgt_dump("MODE SELECT(10)", lu_cmd->iobuf, pllen);
-#endif
-			getdata(data, lu_cmd) //data = lu_cmd->iobuf;
-			llba = BGET8(&data[4], 0);  /* Long LBA */
-			bdlen = DGET16(&data[6]);   /* Block Descriptor Length */
-
-			if (llba) {
-				/* Long LBA mode parameter block descriptor */
-				/* data[8]-data[15] Number of Blocks */
-				/* data[16]-data[19] Reserved */
-				/* data[20]-data[23] Block Length */
-			} else {
-				/* Short LBA mode parameter block descriptor */
-				/* data[8]-data[11] Number of Blocks */
-				/* data[12]-data[15] Block Length */
-			}
-
-			/* page data */
-			data_len = istgt_lu_disk_scsi_mode_select_page(spec, conn, cdb, pf, sp, &data[8 + bdlen], pllen - (8 + bdlen));
-			if (data_len != 0) {
-				if(errno == EBUSY)
-					lu_cmd->status = ISTGT_SCSI_STATUS_BUSY;
-				else
-					lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-			lu_cmd->data_len = pllen;
-			lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
-			break;
+		rc = execute_spc_mode_select_10(conn, lu_cmd, spec);
+		if ( rc < 0 )
+			return -1;
+		break;
 		}
 
 	case SPC_MODE_SENSE_6:
-#if 0
-		istgt_scsi_dump_cdb(cdb);
-#endif
 		{
-			int dbd, pc, page, subpage;
-
-			if (spec->rsv_key) {
-				rc = istgt_lu_disk_check_pr(spec, conn, PR_ALLOW(0,0,1,0,0));
-				if (rc != 0) {
-					ISTGT_ERRLOG("c#%d ISTGT_SCSI_STATUS_RESERVATION_CONFLICT\n", conn->id);
-					lu_cmd->status = ISTGT_SCSI_STATUS_RESERVATION_CONFLICT;
-					break;
-				}
-			}
-
-			if (lu_cmd->R_bit == 0) {
-				ISTGT_ERRLOG("R_bit == 0\n");
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				return -1;
-			}
-			dbd = BGET8(&cdb[1], 3);
-			pc = BGET8W(&cdb[2], 7, 2);
-			page = BGET8W(&cdb[2], 5, 6);
-			subpage = cdb[3];
-
-			allocation_len = cdb[4];
-			data_alloc_len = allocation_len + 2048;
-			if (allocation_len > (size_t) max_alloc_size) {
-				ISTGT_ERRLOG("c#%d data_alloc_len(%d) too small\n",
-				    conn->id, data_alloc_len);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				return -1;
-			}
-			data = lu_cmd->data = xmalloc(data_alloc_len);
-			memset(data, 0, data_alloc_len);
-			data_len = istgt_lu_disk_scsi_mode_sense6(spec, conn, cdb, dbd, pc, page, subpage, data, data_alloc_len);
-			if (data_len < 0) {
-				/* INVALID FIELD IN CDB */
-				BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);
-				if(errno == EBUSY)
-					lu_cmd->status = ISTGT_SCSI_STATUS_BUSY;
-				else
-					lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-			if (data_len > data_alloc_len) {
-				ISTGT_ERRLOG("c#%d MODE SENSE6 dbd:%x pc:%x page:%x subpage:%x alen:%d dlen:%d/%d tlen:%d mem-issue",
-					conn->id, dbd,  pc, page, subpage,
-					allocation_len, data_len, data_alloc_len, lu_cmd->transfer_len);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-#if 0
-			istgt_dump("MODE SENSE(6)", data, data_len);
-#endif
-			lu_cmd->data_len = DMIN32((size_t)data_len, lu_cmd->transfer_len);
-			ISTGT_TRACELOG(ISTGT_TRACE_SCSI, "c#%d MODE SENSE6 dbd:%x pc:%x page:%x subpage:%x alen:%d dlen:%d tlen:%d",
-					conn->id, dbd,  pc, page, subpage,
-					allocation_len, data_len, lu_cmd->transfer_len);
-
-			lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
+		rc = execute_spc_mode_sense_6(conn, lu_cmd, spec);
+		if ( rc < 0 )
+			return -1;
 			break;
 		}
-
 	case SPC_MODE_SENSE_10:
-#if 0
-		istgt_scsi_dump_cdb(cdb);
-#endif
 		{
-			int dbd, pc, page, subpage;
-			int llbaa;
-
-			if (spec->rsv_key) {
-				rc = istgt_lu_disk_check_pr(spec, conn, PR_ALLOW(0,0,1,0,0));
-				if (rc != 0) {
-					ISTGT_ERRLOG("c#%d ISTGT_SCSI_STATUS_RESERVATION_CONFLICT\n", conn->id);
-					lu_cmd->status = ISTGT_SCSI_STATUS_RESERVATION_CONFLICT;
-					break;
-				}
-			}
-
-			if (lu_cmd->R_bit == 0) {
-				ISTGT_ERRLOG("c#%d R_bit == 0\n", conn->id);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				return -1;
-			}
-
-			llbaa = BGET8(&cdb[1], 4);
-			dbd = BGET8(&cdb[1], 3);
-			pc = BGET8W(&cdb[2], 7, 2);
-			page = BGET8W(&cdb[2], 5, 6);
-			subpage = cdb[3];
-
-			allocation_len = DGET16(&cdb[7]);
-			data_alloc_len = allocation_len + 2048;
-			if (allocation_len > (size_t) max_alloc_size) {
-				ISTGT_ERRLOG("c#%d data_alloc_len(%d) too small\n",
-				    conn->id, data_alloc_len);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				return -1;
-			}
-			data = lu_cmd->data = xmalloc(data_alloc_len);
-			memset(data, 0, data_alloc_len);
-
-			data_len = istgt_lu_disk_scsi_mode_sense10(spec, conn, cdb, llbaa, dbd, pc, page, subpage, data, data_alloc_len);
-			if (data_len < 0) {
-				/* INVALID FIELD IN CDB */
-				BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);
-				if(errno == EBUSY)
-					lu_cmd->status = ISTGT_SCSI_STATUS_BUSY;
-				else
-					lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-			if (data_len > data_alloc_len) {
-				ISTGT_ERRLOG("c#%d MODE SENSE10 dbd:%x pc:%x page:%x subpage:%x alen:%d dlen:%d/%d tlen:%d mem-issue",
-					conn->id, dbd,  pc, page, subpage,
-					allocation_len, data_len, data_alloc_len, lu_cmd->transfer_len);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-
-#if 0
-			istgt_dump("MODE SENSE(10)", data, data_len);
-#endif
-			lu_cmd->data_len = DMIN32((size_t)data_len, lu_cmd->transfer_len);
-			ISTGT_NOTICELOG("c#%d MODE SENSE10 dbd:%x pc:%x page:%x subpage:%x alen:%d dlen:%d tlen:%d",
-					conn->id, dbd,  pc, page, subpage,
-					allocation_len, data_len, lu_cmd->transfer_len);
-			lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
+		rc = execute_spc_mode_sense_10(conn, lu_cmd, spec);
+		if ( rc < 0 )
+			return -1;
 			break;
 		}
 
@@ -9684,14 +10518,7 @@ istgt_lu_disk_execute(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 			BUILD_SENSE(ILLEGAL_REQUEST, 0x20, 0x00);
 			lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
 			break;
-			if (spec->rsv_key) {
-				rc = istgt_lu_disk_check_pr(spec, conn, PR_ALLOW(0,0,1,0,0));
-				if (rc != 0) {
-					ISTGT_ERRLOG("c#%d ISTGT_SCSI_STATUS_RESERVATION_CONFLICT\n", conn->id);
-					lu_cmd->status = ISTGT_SCSI_STATUS_RESERVATION_CONFLICT;
-					break;
-				}
-			}
+			CHECK_RSV_KEY(spec->rsv_key)
 		}
 	case SPC_LOG_SENSE:
 		/* INVALID COMMAND OPERATION CODE */
@@ -9701,407 +10528,94 @@ istgt_lu_disk_execute(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 
 	case SPC_REQUEST_SENSE:
 		{
-			int desc;
-			int sk, asc, ascq;
-
-			if (lu_cmd->R_bit == 0) {
-				ISTGT_ERRLOG("c#%d R_bit == 0\n", conn->id);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				return -1;
-			}
-
-			desc = BGET8(&cdb[1], 0);
-			if (desc != 0) {
-				/* INVALID FIELD IN CDB */
-				BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-
-			allocation_len = cdb[4];
-			data_alloc_len = allocation_len + 2048;
-			if (allocation_len > (size_t) max_alloc_size) {
-				ISTGT_ERRLOG("c#%d data_alloc_len(%d) too small\n",
-				    conn->id, data_alloc_len);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				return -1;
-			}
-			data = lu_cmd->data = xmalloc(data_alloc_len);
-
-			if (!spec->sense) {
-				/* NO ADDITIONAL SENSE INFORMATION */
-				sk = ISTGT_SCSI_SENSE_NO_SENSE;
-				asc = 0x00;
-				ascq = 0x00;
-			} else {
-				sk = (spec->sense >> 16) & 0xffU;
-				asc = (spec->sense >> 8) & 0xffU;
-				ascq = spec->sense & 0xffU;
-			}
-			istgt_lu_scsi_build_sense_data(lu_cmd, sk, asc, ascq);
-			data_len = lu_cmd->sense_data_len;
-			if (data_len < 0 || data_len < 2) {
-				if(errno == EBUSY)
-					lu_cmd->status = ISTGT_SCSI_STATUS_BUSY;
-				else
-					lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-			/* omit SenseLength */
-			data_len -= 2;
-			memcpy(data, lu_cmd->sense_data + 2, data_len);
-#if 0
-			istgt_dump("REQUEST SENSE", data, data_len);
-#endif
-			lu_cmd->data_len = DMIN32((size_t)data_len, lu_cmd->transfer_len);
-			if (lu_cmd->data_len > (size_t)data_len)
-				memset(data+data_len, 0, lu_cmd->data_len - data_len);
-			lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
-			break;
+		rc = execute_spc_request_sense(conn, lu_cmd, spec);
+		if ( rc < 0 )
+			return -1;
+		break;
 		}
 
 	case SPC_RECEIVE_COPY_RESULTS:
 		{
-			if (spec->rsv_key) {
-				rc = istgt_lu_disk_check_pr(spec, conn, PR_ALLOW(0,0,1,0,0));
-				if (rc != 0) {
-					ISTGT_ERRLOG("c#%d ISTGT_SCSI_STATUS_RESERVATION_CONFLICT\n", conn->id);
-					lu_cmd->status = ISTGT_SCSI_STATUS_RESERVATION_CONFLICT;
-					break;
-				}
-			}
-			allocation_len = DGET32(&cdb[10]);
-			if (allocation_len > (size_t) max_alloc_size) {
-				ISTGT_ERRLOG("c#%d data_alloc_len(%d) too small\n", conn->id, data_alloc_len);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				return -1;
-			}
-			if (allocation_len == 0) {
-				lu_cmd->data_len = 0;
-				lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
-				break;
-			}
-			data_len = istgt_lu_disk_receive_copy_results(conn, lu_cmd);
-			if (data_len < 0) {
-				if(errno == EBUSY)
-					lu_cmd->status = ISTGT_SCSI_STATUS_BUSY;
-				else
-					lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				ISTGT_ERRLOG("c#%d lu_disk_receive_copy_results() failed\n", conn->id);
-				break;
-			}
-			lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
-			break;
+		rc = execute_spc_receive_copy_results(conn, lu_cmd, spec);
+		if ( rc < 0 )
+			return -1;
+		break;
 		}
 
 	case SBC_READ_6:
 		{
-			if (spec->rsv_key) {
-				rc = istgt_lu_disk_check_pr(spec, conn, PR_ALLOW(1,0,1,1,0));
-				if (rc != 0) {
-					ISTGT_ERRLOG("c#%d ISTGT_SCSI_STATUS_RESERVATION_CONFLICT\n", conn->id);
-					lu_cmd->status = ISTGT_SCSI_STATUS_RESERVATION_CONFLICT;
-					break;
-				}
-			}
+		rc = execute_sbc_read_6(conn, lu_cmd, spec);
+		if ( rc < 0 )
+			return -1;
 
-			if (lu_cmd->R_bit == 0) {
-				ISTGT_ERRLOG("R_bit == 0\n");
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				return -1;
-			}
-
-			lba = (uint64_t) (DGET24(&cdb[1]) & 0x001fffffU);
-			transfer_len = (uint32_t) DGET8(&cdb[4]);
-			if (transfer_len == 0) {
-				transfer_len = 256;
-			}
-			checklength;
-			ISTGT_TRACELOG(ISTGT_TRACE_SCSI,
-			    "c#%d READ_6(lba %"PRIu64", len %u blocks)\n",
-			    conn->id, lba, transfer_len);
-			rc = istgt_lu_disk_lbread(spec, conn, lu_cmd, lba, transfer_len);
-			if (rc < 0) {
-				ISTGT_ERRLOG("c#%d lu_disk_lbread() failed\n", conn->id);
-				if(errno == EBUSY)
-					lu_cmd->status = ISTGT_SCSI_STATUS_BUSY;
-				else
-					lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-			lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
 			break;
 		}
 
 	case SBC_READ_10:
 		{
-			if (spec->rsv_key) {
-				rc = istgt_lu_disk_check_pr(spec, conn, PR_ALLOW(1,0,1,1,0));
-				if (rc != 0) {
-					ISTGT_ERRLOG("c#%d ISTGT_SCSI_STATUS_RESERVATION_CONFLICT\n", conn->id);
-					lu_cmd->status = ISTGT_SCSI_STATUS_RESERVATION_CONFLICT;
-					break;
-				}
-			}
+		rc = execute_sbc_read_10(conn, lu_cmd, spec);
+		if ( rc < 0 )
+			return -1;
 
-			if (lu_cmd->R_bit == 0) {
-				ISTGT_ERRLOG("c#%d R_bit == 0\n", conn->id);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				return -1;
-			}
-
-			lba = (uint64_t) DGET32(&cdb[2]);
-			transfer_len = (uint32_t) DGET16(&cdb[7]);
-			checklength;
-			ISTGT_TRACELOG(ISTGT_TRACE_SCSI,
-			    "c#%d READ_10(lba %"PRIu64", len %u blocks)\n",
-			    conn->id, lba, transfer_len);
-			rc = istgt_lu_disk_lbread(spec, conn, lu_cmd, lba, transfer_len);
-			if (rc < 0) {
-				ISTGT_ERRLOG("c#%d lu_disk_lbread() failed\n", conn->id);
-				if(errno == EBUSY)
-					lu_cmd->status = ISTGT_SCSI_STATUS_BUSY;
-				else
-					lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-			lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
-			break;
+		break;
 		}
 
 	case SBC_READ_12:
 		{
-			if (spec->rsv_key) {
-				rc = istgt_lu_disk_check_pr(spec, conn, PR_ALLOW(1,0,1,1,0));
-				if (rc != 0) {
-					ISTGT_ERRLOG("c#%d ISTGT_SCSI_STATUS_RESERVATION_CONFLICT\n", conn->id);
-					lu_cmd->status = ISTGT_SCSI_STATUS_RESERVATION_CONFLICT;
-					break;
-				}
-			}
-
-			if (lu_cmd->R_bit == 0) {
-				ISTGT_ERRLOG("R_bit == 0\n");
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				return -1;
-			}
-
-			lba = (uint64_t) DGET32(&cdb[2]);
-			transfer_len = (uint32_t) DGET32(&cdb[6]);
-			checklength;
-			ISTGT_TRACELOG(ISTGT_TRACE_SCSI,
-			    "c#%d READ_12(lba %"PRIu64", len %u blocks)\n",
-			    conn->id, lba, transfer_len);
-			rc = istgt_lu_disk_lbread(spec, conn, lu_cmd, lba, transfer_len);
-			if (rc < 0) {
-				ISTGT_ERRLOG("c#%d lu_disk_lbread() failed\n", conn->id);
-				if(errno == EBUSY)
-					lu_cmd->status = ISTGT_SCSI_STATUS_BUSY;
-				else
-					lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-			lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
-			break;
+		rc = execute_sbc_read_12(conn, lu_cmd, spec);
+		if ( rc < 0 )
+			return -1;
+		break;
 		}
 
 	case SBC_READ_16:
 		{
-			if (spec->rsv_key) {
-				rc = istgt_lu_disk_check_pr(spec, conn, PR_ALLOW(1,0,1,1,0));
-				if (rc != 0) {
-					ISTGT_ERRLOG("c#%d ISTGT_SCSI_STATUS_RESERVATION_CONFLICT\n", conn->id);
-					lu_cmd->status = ISTGT_SCSI_STATUS_RESERVATION_CONFLICT;
-					break;
-				}
-			}
-
-			if (lu_cmd->R_bit == 0) {
-				ISTGT_ERRLOG("c#%d R_bit == 0\n", conn->id);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				return -1;
-			}
-
-			lba = (uint64_t) DGET64(&cdb[2]);
-			transfer_len = (uint32_t) DGET32(&cdb[10]);
-			checklength;
-			ISTGT_TRACELOG(ISTGT_TRACE_SCSI,
-			    "c#%d READ_16(lba %"PRIu64", len %u blocks)\n",
-			    conn->id, lba, transfer_len);
-			rc = istgt_lu_disk_lbread(spec, conn, lu_cmd, lba, transfer_len);
-			if (rc < 0) {
-				ISTGT_ERRLOG("c#%d lu_disk_lbread() failed\n", conn->id);
-				if(errno == EBUSY)
-					lu_cmd->status = ISTGT_SCSI_STATUS_BUSY;
-				else
-					lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-			lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
-			break;
+		rc = execute_sbc_read_16(conn, lu_cmd, spec);
+		if ( rc < 0 )
+			return -1;
+		break;
 		}
 
 	case SBC_WRITE_6:
 		{
-			if (spec->rsv_key) {
-				rc = istgt_lu_disk_check_pr(spec, conn, PR_ALLOW(0,0,1,0,0));
-				if (rc != 0) {
-					ISTGT_ERRLOG("c#%d ISTGT_SCSI_STATUS_RESERVATION_CONFLICT\n", conn->id);
-					lu_cmd->status = ISTGT_SCSI_STATUS_RESERVATION_CONFLICT;
-					break;
-				}
-			}
+		rc = execute_sbc_write_6(conn, lu_cmd, spec);
+		if ( rc < 0 )
+			return -1;
 
-			if (lu_cmd->W_bit == 0) {
-				ISTGT_ERRLOG("c#%d W_bit == 0\n", conn->id);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				return -1;
-			}
-
-			lba = (uint64_t) (DGET24(&cdb[1]) & 0x001fffffU);
-			transfer_len = (uint32_t) DGET8(&cdb[4]);
-			if (transfer_len == 0) {
-				transfer_len = 256;
-			}
-			checklength;
-			ISTGT_TRACELOG(ISTGT_TRACE_SCSI,
-			    "c#%d WRITE_6(lba %"PRIu64", len %u blocks)\n",
-			    conn->id, lba, transfer_len);
-			rc = istgt_lu_disk_lbwrite(spec, conn, lu_cmd, lba, transfer_len);
-			if (rc < 0) {
-				ISTGT_ERRLOG("c#%d lu_disk_lbwrite() failed\n", conn->id);
-				if(errno == EBUSY)
-					lu_cmd->status = ISTGT_SCSI_STATUS_BUSY;
-				else
-					lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-			lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
-			break;
+	break;
 		}
 
 	case SBC_WRITE_10:
 	case SBC_WRITE_AND_VERIFY_10:
 		{
-			if (spec->rsv_key) {
-				rc = istgt_lu_disk_check_pr(spec, conn, PR_ALLOW(0,0,1,0,0));
-				if (rc != 0) {
-					ISTGT_ERRLOG("c#%d ISTGT_SCSI_STATUS_RESERVATION_CONFLICT\n", conn->id);
-					lu_cmd->status = ISTGT_SCSI_STATUS_RESERVATION_CONFLICT;
-					break;
-				}
-			}
+		rc = execute_sbc_write_10(conn, lu_cmd, spec);
+		if ( rc < 0 )
+			return -1;
 
-			if (lu_cmd->W_bit == 0) {
-				ISTGT_ERRLOG("c#%d W_bit == 0\n", conn->id);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				return -1;
-			}
-
-			lba = (uint64_t) DGET32(&cdb[2]);
-			transfer_len = (uint32_t) DGET16(&cdb[7]);
-			checklength;
-			ISTGT_TRACELOG(ISTGT_TRACE_SCSI,
-			    "c#%d WRITE_10(lba %"PRIu64", len %u blocks)\n",
-			    conn->id, lba, transfer_len);
-			rc = istgt_lu_disk_lbwrite(spec, conn, lu_cmd, lba, transfer_len);
-			if (rc < 0) {
-				ISTGT_ERRLOG("c#%d lu_disk_lbwrite() failed\n", conn->id);
-				if(errno == EBUSY)
-					lu_cmd->status = ISTGT_SCSI_STATUS_BUSY;
-				else
-					lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-			lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
-			break;
+		break;
 		}
 
 	case SBC_WRITE_12:
 	case SBC_WRITE_AND_VERIFY_12:
 		{
-			if (spec->rsv_key) {
-				rc = istgt_lu_disk_check_pr(spec, conn, PR_ALLOW(0,0,1,0,0));
-				if (rc != 0) {
-					ISTGT_ERRLOG("c#%d ISTGT_SCSI_STATUS_RESERVATION_CONFLICT\n", conn->id);
-					lu_cmd->status = ISTGT_SCSI_STATUS_RESERVATION_CONFLICT;
-					break;
-				}
-			}
-
-			if (lu_cmd->W_bit == 0) {
-				ISTGT_ERRLOG("c#%d W_bit == 0\n", conn->id);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				return -1;
-			}
-
-			lba = (uint64_t) DGET32(&cdb[2]);
-			transfer_len = (uint32_t) DGET32(&cdb[6]);
-			checklength;
-			ISTGT_TRACELOG(ISTGT_TRACE_SCSI,
-			    "c#%d WRITE_12(lba %"PRIu64", len %u blocks)\n",
-			    conn->id, lba, transfer_len);
-			rc = istgt_lu_disk_lbwrite(spec, conn, lu_cmd, lba, transfer_len);
-			if (rc < 0) {
-				ISTGT_ERRLOG("c#%d lu_disk_lbwrite() failed\n", conn->id);
-				if(errno == EBUSY)
-					lu_cmd->status = ISTGT_SCSI_STATUS_BUSY;
-				else
-					lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-			lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
-			break;
+		rc = execute_sbc_write_12(conn, lu_cmd, spec);
+		if ( rc < 0 )
+			return -1;
+		break;
 		}
 
 	case SBC_WRITE_16:
 	case SBC_WRITE_AND_VERIFY_16:
 		{
-			if (spec->rsv_key) {
-				rc = istgt_lu_disk_check_pr(spec, conn, PR_ALLOW(0,0,1,0,0));
-				if (rc != 0) {
-					ISTGT_ERRLOG("c#%d ISTGT_SCSI_STATUS_RESERVATION_CONFLICT\n", conn->id);
-					lu_cmd->status = ISTGT_SCSI_STATUS_RESERVATION_CONFLICT;
-					break;
-				}
-			}
-
-			if (lu_cmd->W_bit == 0) {
-				ISTGT_ERRLOG("c#%d W_bit == 0\n", conn->id);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				return -1;
-			}
-
-			lba = (uint64_t) DGET64(&cdb[2]);
-			transfer_len = (uint32_t) DGET32(&cdb[10]);
-			checklength;
-			ISTGT_TRACELOG(ISTGT_TRACE_SCSI,
-			    "c#%d WRITE_16(lba %"PRIu64", len %u blocks)\n",
-			    conn->id, lba, transfer_len);
-			rc = istgt_lu_disk_lbwrite(spec, conn, lu_cmd, lba, transfer_len);
-			if (rc < 0) {
-				ISTGT_ERRLOG("c#%d lu_disk_lbwrite() failed\n", conn->id);
-				if(errno == EBUSY)
-					lu_cmd->status = ISTGT_SCSI_STATUS_BUSY;
-				else
-					lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-			lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
-			break;
+		rc = execute_sbc_write_16(conn, lu_cmd, spec);
+		if ( rc < 0 )
+			return -1;
+		break;
 		}
 
 	case SBC_VERIFY_10:
 		{
-			if (spec->rsv_key) {
-				rc = istgt_lu_disk_check_pr(spec, conn, PR_ALLOW(1,0,1,1,0));
-				if (rc != 0) {
-					ISTGT_ERRLOG("c#%d ISTGT_SCSI_STATUS_RESERVATION_CONFLICT\n", conn->id);
-					lu_cmd->status = ISTGT_SCSI_STATUS_RESERVATION_CONFLICT;
-					break;
-				}
-			}
-
+			CHECK_RSV_KEY(spec->rsv_key)
 			lba = (uint64_t) DGET32(&cdb[2]);
 			len = (uint32_t) DGET16(&cdb[7]);
 			ISTGT_TRACELOG(ISTGT_TRACE_SCSI,
@@ -10114,14 +10628,7 @@ istgt_lu_disk_execute(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 
 	case SBC_VERIFY_12:
 		{
-			if (spec->rsv_key) {
-				rc = istgt_lu_disk_check_pr(spec, conn, PR_ALLOW(1,0,1,1,0));
-				if (rc != 0) {
-					ISTGT_ERRLOG("c#%d ISTGT_SCSI_STATUS_RESERVATION_CONFLICT\n", conn->id);
-					lu_cmd->status = ISTGT_SCSI_STATUS_RESERVATION_CONFLICT;
-					break;
-				}
-			}
+			CHECK_RSV_KEY(spec->rsv_key)
 
 			lba = (uint64_t) DGET32(&cdb[2]);
 			len = (uint32_t) DGET32(&cdb[6]);
@@ -10135,14 +10642,7 @@ istgt_lu_disk_execute(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 
 	case SBC_VERIFY_16:
 		{
-			if (spec->rsv_key) {
-				rc = istgt_lu_disk_check_pr(spec, conn, PR_ALLOW(1,0,1,1,0));
-				if (rc != 0) {
-					ISTGT_ERRLOG("c#%d ISTGT_SCSI_STATUS_RESERVATION_CONFLICT\n", conn->id);
-					lu_cmd->status = ISTGT_SCSI_STATUS_RESERVATION_CONFLICT;
-					break;
-				}
-			}
+			CHECK_RSV_KEY(spec->rsv_key)
 
 			lba = (uint64_t) DGET64(&cdb[2]);
 			len = (uint32_t) DGET32(&cdb[10]);
@@ -10156,367 +10656,71 @@ istgt_lu_disk_execute(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 
 	case SBC_WRITE_SAME_10:
 		{
-			int pbdata, lbdata;
-
-			if (spec->rsv_key) {
-				rc = istgt_lu_disk_check_pr(spec, conn, PR_ALLOW(0,0,1,0,0));
-				if (rc != 0) {
-					ISTGT_ERRLOG("c#%d ISTGT_SCSI_STATUS_RESERVATION_CONFLICT\n", conn->id);
-					lu_cmd->status = ISTGT_SCSI_STATUS_RESERVATION_CONFLICT;
-					break;
-				}
-			}
-
-			if (lu_cmd->W_bit == 0) {
-				ISTGT_ERRLOG("c#%d W_bit == 0\n", conn->id);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				return -1;
-			}
-
-			pbdata = BGET8(&cdb[1], 2);
-			lbdata = BGET8(&cdb[1], 1);
-			lba = (uint64_t) DGET32(&cdb[2]);
-			transfer_len = (uint32_t) DGET16(&cdb[7]);
-			checklength;
-			//group_no = BGET8W(&cdb[6], 4, 5)
-			/* only PBDATA=0 and LBDATA=0 support */
-			if (pbdata || lbdata) {
-				/* INVALID FIELD IN CDB */
-				BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-
-			ISTGT_TRACELOG(ISTGT_TRACE_SCSI,
-			    "c#%d WRITE_SAME_10(lba %"PRIu64", len %u blocks)\n",
-			    conn->id, lba, transfer_len);
-			rc = istgt_lu_disk_lbwrite_same(spec, conn, lu_cmd, lba, transfer_len);
-			if (rc < 0) {
-				ISTGT_ERRLOG("c#%d lu_disk_lbwrite_same() failed\n", conn->id);
-				if(errno == EBUSY)
-					lu_cmd->status = ISTGT_SCSI_STATUS_BUSY;
-				else
-					lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-			lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
-			break;
+		rc = execute_sbc_write_same_10(conn, lu_cmd, spec);
+		if ( rc < 0 )
+			return -1;
+		break;
 		}
 
 	case SBC_WRITE_SAME_16:
 		{
-			int anchor, unmap, pbdata, lbdata;
-
-#if 0
-			istgt_scsi_dump_cdb(cdb);
-#endif
-			if (spec->rsv_key) {
-				rc = istgt_lu_disk_check_pr(spec, conn, PR_ALLOW(0,0,1,0,0));
-				if (rc != 0) {
-					ISTGT_ERRLOG("c#%d ISTGT_SCSI_STATUS_RESERVATION_CONFLICT\n", conn->id);
-					lu_cmd->status = ISTGT_SCSI_STATUS_RESERVATION_CONFLICT;
-					break;
-				}
-			}
-
-			if (lu_cmd->W_bit == 0) {
-				ISTGT_ERRLOG("c#%d W_bit == 0\n", conn->id);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				return -1;
-			}
-
-			anchor = BGET8(&cdb[1], 4);
-			unmap = BGET8(&cdb[1], 3);
-			pbdata = BGET8(&cdb[1], 2);
-			lbdata = BGET8(&cdb[1], 1);
-			lba = (uint64_t) DGET64(&cdb[2]);
-			transfer_len = (uint32_t) DGET32(&cdb[10]);
-			checklength;
-			//group_no = BGET8W(&cdb[14], 4, 5);
-			/* only PBDATA=0 and LBDATA=0 support */
-			if (pbdata || lbdata) {
-				/* INVALID FIELD IN CDB */
-				BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-			if (anchor) {
-				/* INVALID FIELD IN CDB */
-				BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-			ISTGT_TRACELOG(ISTGT_TRACE_SCSI,
-			     "c#%d WRITE_SAME_16(lba %"PRIu64", len %u blocks) %s\n",
-				 conn->id, lba, transfer_len, unmap ? "UNMAP bit" : " ");
-			rc = istgt_lu_disk_lbwrite_same(spec, conn, lu_cmd, lba, transfer_len);
-			if (rc < 0) {
-				ISTGT_ERRLOG("c#%d WRITE_SAME_16(lba %"PRIu64", len %u blocks) failed. %s\n",
-						conn->id, lba, transfer_len, unmap ? "UNMAP bit" : " ");
-				if(errno == EBUSY)
-					lu_cmd->status = ISTGT_SCSI_STATUS_BUSY;
-				else
-					lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-			lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
-			break;
+		rc = execute_sbc_write_same_16(conn, lu_cmd, spec);
+		if ( rc < 0 )
+			return -1;
+		break;
 		}
 
 	case SBC_COMPARE_AND_WRITE:
 		{
-			int64_t maxlen;
-#if 0
-			istgt_scsi_dump_cdb(cdb);
-#endif
-			if (spec->lu->istgt->swmode == ISTGT_SWMODE_TRADITIONAL) {
-				/* INVALID COMMAND OPERATION CODE */
-				BUILD_SENSE(ILLEGAL_REQUEST, 0x20, 0x00);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-			if (spec->rsv_key) {
-				rc = istgt_lu_disk_check_pr(spec, conn, PR_ALLOW(0,0,1,0,0));
-				if (rc != 0) {
-					ISTGT_ERRLOG("c#%d ISTGT_SCSI_STATUS_RESERVATION_CONFLICT\n", conn->id);
-					lu_cmd->status = ISTGT_SCSI_STATUS_RESERVATION_CONFLICT;
-					break;
-				}
-			}
+		rc = execute_sbc_compare_and_write(conn, lu_cmd, spec);
+		if ( rc < 0 )
+			return -1;
 
-			if (lu_cmd->W_bit == 0) {
-				ISTGT_ERRLOG("W_bit == 0\n");
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				return -1;
-			}
-
-			lba = (uint64_t) DGET64(&cdb[2]);
-			transfer_len = (uint32_t) DGET8(&cdb[13]);
-
-			maxlen = ISTGT_LU_WORK_ATS_BLOCK_SIZE / spec->blocklen;
-			if (maxlen > 0xff) {
-				maxlen = 0xff;
-			}
-			if (transfer_len > maxlen) {
-				/* INVALID FIELD IN CDB */
-				BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-
-			ISTGT_TRACELOG(ISTGT_TRACE_SCSI,
-			    "c#%d COMPARE_AND_WRITE(lba %"PRIu64", len %u blocks)\n",
-			    conn->id, lba, transfer_len);
-			rc = istgt_lu_disk_lbwrite_ats(spec, conn, lu_cmd, lba, transfer_len);
-			if (rc < 0) {
-				//ISTGT_ERRLOG("lu_disk_lbwrite_ats() failed\n");
-				/* sense data build by function */
-				if(errno == EBUSY)
-					lu_cmd->status = ISTGT_SCSI_STATUS_BUSY;
-				else
-					lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-			lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
-			break;
+		break;
 		}
 
 	case SBC_SYNCHRONIZE_CACHE_10:
 		{
-			if (spec->rsv_key) {
-				rc = istgt_lu_disk_check_pr(spec, conn, PR_ALLOW(0,0,1,0,0));
-				if (rc != 0) {
-					ISTGT_ERRLOG("ISTGT_SCSI_STATUS_RESERVATION_CONFLICT\n");
-					lu_cmd->status = ISTGT_SCSI_STATUS_RESERVATION_CONFLICT;
-					break;
-				}
-			}
+		rc = execute_sbc_synchronize_cache_10(conn, lu_cmd, spec);
+		if ( rc < 0 )
+			return -1;
 
-			lba = (uint64_t) DGET32(&cdb[2]);
-			len = (uint32_t) DGET16(&cdb[7]);
-			if (len == 0) {
-				len = spec->blockcnt;
-			}
-			ISTGT_TRACELOG(ISTGT_TRACE_SCSI,
-			    "c#%d SYNCHRONIZE_CACHE_10(lba %"PRIu64
-			    ", len %u blocks)\n",
-			    conn->id, lba, len);
-			rc = istgt_lu_disk_lbsync(spec, conn, lu_cmd, lba, len);
-			if (rc < 0) {
-				ISTGT_ERRLOG("c#%d lu_disk_lbsync() failed\n", conn->id);
-				if(errno == EBUSY)
-					lu_cmd->status = ISTGT_SCSI_STATUS_BUSY;
-				else
-					lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-			lu_cmd->data_len = 0;
-			lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
-			break;
+		break;
 		}
 
 	case SBC_SYNCHRONIZE_CACHE_16:
 		{
-			if (spec->rsv_key) {
-				rc = istgt_lu_disk_check_pr(spec, conn, PR_ALLOW(0,0,1,0,0));
-				if (rc != 0) {
-					ISTGT_ERRLOG("c#%d ISTGT_SCSI_STATUS_RESERVATION_CONFLICT\n", conn->id);
-					lu_cmd->status = ISTGT_SCSI_STATUS_RESERVATION_CONFLICT;
-					break;
-				}
-			}
-
-			lba = (uint64_t) DGET64(&cdb[2]);
-			len = (uint32_t) DGET32(&cdb[10]);
-			if (len == 0) {
-				len = spec->blockcnt;
-			}
-			ISTGT_TRACELOG(ISTGT_TRACE_SCSI,
-			    "c#%d SYNCHRONIZE_CACHE_10(lba %"PRIu64
-			    ", len %u blocks)\n",
-			    conn->id, lba, len);
-			rc = istgt_lu_disk_lbsync(spec, conn, lu_cmd, lba, len);
-			if (rc < 0) {
-				ISTGT_ERRLOG("c#%d lu_disk_lbsync() failed\n", conn->id);
-				if(errno == EBUSY)
-					lu_cmd->status = ISTGT_SCSI_STATUS_BUSY;
-				else
-					lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-			lu_cmd->data_len = 0;
-			lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
-			break;
+		rc = execute_sbc_synchronize_cache_16(conn, lu_cmd, spec);
+		if ( rc < 0 )
+			return -1;
+		break;
 		}
 
 	case SBC_READ_DEFECT_DATA_10:
 		{
-			int req_plist, req_glist, list_format;
-			if (lu_cmd->R_bit == 0) {
-				ISTGT_ERRLOG("c#%d R_bit == 0\n", conn->id);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				return -1;
-			}
+		rc = execute_sbc_read_defect_data_10(conn, lu_cmd, spec);
+		if ( rc < 0 )
+			return -1;
 
-			req_plist = BGET8(&cdb[2], 4);
-			req_glist = BGET8(&cdb[2], 3);
-			list_format = BGET8W(&cdb[2], 2, 3);
-
-			allocation_len = (uint32_t) DGET16(&cdb[7]);
-			data_alloc_len = allocation_len + 8192;
-			if (allocation_len > (size_t) max_alloc_size) {
-				ISTGT_ERRLOG("c#%d data_alloc_len(%d) too small\n",
-				    conn->id, data_alloc_len);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				return -1;
-			}
-			data = lu_cmd->data = xmalloc(data_alloc_len);
-			memset(data, 0, allocation_len);
-
-			data_len = istgt_lu_disk_scsi_read_defect10(spec, conn, cdb,
-			    req_plist, req_glist, list_format, data, data_alloc_len);
-			if (data_len < 0) {
-				if(errno == EBUSY)
-					lu_cmd->status = ISTGT_SCSI_STATUS_BUSY;
-				else
-					lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-			if (data_len > data_alloc_len) {
-				ISTGT_ERRLOG("c#%d READ_DEFECT_DATA10  alen:%d dlen:%d/%d tlen:%d mem-issue",
-					conn->id, allocation_len, data_len, data_alloc_len, lu_cmd->transfer_len);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-			lu_cmd->data_len = DMIN32((size_t)data_len, lu_cmd->transfer_len);
-			lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
-			break;
+		break;
 		}
 
 	case SBC_READ_DEFECT_DATA_12:
 		{
-			int req_plist, req_glist, list_format;
+		rc = execute_sbc_read_defect_12(conn, lu_cmd, spec);
+		if ( rc < 0 )
+			return -1;
 
-			if (lu_cmd->R_bit == 0) {
-				ISTGT_ERRLOG("c#%d R_bit == 0\n", conn->id);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				return -1;
-			}
-
-			req_plist = BGET8(&cdb[2], 4);
-			req_glist = BGET8(&cdb[2], 3);
-			list_format = BGET8W(&cdb[2], 2, 3);
-
-			allocation_len = DGET32(&cdb[6]);
-			data_alloc_len = allocation_len + 8192;
-			if (allocation_len > (size_t) max_alloc_size) {
-				ISTGT_ERRLOG("c#%d data_alloc_len(%d) too small\n",
-				    conn->id, data_alloc_len);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				return -1;
-			}
-			data = lu_cmd->data = xmalloc(data_alloc_len);
-			memset(data, 0, allocation_len);
-
-			data_len = istgt_lu_disk_scsi_read_defect12(spec, conn, cdb,
-			    req_plist, req_glist, list_format, data, data_alloc_len);
-			if (data_len < 0) {
-				if(errno == EBUSY)
-					lu_cmd->status = ISTGT_SCSI_STATUS_BUSY;
-				else
-					lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-			if (data_len > data_alloc_len) {
-				ISTGT_ERRLOG("c#%d READ_DEFECT_DATA12  alen:%d dlen:%d/%d tlen:%d mem-issue",
-					conn->id, allocation_len, data_len, data_alloc_len, lu_cmd->transfer_len);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-			lu_cmd->data_len = DMIN32((size_t)data_len, lu_cmd->transfer_len);
-			lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
-			break;
+		break;
 		}
 
 	case SCC_MAINTENANCE_IN:
 		sa = BGET8W(&cdb[1], 4, 5); /* SERVICE ACTION */
 		switch (sa) { /* SERVICE ACTION */
 		case SPC_MI_REPORT_TARGET_PORT_GROUPS:
-			ISTGT_TRACELOG(ISTGT_TRACE_SCSI, "c#%d MAINTENANCE_IN: sa:0x%2.2x:REPORT_TARGET_PORT_GROUPS\n", conn->id, sa);
-			if (lu_cmd->R_bit == 0) {
-				ISTGT_ERRLOG("R_bit == 0\n");
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
+			rc = execute_spc_report_target_portal_group(conn, lu_cmd, spec, sa);
+			if ( rc < 0 )
 				return -1;
-			}
-			allocation_len = DGET32(&cdb[6]);
-			data_alloc_len = allocation_len + 8192;
-			if (allocation_len > (size_t) max_alloc_size) {
-				ISTGT_ERRLOG("c#%d data_alloc_len(%d) too small\n",
-				    conn->id, data_alloc_len);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				return -1;
-			}
-			data = lu_cmd->data = xmalloc(data_alloc_len);
-			memset(data, 0, allocation_len);
-			data_len = istgt_lu_disk_scsi_report_target_port_groups(spec, conn, cdb, data, data_alloc_len);
-			if (data_len < 0) {
-				if(errno == EBUSY)
-					lu_cmd->status = ISTGT_SCSI_STATUS_BUSY;
-				else
-					lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-			if (data_len > data_alloc_len) {
-				ISTGT_ERRLOG("c#%d REPORT_TPGs alen:%d dlen:%d/%d tlen:%d mem-issue",
-					conn->id, allocation_len, data_len, data_alloc_len, lu_cmd->transfer_len);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-
-			ISTGT_TRACEDUMP(ISTGT_TRACE_DEBUG,
-			    "REPORT_TARGET_PORT_GROUPS", data, data_len);
-			lu_cmd->data_len = DMIN32((size_t)data_len, lu_cmd->transfer_len);
-			lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
 			break;
 		default:
 			ISTGT_TRACELOG(ISTGT_TRACE_SCSI, "c#%d MAINTENANCE_IN: sa:0x%2.2x:unhandled\n", conn->id, sa);
@@ -10531,57 +10735,9 @@ istgt_lu_disk_execute(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 		sa = BGET8W(&cdb[1], 4, 5);  /* SERVICE ACTION */
 		switch (sa) { /* SERVICE ACTION */
 		case SPC_MO_SET_TARGET_PORT_GROUPS:
-			ISTGT_TRACELOG(ISTGT_TRACE_SCSI, "c#%d MAINTENANCE_OUT: 0x%2.2x:SET_TARGET_PORT_GROUPS\n", conn->id, sa);
-			if (spec->rsv_key) {
-				rc = istgt_lu_disk_check_pr(spec, conn, PR_ALLOW(0,0,1,0,0));
-				if (rc != 0) {
-					ISTGT_ERRLOG("c#%d ISTGT_SCSI_STATUS_RESERVATION_CONFLICT\n", conn->id);
-					lu_cmd->status = ISTGT_SCSI_STATUS_RESERVATION_CONFLICT;
-					break;
-				}
-			}
-			if (lu_cmd->W_bit == 0) {
-				ISTGT_ERRLOG("c#%d W_bit == 0\n", conn->id);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
+			rc = execute_set_target_port_groups(conn, lu_cmd, spec, sa);
+			if ( rc < 0 )
 				return -1;
-			}
-			parameter_len = DGET32(&cdb[6]);
-			if (parameter_len == 0) {
-				lu_cmd->data_len = 0;
-				lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
-				break;
-			}
-			/* Data-Out */
-			rc = istgt_lu_disk_transfer_data(conn, lu_cmd, parameter_len);
-			if (rc < 0) {
-				ISTGT_ERRLOG("c#%d lu_disk_transfer_data() failed\n", conn->id);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-			if (parameter_len < 4) {
-				/* INVALID FIELD IN CDB */
-				BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-			/*ISTGT_TRACEDUMP(ISTGT_TRACE_DEBUG,
-			    "SET_TARGET_PORT_GROUPS",
-			    lu_cmd->iobuf, parameter_len);*/
-			getdata(data, lu_cmd)
-			/* data[0]-data[3] Reserved */
-			/* Set target port group descriptor(s) */
-			data_len = istgt_lu_disk_scsi_set_target_port_groups(spec, conn, cdb, &data[4], parameter_len - 4);
-			if (data_len < 0) {
-				/* INVALID FIELD IN PARAMETER LIST */
-				BUILD_SENSE(ILLEGAL_REQUEST, 0x26, 0x00);
-				if(errno == EBUSY)
-					lu_cmd->status = ISTGT_SCSI_STATUS_BUSY;
-				else
-					lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-			lu_cmd->data_len = parameter_len;
-			lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
 			break;
 		default:
 			ISTGT_TRACELOG(ISTGT_TRACE_SCSI, "c#%d MAINTENANCE_OUT: sa:0x%2.2x:unhandled\n", conn->id,  sa);
@@ -10594,107 +10750,17 @@ istgt_lu_disk_execute(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 
 	case SPC_PERSISTENT_RESERVE_IN:
 		{
-#ifdef	REPLICATION
-			ISTGT_TRACELOG(ISTGT_TRACE_SCSI, "c#%d RESERVE_IN not handled\n", conn->id);
-			/* INVALID COMMAND OPERATION CODE */
-			BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);
-			lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-#else
-			sa = BGET8W(&cdb[1], 4, 5);
-			if (lu_cmd->R_bit == 0) {
-				ISTGT_ERRLOG("c#%d PERSISTENT_RESERVE_IN: sa:0x%2.2x R_bit == 0\n", conn->id, sa);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				return -1;
-			}
-
-			allocation_len = DGET16(&cdb[7]);
-			data_alloc_len = allocation_len + 8192;
-			if (allocation_len > (size_t) max_alloc_size) {
-				ISTGT_ERRLOG("c#%d data_alloc_len(%d) too small\n",
-				    conn->id, data_alloc_len);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				return -1;
-			}
-			data = lu_cmd->data = xmalloc(data_alloc_len);
-			memset(data, 0, allocation_len);
-			MTX_LOCK(&spec->pr_rsv_mutex);
-			data_len = istgt_lu_disk_scsi_persistent_reserve_in(spec, conn, lu_cmd, sa, data, allocation_len);
-			MTX_UNLOCK(&spec->pr_rsv_mutex);
-			if (data_len < 0) {
-				/* status build by function */
-				break;
-			}
-			if (data_len > data_alloc_len) {
-				ISTGT_ERRLOG("c#%d PRIN alen:%d dlen:%d/%d tlen:%d mem-issue",
-					conn->id, allocation_len, data_len, data_alloc_len, lu_cmd->transfer_len);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-			ISTGT_TRACEDUMP(ISTGT_TRACE_DEBUG,
-			    "PERSISTENT_RESERVE_IN", data, data_len);
-			lu_cmd->data_len = DMIN32((size_t)data_len, lu_cmd->transfer_len);
-			lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
-			ISTGT_TRACELOG(ISTGT_TRACE_SCSI, "c#%d PERSISTENT_RESERVE_IN sa:0x%2.2x data:%u/%u/%u\n", conn->id, sa, data_len, lu_cmd->transfer_len, allocation_len);
-#endif
+		rc = execute_spc_persistent_reserve_in(conn, lu_cmd, spec);
+		if ( rc < 0 )
+			return -1;
 		}
 		break;
 
 	case SPC_PERSISTENT_RESERVE_OUT:
 		{
-#ifdef	REPLICATION
-			ISTGT_TRACELOG(ISTGT_TRACE_SCSI, "c#%d RESERVE_OUT not handled\n", conn->id);
-			/* INVALID COMMAND OPERATION CODE */
-			BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);
-			lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-#else
-			int scope, type;
-			sa = BGET8W(&cdb[1], 4, 5);
-
-			if (lu_cmd->W_bit == 0) {
-				ISTGT_ERRLOG("c#%d PERSISTENT_RESERVE_OUT sa:0x%2.2x W_bit == 0\n", conn->id, sa);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				return -1;
-			}
-
-			scope = BGET8W(&cdb[2], 7, 4);
-			type = BGET8W(&cdb[2], 3, 4);
-			parameter_len = DGET32(&cdb[5]);
-
-			/* Data-Out */
-			rc = istgt_lu_disk_transfer_data(conn, lu_cmd, parameter_len);
-			if (rc < 0) {
-				ISTGT_ERRLOG("c#%d PERSISTENT_RESERVE_OUT sa:0x%2.2x scope:%x type:%x plen:%d - disk_transfer_data failed:%d\n",
-						conn->id, sa, scope, type, parameter_len, rc);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-			if (parameter_len < 24) {
-				ISTGT_ERRLOG("c#%d PERSISTENT_RESERVE_OUT sa:0x%2.2x scope:%x type:%x plen:%d less than 24\n",
-						conn->id, sa, scope, type, parameter_len);
-				/* INVALID FIELD IN CDB */
-				BUILD_SENSE(ILLEGAL_REQUEST, 0x24, 0x00);
-				lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
-				break;
-			}
-
-			/*ISTGT_TRACEDUMP(ISTGT_TRACE_DEBUG,
-			    "PERSISTENT_RESERVE_OUT",
-			    lu_cmd->iobuf, parameter_len);*/
-			getdata(data, lu_cmd)
-			MTX_LOCK(&spec->pr_rsv_mutex);
-			data_len = istgt_lu_disk_scsi_persistent_reserve_out(spec, conn, lu_cmd, sa, scope, type, &data[0], parameter_len, 0);
-			MTX_UNLOCK(&spec->pr_rsv_mutex);
-			if (data_len < 0) {
-				ISTGT_ERRLOG("c#%d PERSISTENT_RESERVE_OUT sa:0x%2.2x scope:%x type:%x plen:%d, function failed:%d\n",
-						conn->id, sa, scope, type, parameter_len, data_len);
-				/* status build by function */
-				break;
-			}
-			lu_cmd->data_len = parameter_len;
-			lu_cmd->status = ISTGT_SCSI_STATUS_GOOD;
-			ISTGT_ERRLOG("c#%d PERSISTENT_RESERVE_OUT sa:0x%2.2x scope:%x type:%x plen:%d success (%d)",
-						conn->id, sa, scope, type, parameter_len, data_len);
-#endif
+		rc = execute_spc_persistent_reserve_out(conn, lu_cmd, spec);
+		if ( rc < 0 )
+			return -1;
 		}
 		break;
 
@@ -10715,14 +10781,7 @@ istgt_lu_disk_execute(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 			lu_cmd->status = ISTGT_SCSI_STATUS_CHECK_CONDITION;
 			break;
 		}
-		if (spec->rsv_key) {
-			rc = istgt_lu_disk_check_pr(spec, conn, PR_ALLOW(0,0,1,0,0));
-			if (rc != 0) {
-				ISTGT_ERRLOG("c#%d ISTGT_SCSI_STATUS_RESERVATION_CONFLICT\n", conn->id);
-				lu_cmd->status = ISTGT_SCSI_STATUS_RESERVATION_CONFLICT;
-				break;
-			}
-		}
+		CHECK_RSV_KEY(spec->rsv_key)
 		rc = istgt_lu_disk_xcopy(spec, conn, lu_cmd);
 		if (rc < 0) {
 			/* build by function */
@@ -10794,14 +10853,7 @@ istgt_lu_disk_execute(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 				lu_cmd->status = ISTGT_SCSI_STATUS_BUSY;
 				break;
 			}
-			if (spec->rsv_key) {
-				rc = istgt_lu_disk_check_pr(spec, conn, PR_ALLOW(0,0,1,0,0));
-				if (rc != 0) {
-					ISTGT_ERRLOG("c#%d ISTGT_SCSI_STATUS_RESERVATION_CONFLICT\n", conn->id);
-					lu_cmd->status = ISTGT_SCSI_STATUS_RESERVATION_CONFLICT;
-					break;
-				}
-			}
+			CHECK_RSV_KEY(spec->rsv_key)
 			pllen = DGET16(&cdb[7]);    /* Parameter List Length */
 			if (pllen == 0) {
 				lu_cmd->data_len = 0;
