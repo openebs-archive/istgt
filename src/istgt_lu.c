@@ -2198,7 +2198,9 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	nbs = 0;
 #endif
 
-	sp_validate(istgt, lu, sp);
+	ret = sp_validate(istgt, lu, sp);
+	if(ret == -1)
+		goto error_return;
 
 	val = istgt_get_val(sp, "TargetName");
 	if (val == NULL) {
