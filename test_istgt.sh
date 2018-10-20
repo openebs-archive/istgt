@@ -11,9 +11,10 @@ ISTGTCONTROL=istgtcontrol
 SETUP_PID=-1
 device_name=""
 LOGFILE="/tmp/istgt.log"
-
 CONTROLLER_IP="127.0.0.1"
 CONTROLLER_PORT="6060"
+REPLICATION_FACTOR=3
+CONSISTTENCY_FACTOR=2
 
 CURDIR=$PWD
 
@@ -527,6 +528,38 @@ run_replication_factor_test()
 	local replica1_vdev="/tmp/test_vol1"
 	local ret=0
 
+	REPLICATION_FACTOR=1
+	CONSISTENCY_FACTOR=1
+	setup_test_env
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev &
+	replica1_pid=$!
+	sleep 2
+
+	while [ 1 ]; do
+		# We have started istgt with 20 second replica timeout
+		# and rf=cf=1. so, it will take around 2 minutes for the
+		# replica to become healthy. So on safe side, we will
+		# check replica status after 130 seconds.
+		rt=`$ISTGTCONTROL -q REPLICA | awk -F 'in seconds)":' '{print $2}' | tr -d '}]}]}'`
+		if [ $rt -gt 130 ]; then
+			rstatus=`$ISTGTCONTROL -q REPLICA | awk -F '"status":' '{print $2}' |awk -F ',' '{print $1}' | tr -d '"'`
+			if [ ${rstatus} != "HEALTHY" ]; then
+				echo "replication factor(1) test failed"
+				exit 1
+			else
+				break
+			fi
+		fi
+		sleep 10
+	done
+	kill -9 $replica1_pid
+	stop_istgt
+	rm -rf ${replica1_vdev::-1}*
+
+	sleep 1
+	REPLICATION_FACTOR=3
+	CONSISTENCY_FACTOR=2
+
 	setup_test_env
 
 	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev &
@@ -572,7 +605,6 @@ run_mempool_test
 run_istgt_integration
 run_read_consistency_test
 run_replication_factor_test
-
 tail -20 $LOGFILE
 
 exit 0
