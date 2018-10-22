@@ -1403,8 +1403,8 @@ istgt_lu_disk_shutdown(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr
 					sleep(1);
 			} while ((workers_signaled == 0) && (++loop  < 10));
 
-#ifndef	REPLICATION
 			timesdiff(clockid, _wrk, _wrkx, _s1)
+#ifndef	REPLICATION
 			if (!spec->lu->readonly) {
 				rc = spec->sync(spec, 0, spec->size);
 				if (rc < 0) {
@@ -1412,8 +1412,8 @@ istgt_lu_disk_shutdown(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr
 					/* ignore error */
 				}
 			}
-			timesdiff(clockid, _wrkx, _wrk, _s2)
 #endif
+			timesdiff(clockid, _wrkx, _wrk, _s2)
 			rc = spec->close(spec);
 			if (rc < 0) {
 				//ISTGT_ERRLOG("LU%d: lu_disk_close() failed\n", lu->num);
@@ -2361,7 +2361,6 @@ istgt_lu_disk_scsi_inquiry(ISTGT_LU_DISK *spec, CONN_Ptr conn, uint8_t *cdb, uin
 			DSET32(&data[12], blocks);
 			/* MAXIMUM PREFETCH XDREAD XDWRITE TRANSFER LENGTH */
 			DSET32(&data[16], 0);
-			len = 20 - hlen;
 
 			if (spec->unmap) {
 				/* MAXIMUM UNMAP LBA COUNT */
@@ -2372,7 +2371,6 @@ istgt_lu_disk_scsi_inquiry(ISTGT_LU_DISK *spec, CONN_Ptr conn, uint8_t *cdb, uin
 				data[25] = 0xFF;
 				data[26] = 0xFF;
 				data[27] = 0xFF;
-				len = 27 - hlen;
 
 				/* OPTIMAL UNMAP GRANULARITY */
 				DSET32(&data[28], spec->lb_per_rec);
@@ -5095,7 +5093,7 @@ do_register:
                 rc = istgt_lu_disk_update_reservation(spec);
                 if (rc < 0) {
                         ISTGT_ERRLOG("c#%d istgt_lu_disk_update_reservation() failed\n", conn->id);
-                        /* Copy only if the backup was successfull */
+                        /* Copy only if the backup was successful */
                         if (bkp_success == 1) {
                                 rc = istgt_lu_disk_copy_reservation(spec, spec_bkp);
                                 if (rc < 0) {
@@ -6721,7 +6719,7 @@ istgt_lu_disk_clear_reservation(ISTGT_LU_Ptr lu, int lun)
 		rc = istgt_lu_disk_update_reservation(spec); 
 		if (rc < 0) {
 			ISTGT_ERRLOG("istgt_lu_disk_update_reservation() failed\n");
-			/* Copy only if the backup was successfull */
+			/* Copy only if the backup was successful */
 			if (bkp_success == 1) {
 				rc = istgt_lu_disk_copy_reservation(spec, spec_bkp);
 				if (rc < 0) {
@@ -6866,6 +6864,7 @@ istgt_lu_disk_stop(ISTGT_LU_Ptr lu, int lun)
 	}
 #endif
 
+	timesdiff(clockid, _wrk, _wrkx, _s3)
 	MTX_LOCK(&spec->state_mutex);
 	spec->ex_state = ISTGT_LUN_CLOSE;
 	MTX_UNLOCK(&spec->state_mutex);

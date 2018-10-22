@@ -1,4 +1,4 @@
-### instructions to check cstyle
+### Instructions to check cstyle
 ```
 Checkout replication branch
 Do ./cstyle.pl <filename with path>
