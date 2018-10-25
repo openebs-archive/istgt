@@ -32,6 +32,7 @@ cstor_conn_ops_t cstor_ops = {
 
 int replication_initialized = 0;
 size_t rcmd_mempool_count = RCMD_MEMPOOL_ENTRIES;
+struct timespec istgt_start_time;
 
 static int start_rebuild(void *buf, replica_t *replica, uint64_t data_len);
 static void handle_mgmt_conn_error(replica_t *r, int sfd, struct epoll_event *events,
@@ -44,6 +45,7 @@ static int handle_mgmt_event_fd(replica_t *replica);
 
 #define build_rcomm_cmd(rcomm_cmd, cmd, offset, nbytes) 						\
 	do {								\
+		uint64_t blockcnt = 0;                                  \
 		rcomm_cmd = malloc(sizeof (*rcomm_cmd));		\
 		memset(rcomm_cmd, 0, sizeof (*rcomm_cmd));		\
 		rcomm_cmd->copies_sent = 0;				\
@@ -72,7 +74,11 @@ static int handle_mgmt_event_fd(replica_t *replica);
 				rcomm_cmd->opcode = ZVOL_OPCODE_WRITE;	\
 				rcomm_cmd->iovcnt = cmd->iobufindx + 1;	\
 				__sync_add_and_fetch(&spec->writes, 1); \
-				__sync_add_and_fetch(&spec->writebytes, nbytes);\
+				__sync_add_and_fetch(&spec->writebytes, \
+							nbytes);        \
+				blockcnt = (nbytes/spec->blocklen);     \
+				__sync_add_and_fetch(&spec->totalwriteblockcount,\
+							blockcnt);      \
 				break;					\
 									\
 			case SBC_READ_6:				\
@@ -82,7 +88,11 @@ static int handle_mgmt_event_fd(replica_t *replica);
 				rcomm_cmd->opcode = ZVOL_OPCODE_READ;	\
 				rcomm_cmd->iovcnt = 0;			\
 				__sync_add_and_fetch(&spec->reads, 1);	\
-				__sync_add_and_fetch(&spec->readbytes, nbytes);\
+				__sync_add_and_fetch(&spec->readbytes,  \
+							nbytes);	\
+				blockcnt = (nbytes/spec->blocklen);     \
+				__sync_add_and_fetch(&spec->totalreadblockcount,\
+							blockcnt);      \
 				break;					\
 									\
 			case SBC_SYNCHRONIZE_CACHE_10:			\
@@ -2466,7 +2476,6 @@ again:
 
 	ASSERT(spec->io_seq);
 	build_rcomm_cmd(rcomm_cmd, cmd, offset, nbytes);
-
 retry_read:
 	replica_choosen = false;
 	skip_count = 0;
@@ -2934,6 +2943,7 @@ initialize_replication()
 		REPLICA_ERRLOG("Failed to init specq_mtx err(%d)\n", rc);
 		return -1;
 	}
+	clock_gettime(CLOCK_MONOTONIC_RAW, &istgt_start_time);
 	return 0;
 }
 
