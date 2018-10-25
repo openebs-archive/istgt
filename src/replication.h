@@ -165,6 +165,8 @@ typedef struct known_replica_s {
 	uint64_t zvol_guid;
 } known_replica_t;
 
+extern struct timespec istgt_start_time;
+
 void *init_replication(void *);
 int make_socket_non_blocking(int);
 int send_mgmtack(int, zvol_op_code_t, void *, char *, int);
