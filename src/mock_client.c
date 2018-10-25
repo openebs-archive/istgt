@@ -281,7 +281,7 @@ snapshot_thread(void *args)
 		    wait_time);
 		timesdiff(CLOCK_MONOTONIC, cmd_start, now, cmd_time);
 
-		VERIFY((cmd_time.tv_sec + 1) <= (io_wait_time + wait_time));
+		VERIFY(cmd_time.tv_sec <= (wait_time + 1));
 
 		verify_snap_response(ret);
 
