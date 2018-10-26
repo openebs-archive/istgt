@@ -32,6 +32,7 @@ cstor_conn_ops_t cstor_ops = {
 
 int replication_initialized = 0;
 size_t rcmd_mempool_count = RCMD_MEMPOOL_ENTRIES;
+struct timespec istgt_start_time;
 
 static int start_rebuild(void *buf, replica_t *replica, uint64_t data_len);
 static void handle_mgmt_conn_error(replica_t *r, int sfd, struct epoll_event *events,
@@ -44,6 +45,7 @@ static int handle_mgmt_event_fd(replica_t *replica);
 
 #define build_rcomm_cmd(rcomm_cmd, cmd, offset, nbytes) 						\
 	do {								\
+		uint64_t blockcnt = 0;                                  \
 		rcomm_cmd = malloc(sizeof (*rcomm_cmd));		\
 		memset(rcomm_cmd, 0, sizeof (*rcomm_cmd));		\
 		rcomm_cmd->copies_sent = 0;				\
@@ -72,7 +74,11 @@ static int handle_mgmt_event_fd(replica_t *replica);
 				rcomm_cmd->opcode = ZVOL_OPCODE_WRITE;	\
 				rcomm_cmd->iovcnt = cmd->iobufindx + 1;	\
 				__sync_add_and_fetch(&spec->writes, 1); \
-				__sync_add_and_fetch(&spec->writebytes, nbytes);\
+				__sync_add_and_fetch(&spec->writebytes, \
+							nbytes);        \
+				blockcnt = (nbytes/spec->blocklen);     \
+				__sync_add_and_fetch(&spec->totalwriteblockcount,\
+							blockcnt);      \
 				break;					\
 									\
 			case SBC_READ_6:				\
@@ -82,7 +88,11 @@ static int handle_mgmt_event_fd(replica_t *replica);
 				rcomm_cmd->opcode = ZVOL_OPCODE_READ;	\
 				rcomm_cmd->iovcnt = 0;			\
 				__sync_add_and_fetch(&spec->reads, 1);	\
-				__sync_add_and_fetch(&spec->readbytes, nbytes);\
+				__sync_add_and_fetch(&spec->readbytes,  \
+							nbytes);	\
+				blockcnt = (nbytes/spec->blocklen);     \
+				__sync_add_and_fetch(&spec->totalreadblockcount,\
+							blockcnt);      \
 				break;					\
 									\
 			case SBC_SYNCHRONIZE_CACHE_10:			\
@@ -246,7 +256,7 @@ count_of_replicas_helping_rebuild(spec_t *spec, replica_t *healthy_replica)
 
 	if (healthy_replica != NULL)
 		return (1);
-	return ((MAX(spec->replication_factor - spec->consistency_factor + 1,
+	return ((MAX_OF(spec->replication_factor - spec->consistency_factor + 1,
 	    spec->consistency_factor)) - 1);
 }
 
@@ -527,7 +537,8 @@ trigger_rebuild(spec_t *spec)
 		}
 
 		timesdiff(CLOCK_MONOTONIC, replica->create_time, now, diff);
-		if (diff.tv_sec <= (2 * replica_timeout)) {
+		if ((spec->replication_factor != 1) &&
+		    (diff.tv_sec <= (2 * replica_timeout))) {
 			REPLICA_LOG("Replica:%p added very recently, "
 			    "skipping rebuild.\n", replica);
 			continue;
@@ -648,7 +659,7 @@ update_volstate(spec_t *spec)
 	if (((spec->healthy_rcount + spec->degraded_rcount >=
 	    spec->consistency_factor) && (spec->healthy_rcount >= 1)) ||
 	    (spec->healthy_rcount  + spec->degraded_rcount >=
-	    MAX(spec->replication_factor - spec->consistency_factor + 1,
+	    MAX_OF(spec->replication_factor - spec->consistency_factor + 1,
 	    spec->consistency_factor))) { 
 		TAILQ_FOREACH(replica, &spec->rq, r_next) {
 			if (max < replica->initial_checkpointed_io_seq) {
@@ -931,7 +942,7 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	replica->port = ack_data->port;
 	replica->state = ZVOL_STATUS_DEGRADED;
 	replica->initial_checkpointed_io_seq =
-	    MAX(ack_data->checkpointed_io_seq,
+	    MAX_OF(ack_data->checkpointed_io_seq,
 	    ack_data->checkpointed_degraded_io_seq);
 
 	replica->pool_guid = ack_data->pool_guid;
@@ -1190,7 +1201,7 @@ send_replica_snapshot(spec_t *spec, replica_t *replica, uint64_t io_seq,
 }
 
 static void
-disconnect_pending_replica(replica_t *replica, uint64_t io_seq,
+disconnect_nonresponding_replica(replica_t *replica, uint64_t io_seq,
     zvol_op_code_t opcode)
 {
 	mgmt_cmd_t *mgmt_cmd;
@@ -1388,7 +1399,7 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 		 * Snapshot failure will be handled by zrepl.
 		 */
 		TAILQ_FOREACH(replica, &spec->rq, r_next)
-			disconnect_pending_replica(replica, io_seq,
+			disconnect_nonresponding_replica(replica, io_seq,
 			    ZVOL_OPCODE_SNAP_CREATE);
 	}
 	MTX_UNLOCK(&spec->rq_mtx);
@@ -2358,7 +2369,7 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 	}
 
 	response_received = success + failure;
-	min_response = MAX(rcomm_cmd->replication_factor -
+	min_response = MAX_OF(rcomm_cmd->replication_factor -
 	    rcomm_cmd->consistency_factor + 1, rcomm_cmd->consistency_factor);
 
 	rc = 0;
@@ -2465,7 +2476,6 @@ again:
 
 	ASSERT(spec->io_seq);
 	build_rcomm_cmd(rcomm_cmd, cmd, offset, nbytes);
-
 retry_read:
 	replica_choosen = false;
 	skip_count = 0;
@@ -2933,6 +2943,7 @@ initialize_replication()
 		REPLICA_ERRLOG("Failed to init specq_mtx err(%d)\n", rc);
 		return -1;
 	}
+	clock_gettime(CLOCK_MONOTONIC_RAW, &istgt_start_time);
 	return 0;
 }
 
