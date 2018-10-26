@@ -95,7 +95,7 @@ run_istgt_integration()
 {
 	export externalIP=127.0.0.1
 	echo $externalIP
-	$ISTGT_INTEGRATION
+	$ISTGT_INTEGRATION >> $LOGFILE 2>&1
 	[[ $? -ne 0 ]] && echo "istgt integration test failed" && tail -20 $LOGFILE && exit 1
 	rm -f /tmp/test_vol*
 	return 0
