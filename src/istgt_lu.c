@@ -3732,9 +3732,9 @@ istgt_lu_create_task(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, int lun, ISTGT_LU_D
 
 	}
 
-	#ifdef REPLICATION
+#ifdef REPLICATION
 	lu_task->lu_cmd.start_rw_time = lu_cmd->start_rw_time;
-	#endif
+#endif
 	lu_task->condwait = 0;
 	lu_task->offset = 0;
 	lu_task->req_execute = 0;
