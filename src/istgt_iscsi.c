@@ -2308,7 +2308,7 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 			conn->login_phase = ISCSI_LOGIN_PHASE_FULLFEATURE;
 			rc = istgt_lu_add_nexus(conn->sess->lu, conn->initiator_port);
 			if (rc == -1) {
-				/* Ignore the error, Since during discovery there is no nexus formed*/
+				/* Ignore the error, Since during discovery there is no nexus formed */
 				ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "Failed to Add  the Nexus\n");
 			} else if(rc == -2) {
 				ISTGT_ERRLOG("Failed to Add  the Nexus\n");
@@ -3038,7 +3038,7 @@ parse_scsi_cdb(ISTGT_LU_CMD_Ptr lu_cmd)
 		spec = (ISTGT_LU_DISK *) (lu_cmd->lu->lun[lun_i].spec);
 	*/
 	switch(cdb[0]) {
-		/*....................
+		/* ....................
 		  case SBC_READ_6:
 		  case SBC_WRITE_6:
 		  lu_cmd->cdb0  = lu_cmd->cdb[0];
@@ -3078,7 +3078,7 @@ parse_scsi_cdb(ISTGT_LU_CMD_Ptr lu_cmd)
 		  lu_cmd->lba   = (uint64_t) DGET64(&lu_cmd->cdb[2]);
 		  lu_cmd->lblen = (uint32_t) DGET32(&lu_cmd->cdb[10]);
 		  break;
-		  .................*/
+		  ................. */
 		case SBC_READ_6:
 			if (lu_cmd->R_bit == 0)
 				NOR=1;
@@ -3227,11 +3227,11 @@ parse_scsi_cdb(ISTGT_LU_CMD_Ptr lu_cmd)
 			lba = (uint64_t) DGET64(&cdb[2]);
 			transfer_len = (uint32_t) DGET8(&cdb[13]);
 
-			/*maxlen = ISTGT_LU_WORK_ATS_BLOCK_SIZE / spec->blocklen;
+			/* maxlen = ISTGT_LU_WORK_ATS_BLOCK_SIZE / spec->blocklen;
 			if (maxlen > 0xff)
 				maxlen = 0xff;
 			if (transfer_len > maxlen)
-				inv = 1;*/
+				inv = 1; */
 			break;
 
 		case SBC_SYNCHRONIZE_CACHE_10:
@@ -4048,7 +4048,7 @@ istgt_iscsi_op_task(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 		memcpy(initport, conn->initiator_port, MAX_INITIATOR_NAME - 1);
 		fname = "LOGICAL_UNIT_RESET";
 		/* Ravi: Should not be dropping connections on LU_RESET */
-		/*istgt_iscsi_drop_all_conns(conn);*/
+		/* istgt_iscsi_drop_all_conns(conn); */
 		if(conn->sess->lu != NULL)
 			MTX_LOCK(&conn->sess->lu->mutex);
 		SESS_MTX_LOCK(conn);
@@ -4070,7 +4070,7 @@ istgt_iscsi_op_task(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 		memcpy(initport, conn->initiator_port, MAX_INITIATOR_NAME - 1);
 		fname = "TARGET_WARM_RESET";
 		/* Ravi: Should not be dropping connections on TGT_RESET */
-		/*istgt_iscsi_drop_all_conns(conn); */
+		/* istgt_iscsi_drop_all_conns(conn); */
 		if(conn->sess->lu != NULL)
 			MTX_LOCK(&conn->sess->lu->mutex);
 		SESS_MTX_LOCK(conn);
@@ -4093,7 +4093,7 @@ istgt_iscsi_op_task(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 		fname = "TARGET_COLD_RESET";
 		/* This is a obsolete */
 		/* Ravi: Should not be dropping connections on TGT_RESET */
-		/*istgt_iscsi_drop_all_conns(conn); */
+		/* istgt_iscsi_drop_all_conns(conn); */
 		if(conn->sess->lu != NULL)
 			MTX_LOCK(&conn->sess->lu->mutex);
 		SESS_MTX_LOCK(conn);
@@ -4562,10 +4562,10 @@ istgt_iscsi_op_data(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 		ISTGT_ERRLOG("offset(%u) error\n", buffer_offset);
 		return -1;
 	}
-	/*if (buffer_offset + data_len > alloc_len) {
+	/* if (buffer_offset + data_len > alloc_len) {
 		ISTGT_ERRLOG("offset error\n");
 		return -1;
-	}*/
+	} */
 
 	ISTGT_TRACELOG(ISTGT_TRACE_ISCSI,
 	    "copy pdu.data %lu to r2ttask.iobuf at %u; pending r2t=%d, StatSN=%x, ExpStatSN=%x, DataSN=%x\n",
@@ -5270,7 +5270,7 @@ wait_all_task(CONN_Ptr conn)
 		}
 
 		if (events.data.fd == conn->task_pipe[0]) {
-			/*// TODO
+			/ *// TODO
 			if (kev.flags & (EV_EOF|EV_ERROR)) {
 				break;
 			}
@@ -5896,7 +5896,7 @@ worker(void *arg)
 	    conn->portal.host, conn->portal.port, conn->portal.tag);
 	conn->epfd = epfd;
 
-/*// TODO
+/ *// TODO
 #if defined (ISTGT_USE_IOVEC) && defined (NOTE_LOWAT)
 	ISTGT_EV_SET(&kev, conn->sock, EVFILT_READ, EV_ADD, NOTE_LOWAT, ISCSI_BHS_LEN, NULL);
 #else
@@ -5920,7 +5920,7 @@ worker(void *arg)
 		return NULL;
         }
 
-	/*TODO
+	/* TODO
 	if (!conn->istgt->daemon) {
 		event.data.fd = SIGINT;
 		event.events = EPOLLIN;
@@ -6385,8 +6385,8 @@ istgt_create_conn(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock, struct sockaddr 
 	conn->exec_lu_task = NULL;
 	conn->running_tasks = 0;
 
-	/*memset(conn->initiator_addr, 0, sizeof conn->initiator_addr);
-	memset(conn->target_addr, 0, sizeof conn->target_addr);*/
+	/* memset(conn->initiator_addr, 0, sizeof conn->initiator_addr);
+	memset(conn->target_addr, 0, sizeof conn->target_addr); */
 
 	switch (sa->sa_family) {
 	case AF_INET6:
@@ -6413,9 +6413,9 @@ istgt_create_conn(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock, struct sockaddr 
 		ISTGT_ERRLOG("unsupported family\n");
 		goto error_return;
 	}
-	/*printf("sock=%d, addr=%s, peer=%s\n",
+	/* printf("sock=%d, addr=%s, peer=%s\n",
 		   sock, conn->target_addr,
-		   conn->initiator_addr);*/
+		   conn->initiator_addr); */
 
 	/* wildcard? */
 	if (strcasecmp(conn->portal.host, "[::]") == 0
@@ -6438,10 +6438,10 @@ istgt_create_conn(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock, struct sockaddr 
 		conn->portal.host = xstrdup(buf);
 	}
 
-	/*memset(conn->initiator_name, 0, sizeof conn->initiator_name);
+	/* memset(conn->initiator_name, 0, sizeof conn->initiator_name);
 	memset(conn->target_name, 0, sizeof conn->target_name);
 	memset(conn->initiator_port, 0, sizeof conn->initiator_port);
-	memset(conn->target_port, 0, sizeof conn->target_port);*/
+	memset(conn->target_port, 0, sizeof conn->target_port); */
 
 	/* set timeout msec. */
 	rc = istgt_set_recvtimeout(conn->sock, conn->timeout * 1000);
