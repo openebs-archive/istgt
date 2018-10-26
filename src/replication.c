@@ -1201,7 +1201,7 @@ send_replica_snapshot(spec_t *spec, replica_t *replica, uint64_t io_seq,
 }
 
 static void
-disconnect_pending_replica(replica_t *replica, uint64_t io_seq,
+disconnect_nonresponding_replica(replica_t *replica, uint64_t io_seq,
     zvol_op_code_t opcode)
 {
 	mgmt_cmd_t *mgmt_cmd;
@@ -1399,7 +1399,7 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 		 * Snapshot failure will be handled by zrepl.
 		 */
 		TAILQ_FOREACH(replica, &spec->rq, r_next)
-			disconnect_pending_replica(replica, io_seq,
+			disconnect_nonresponding_replica(replica, io_seq,
 			    ZVOL_OPCODE_SNAP_CREATE);
 	}
 	MTX_UNLOCK(&spec->rq_mtx);
