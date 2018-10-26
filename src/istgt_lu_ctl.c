@@ -3455,7 +3455,7 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 			jtotalwritetime);
 		json_object_object_add(jobj, "TotalReadBlockCount",
 			jtotalreadblockcount);
-		json_object_object_add(jobj, "TotatWriteBlockCount",
+		json_object_object_add(jobj, "TotalWriteBlockCount",
 			jtotalwriteblockcount);
 
 		istgt_uctl_snprintf(uctl, "%s  %s\n",
