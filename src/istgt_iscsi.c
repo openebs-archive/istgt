@@ -51,7 +51,7 @@
 
 #ifdef __FreeBSD__
 #include <sys/event.h>
-#define DIO_ISCSIWR _IOW('d', 131, struct istgt_detail)
+#define	DIO_ISCSIWR _IOW('d', 131, struct istgt_detail)
 #endif
 
 #ifdef __linux__
@@ -84,28 +84,28 @@
 
 #if !defined(__GNUC__)
 #undef __attribute__
-#define __attribute__(x)
+#define	__attribute__(x)
 #endif
 
 /* according to RFC1982 */
-#define SN32_CMPMAX (((uint32_t)1U) << (32 - 1))
-#define SN32_LT(S1,S2) \
+#define	SN32_CMPMAX (((uint32_t)1U) << (32 - 1))
+#define	SN32_LT(S1,S2) \
 	(((uint32_t)(S1) != (uint32_t)(S2))				\
 	    && (((uint32_t)(S1) < (uint32_t)(S2)			\
 		    && ((uint32_t)(S2) - (uint32_t)(S1) < SN32_CMPMAX))	\
 		|| ((uint32_t)(S1) > (uint32_t)(S2)			\
 		    && ((uint32_t)(S1) - (uint32_t)(S2) > SN32_CMPMAX))))
-#define SN32_GT(S1,S2) \
+#define	SN32_GT(S1,S2) \
 	(((uint32_t)(S1) != (uint32_t)(S2))				\
 	    && (((uint32_t)(S1) < (uint32_t)(S2)			\
 		    && ((uint32_t)(S2) - (uint32_t)(S1) > SN32_CMPMAX))	\
 		|| ((uint32_t)(S1) > (uint32_t)(S2)			\
 		    && ((uint32_t)(S1) - (uint32_t)(S2) < SN32_CMPMAX))))
 
-#define POLLWAIT 5000
-#define MAX_MCSREVWAIT (10 * 1000)
-#define ISCMDQ 8
-#define ISCSI_SOCKET "/dev/eventctl"
+#define	POLLWAIT 5000
+#define	MAX_MCSREVWAIT (10 * 1000)
+#define	ISCMDQ 8
+#define	ISCSI_SOCKET "/dev/eventctl"
 
 enum iscsi_log {
         TYPE_LOGIN,
@@ -124,13 +124,13 @@ struct istgt_detail {
         char target_name[256];
 };
 
-#define ISCSI_GETVAL(PARAMS,KEY) \
+#define	ISCSI_GETVAL(PARAMS,KEY) \
 	istgt_iscsi_param_get_val((PARAMS),(KEY))
-#define ISCSI_EQVAL(PARAMS,KEY,VAL) \
+#define	ISCSI_EQVAL(PARAMS,KEY,VAL) \
 	istgt_iscsi_param_eq_val((PARAMS),(KEY),(VAL))
-#define ISCSI_DELVAL(PARAMS,KEY) \
+#define	ISCSI_DELVAL(PARAMS,KEY) \
 	istgt_iscsi_param_del((PARAMS),(KEY))
-#define ISCSI_ADDVAL(PARAMS,KEY,VAL,LIST,TYPE) \
+#define	ISCSI_ADDVAL(PARAMS,KEY,VAL,LIST,TYPE) \
 	istgt_iscsi_param_add((PARAMS),(KEY),(VAL), (LIST), (TYPE))
 
 static int g_nconns;
@@ -158,16 +158,16 @@ _verb_istat ISCSIstat_rest[ISCSI_ARYSZ] = { {0,0,0} };
 extern int iscsi_ops_indx_table[256];
 
 /* Switch to use readv/writev (assume blocking) */
-#define ISTGT_USE_IOVEC
+#define	ISTGT_USE_IOVEC
 
-#define MATCH_DIGEST_WORD(BUF, CRC32C) \
+#define	MATCH_DIGEST_WORD(BUF, CRC32C) \
 	(    ((((uint32_t) *((uint8_t *)(BUF)+0)) << 0)		\
 	    | (((uint32_t) *((uint8_t *)(BUF)+1)) << 8)		\
 	    | (((uint32_t) *((uint8_t *)(BUF)+2)) << 16)	\
 	    | (((uint32_t) *((uint8_t *)(BUF)+3)) << 24))	\
 	    == (CRC32C))
 
-#define MAKE_DIGEST_WORD(BUF, CRC32C) \
+#define	MAKE_DIGEST_WORD(BUF, CRC32C) \
 	(   ((*((uint8_t *)(BUF)+0)) = (uint8_t)((uint32_t)(CRC32C) >> 0)), \
 	    ((*((uint8_t *)(BUF)+1)) = (uint8_t)((uint32_t)(CRC32C) >> 8)), \
 	    ((*((uint8_t *)(BUF)+2)) = (uint8_t)((uint32_t)(CRC32C) >> 16)), \
@@ -3003,7 +3003,7 @@ istgt_iscsi_transfer_in_internal(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 static void
 parse_scsi_cdb(ISTGT_LU_CMD_Ptr lu_cmd)
 {
-#define setinf1()  {                     \
+#define	setinf1()  {                     \
 	if (dpo) lu_cmd->info[lu_cmd->infdx++] = 'd'; \
 	if (fua) lu_cmd->info[lu_cmd->infdx++] = 'f'; \
 	if (fua_nv) lu_cmd->info[lu_cmd->infdx++] = 'n'; \
