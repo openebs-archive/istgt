@@ -3687,7 +3687,7 @@ istgt_lu_create_task(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, int lun, ISTGT_LU_D
 #endif
 
 	alloc_len = ISCSI_ALIGN(sizeof (*lu_task));
-	alloc_len += ISCSI_ALIGN(sizeof *lu_task->lu_cmd.pdu); // I'm not sure if this is 'sizeof (*lu_task)->lu_cmd.pdu' or 'sizeof (*lu_task->lu_cmd.pdu)'
+	alloc_len += ISCSI_ALIGN(sizeof (*lu_task->lu_cmd.pdu));
 
 	lu_task = xmalloc(alloc_len);
 	if (lu_task == NULL)
