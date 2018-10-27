@@ -539,7 +539,7 @@ istgt_iscsi_write_pdu_queue(CONN_Ptr conn, ISCSI_PDU_Ptr pdu, int req_type, int 
 	total += ISCSI_BHS_LEN;
 	if (total_ahs_len != 0) {
 		dst_pdu->ahs = src_pdu->ahs;
-	   	dst_pdu->total_ahs_len = (4 * total_ahs_len);
+		dst_pdu->total_ahs_len = (4 * total_ahs_len);
 		total += (4 * total_ahs_len);
 		src_pdu->ahs = NULL; src_pdu->total_ahs_len = 0;
 	} else {
@@ -719,7 +719,6 @@ istgt_iscsi_copy_pdu(ISCSI_PDU_Ptr dst_pdu, ISCSI_PDU_Ptr src_pdu)
 	src_pdu->ahs = NULL;
 	src_pdu->data = NULL;
 	src_pdu->data_segment_len = 0;
-	return;
 }
 
 typedef struct iscsi_param_table_t
@@ -3416,9 +3415,9 @@ istgt_iscsi_op_scsi(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 	lu_cmd.sense_alloc_len = 0; // conn->snsbufsize;
 	lu_cmd.sense_data_len = 0;
 	lu_cmd.connGone = 0;
-	#ifdef REPLICATION
+#ifdef REPLICATION
 	clock_gettime(CLOCK_MONOTONIC_RAW, &lu_cmd.start_rw_time);
-	#endif
+#endif
 	ISTGT_TRACELOG(ISTGT_TRACE_ISCSI,
 		"LU%d: CSN:%x ITT:%x (%lu/%u)[0x%x %lx+%x] PG=0x%4.4x, LUN=0x%lx "
 		"ExpStatSN=%x StatSN=%x ExpCmdSN=%x MaxCmdSN=%x "
@@ -5383,8 +5382,6 @@ worker_cleanup(void *arg)
 	istgt_remove_conn(conn);
 	MTX_UNLOCK(&g_conns_mutex);
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "cancel cleanup UNLOCK\n");
-
-	return;
 }
 
 const char lu_task_typ[4][12] = {
@@ -5632,7 +5629,6 @@ update_cummulative_rw_time(ISTGT_LU_TASK_Ptr lu_task)
 				__sync_fetch_and_add(&spec->totalreadtime, ns);
 				break;
 		}
-	return;
 }
 #endif
 
@@ -5710,9 +5706,9 @@ sender(void *arg)
 			lu_task->lock = 1;
 			timediff(&lu_task->lu_cmd, 'r', __LINE__);
 			if (lu_task->type == ISTGT_LU_TASK_RESPONSE) {
-				#ifdef REPLICATION
+#ifdef REPLICATION
 				update_cummulative_rw_time(lu_task);
-				#endif
+#endif
 
 				/* send DATA-IN, SCSI status */
 				rc = istgt_iscsi_task_response(conn, lu_task);
@@ -6365,8 +6361,8 @@ istgt_create_conn(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock, struct sockaddr 
 		goto error_return;
 	}
 	// printf("sock=%d, addr=%s, peer=%s\n",
-	// 	   sock, conn->target_addr,
-	// 	   conn->initiator_addr);
+	//  sock, conn->target_addr,
+	//  conn->initiator_addr);
 
 	/* wildcard? */
 	if (strcasecmp(conn->portal.host, "[::]") == 0
