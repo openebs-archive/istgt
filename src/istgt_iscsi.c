@@ -730,14 +730,48 @@ typedef struct iscsi_param_table_t
 } ISCSI_PARAM_TABLE;
 
 static ISCSI_PARAM_TABLE conn_param_table[] =
-{ { "HeaderDigest", "None", "CRC32C,None", ISPT_LIST }, { "DataDigest", "None", "CRC32C,None", ISPT_LIST }, { "MaxRecvDataSegmentLength", "8192", "512,16777215", ISPT_NUMERICAL }, { "OFMarker", "No", "Yes,No", ISPT_BOOLEAN_AND }, { "IFMarker", "No", "Yes,No", ISPT_BOOLEAN_AND }, { "OFMarkInt", "1", "1,65535", ISPT_NUMERICAL }, { "IFMarkInt", "1", "1,65535", ISPT_NUMERICAL }, { "AuthMethod", "None", "CHAP,None", ISPT_LIST }, { "CHAP_A", "5", "5", ISPT_LIST }, { "CHAP_N", "", "", ISPT_DECLARATIVE }, { "CHAP_R", "", "", ISPT_DECLARATIVE }, { "CHAP_I", "", "", ISPT_DECLARATIVE }, { "CHAP_C", "", "", ISPT_DECLARATIVE }, { NULL, NULL, NULL, ISPT_INVALID },
+{
+	{ "HeaderDigest", "None", "CRC32C,None", ISPT_LIST },
+	{ "DataDigest", "None", "CRC32C,None", ISPT_LIST },
+	{ "MaxRecvDataSegmentLength", "8192", "512,16777215", ISPT_NUMERICAL },
+	{ "OFMarker", "No", "Yes,No", ISPT_BOOLEAN_AND },
+	{ "IFMarker", "No", "Yes,No", ISPT_BOOLEAN_AND },
+	{ "OFMarkInt", "1", "1,65535", ISPT_NUMERICAL },
+	{ "IFMarkInt", "1", "1,65535", ISPT_NUMERICAL },
+	{ "AuthMethod", "None", "CHAP,None", ISPT_LIST },
+	{ "CHAP_A", "5", "5", ISPT_LIST },
+	{ "CHAP_N", "", "", ISPT_DECLARATIVE },
+	{ "CHAP_R", "", "", ISPT_DECLARATIVE },
+	{ "CHAP_I", "", "", ISPT_DECLARATIVE },
+	{ "CHAP_C", "", "", ISPT_DECLARATIVE },
+	{ NULL, NULL, NULL, ISPT_INVALID },
 };
 
 static ISCSI_PARAM_TABLE sess_param_table[] =
-{ { "MaxConnections", "1", "1,65535", ISPT_NUMERICAL },
+{ 
+	{ "MaxConnections", "1", "1,65535", ISPT_NUMERICAL },
 #if 0
-	/* need special handling */ { "SendTargets", "", "", ISPT_DECLARATIVE },
-#endif { "TargetName", "", "", ISPT_DECLARATIVE }, { "InitiatorName", "", "", ISPT_DECLARATIVE }, { "TargetAlias", "", "", ISPT_DECLARATIVE }, { "InitiatorAlias", "", "", ISPT_DECLARATIVE }, { "TargetAddress", "", "", ISPT_DECLARATIVE }, { "TargetPortalGroupTag", "1", "1,65535", ISPT_NUMERICAL }, { "InitialR2T", "Yes", "Yes,No", ISPT_BOOLEAN_OR }, { "ImmediateData", "Yes", "Yes,No", ISPT_BOOLEAN_AND }, { "MaxBurstLength", "262144", "512,16777215", ISPT_NUMERICAL }, { "FirstBurstLength", "65536", "512,16777215", ISPT_NUMERICAL }, { "DefaultTime2Wait", "2", "0,3600", ISPT_NUMERICAL_MAX }, { "DefaultTime2Retain", "20", "0,3600", ISPT_NUMERICAL }, { "MaxOutstandingR2T", "1", "1,65536", ISPT_NUMERICAL }, { "DataPDUInOrder", "Yes", "Yes,No", ISPT_BOOLEAN_OR }, { "DataSequenceInOrder", "Yes", "Yes,No", ISPT_BOOLEAN_OR }, { "ErrorRecoveryLevel", "0", "0,2", ISPT_NUMERICAL }, { "SessionType", "Normal", "Normal,Discovery", ISPT_DECLARATIVE }, { NULL, NULL, NULL, ISPT_INVALID },
+	/* need special handling */
+	{ "SendTargets", "", "", ISPT_DECLARATIVE },
+#endif 
+	{ "TargetName", "", "", ISPT_DECLARATIVE },
+	{ "InitiatorName", "", "", ISPT_DECLARATIVE },
+	{ "TargetAlias", "", "", ISPT_DECLARATIVE },
+	{ "InitiatorAlias", "", "", ISPT_DECLARATIVE },
+	{ "TargetAddress", "", "", ISPT_DECLARATIVE },
+	{ "TargetPortalGroupTag", "1", "1,65535", ISPT_NUMERICAL },
+	{ "InitialR2T", "Yes", "Yes,No", ISPT_BOOLEAN_OR },
+	{ "ImmediateData", "Yes", "Yes,No", ISPT_BOOLEAN_AND },
+	{ "MaxBurstLength", "262144", "512,16777215", ISPT_NUMERICAL },
+	{ "FirstBurstLength", "65536", "512,16777215", ISPT_NUMERICAL },
+	{ "DefaultTime2Wait", "2", "0,3600", ISPT_NUMERICAL_MAX },
+	{ "DefaultTime2Retain", "20", "0,3600", ISPT_NUMERICAL },
+	{ "MaxOutstandingR2T", "1", "1,65536", ISPT_NUMERICAL },
+	{ "DataPDUInOrder", "Yes", "Yes,No", ISPT_BOOLEAN_OR },
+	{ "DataSequenceInOrder", "Yes", "Yes,No", ISPT_BOOLEAN_OR },
+	{ "ErrorRecoveryLevel", "0", "0,2", ISPT_NUMERICAL },
+	{ "SessionType", "Normal", "Normal,Discovery", ISPT_DECLARATIVE },
+	{ NULL, NULL, NULL, ISPT_INVALID },
 };
 
 static int
@@ -5226,11 +5260,9 @@ wait_all_task(CONN_Ptr conn)
 		}
 
 		if (events.data.fd == conn->task_pipe[0]) {
-			/ *// TODO
-			if (kev.flags & (EV_EOF|EV_ERROR)) {
-				break;
-			}
-			*/
+			// if (kev.flags & (EV_EOF|EV_ERROR)) {
+			// 	break;
+			// }
 			char tmp[1];
 
 			rc = read(conn->task_pipe[0], tmp, 1);
