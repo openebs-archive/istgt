@@ -90,13 +90,13 @@
 
 /* according to RFC1982 */
 #define	SN32_CMPMAX (((uint32_t)1U) << (32 - 1))
-#define	SN32_LT(S1,S2) \
+#define	SN32_LT(S1, S2) \
 	(((uint32_t)(S1) != (uint32_t)(S2))				\
 		&& (((uint32_t)(S1) < (uint32_t)(S2)			\
 			&& ((uint32_t)(S2) - (uint32_t)(S1) < SN32_CMPMAX))	\
 		|| ((uint32_t)(S1) > (uint32_t)(S2)			\
 			&& ((uint32_t)(S1) - (uint32_t)(S2) > SN32_CMPMAX))))
-#define	SN32_GT(S1,S2) \
+#define	SN32_GT(S1, S2) \
 	(((uint32_t)(S1) != (uint32_t)(S2))				\
 		&& (((uint32_t)(S1) < (uint32_t)(S2)			\
 			&& ((uint32_t)(S2) - (uint32_t)(S1) > SN32_CMPMAX))	\
@@ -125,14 +125,14 @@ struct istgt_detail {
 		char target_name[256];
 };
 
-#define	ISCSI_GETVAL(PARAMS,KEY) \
-	istgt_iscsi_param_get_val((PARAMS),(KEY))
-#define	ISCSI_EQVAL(PARAMS,KEY,VAL) \
-	istgt_iscsi_param_eq_val((PARAMS),(KEY),(VAL))
-#define	ISCSI_DELVAL(PARAMS,KEY) \
-	istgt_iscsi_param_del((PARAMS),(KEY))
-#define	ISCSI_ADDVAL(PARAMS,KEY,VAL,LIST,TYPE) \
-	istgt_iscsi_param_add((PARAMS),(KEY),(VAL), (LIST), (TYPE))
+#define	ISCSI_GETVAL(PARAMS, KEY) \
+	istgt_iscsi_param_get_val((PARAMS), (KEY))
+#define	ISCSI_EQVAL(PARAMS, KEY, VAL) \
+	istgt_iscsi_param_eq_val((PARAMS), (KEY), (VAL))
+#define	ISCSI_DELVAL(PARAMS, KEY) \
+	istgt_iscsi_param_del((PARAMS), (KEY))
+#define	ISCSI_ADDVAL(PARAMS, KEY, VAL, LIST, TYPE) \
+	istgt_iscsi_param_add((PARAMS), (KEY), (VAL), (LIST), (TYPE))
 
 static int g_nconns;
 static int g_max_connidx;
@@ -154,8 +154,8 @@ static void ioctl_call(CONN_Ptr, enum iscsi_log);
 
 // _verb_stat SCSIstat_0min[SCSI_ARYSZ]
 // _verb_stat SCSIstat_1min[SCSI_ARYSZ]
-_verb_stat SCSIstat_rest[SCSI_ARYSZ] = { {0,0,0} };
-_verb_istat ISCSIstat_rest[ISCSI_ARYSZ] = { {0,0,0} };
+_verb_stat SCSIstat_rest[SCSI_ARYSZ] = { {0, 0, 0} };
+_verb_istat ISCSIstat_rest[ISCSI_ARYSZ] = { {0, 0, 0} };
 extern int iscsi_ops_indx_table[256];
 
 /* Switch to use readv/writev (assume blocking) */
@@ -1815,7 +1815,7 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 		ISTGT_TRACELOG(ISTGT_TRACE_ISCSI,
 				"op_login CSN:%x T=%d, C=%d, CSG=%d, NSG=%d, Min=%d, Max=%d, ITT=%x ExpStatSN=%x, StatSN=%x (session)\n",
 				CmdSN, T_bit, C_bit, CSG, NSG, VersionMin, VersionMax, task_tag,
-				ExpStatSN, conn->StatSN); // , conn->sess->ExpCmdSN, conn->sess->MaxCmdSN);
+				ExpStatSN, conn->StatSN); //, conn->sess->ExpCmdSN, conn->sess->MaxCmdSN);
 		// SESS_MTX_UNLOCK(conn);
 	} else {
 		ISTGT_TRACELOG(ISTGT_TRACE_ISCSI,
@@ -3017,7 +3017,7 @@ parse_scsi_cdb(ISTGT_LU_CMD_Ptr lu_cmd)
 	int anchor = 0, unmap = 0;  // cdb[1] bits 4,  3
 	int pbdata = 0, lbdata = 0; // cdb[1] bits 2,  1
 	uint64_t lba = 0;
-	uint32_t len = 0;;
+	uint32_t len = 0;
 	uint32_t transfer_len = 0; // uint32_t parameter_len;
 	uint8_t *cdb  = lu_cmd->cdb;
 
@@ -3380,7 +3380,7 @@ istgt_iscsi_op_scsi(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 	int I_bit, F_bit, R_bit, W_bit, Attr_bit;
 	int o_bit, u_bit, O_bit, U_bit;
 	int rc;
-	uint32_t c_StatSN , s_ExpCmdSN, s_MaxCmdSN;
+	uint32_t c_StatSN, s_ExpCmdSN, s_MaxCmdSN;
 	uint32_t QCmdSN;
 	int s_conns;
 	int operation_mode = 0;
@@ -4419,7 +4419,7 @@ istgt_del_transfer_task(CONN_Ptr conn, ISTGT_R2T_TASK_Ptr r2t_task)
 		}
 	}
 	if (found) {
-		for ( ; i < conn->pending_r2t; i++) {
+		for (; i < conn->pending_r2t; i++) {
 			conn->r2t_tasks[i] = conn->r2t_tasks[i + 1];
 		}
 		conn->pending_r2t--;
@@ -4456,7 +4456,7 @@ istgt_clear_transfer_task(CONN_Ptr conn, uint32_t CmdSN)
 		}
 	}
 	if (found) {
-		for ( ; i < conn->pending_r2t; i++) {
+		for (; i < conn->pending_r2t; i++) {
 			conn->r2t_tasks[i] = conn->r2t_tasks[i + 1];
 		}
 		conn->pending_r2t--;
@@ -4592,7 +4592,7 @@ uint8_t istgt_get_sleep_val(ISTGT_LU_DISK *spec)
 	if (spec->percent_count == 0)
 		return 0;
 
-	for (i = 0;i < spec->percent_count && i < 31;i++)
+	for (i = 0; i < spec->percent_count && i < 31; i++)
 		if ((tot+spec->percent_val[i]) <= val)
 			tot += spec->percent_val[i];
 		else
@@ -4873,7 +4873,7 @@ start:
 
 				rc = istgt_queue_count(&conn->pending_pdus);
 				if (rc > conn->max_pending) {
-					ISTGT_ERRLOG("c#%d pending queue(%d) is full\n",conn->id, conn->max_pending);
+					ISTGT_ERRLOG("c#%d pending queue(%d) is full\n", conn->id, conn->max_pending);
 					goto error_return;
 				}
 				ISTGT_TRACELOG(ISTGT_TRACE_ISCSI, "c#%d non DATAOUT PDU, move to pending:%d/%d  OP=0x%x cmdsn:0x%x expstatsn:0x%x\n", conn->id, rc, conn->max_pending, opcode, wCmdSN, ExpStatSN);
@@ -5484,7 +5484,7 @@ prof_log(ISTGT_LU_CMD_Ptr p, const char *caller)
 						spec->IO_size[ind].write.total_time.tv_nsec = _r.tv_nsec;
 						spec->IO_size[ind].write.lba = p->lba;
 						spec->IO_size[ind].write.lblen = p->lblen;
-						for (i = 1; i < _PSZ ; i++) {
+						for (i = 1; i < _PSZ; i++) {
 							spec->IO_size[ind].write.caller[i] = p->caller[i];
 							spec->IO_size[ind].write.tdiff[i].tv_sec = p->tdiff[i].tv_sec;
 							spec->IO_size[ind].write.tdiff[i].tv_nsec = p->tdiff[i].tv_nsec;
@@ -5500,7 +5500,7 @@ prof_log(ISTGT_LU_CMD_Ptr p, const char *caller)
 						spec->IO_size[ind].read.total_time.tv_nsec = _r.tv_nsec;
 						spec->IO_size[ind].read.lba = p->lba;
 						spec->IO_size[ind].read.lblen = p->lblen;
-						for (i = 1; i < _PSZ ; i++) {
+						for (i = 1; i < _PSZ; i++) {
 							spec->IO_size[ind].read.caller[i] = p->caller[i];
 							spec->IO_size[ind].read.tdiff[i].tv_sec = p->tdiff[i].tv_sec;
 							spec->IO_size[ind].read.tdiff[i].tv_nsec = p->tdiff[i].tv_nsec;
@@ -5513,7 +5513,7 @@ prof_log(ISTGT_LU_CMD_Ptr p, const char *caller)
 						spec->IO_size[ind].cmp_n_write.total_time.tv_nsec = _r.tv_nsec;
 						spec->IO_size[ind].cmp_n_write.lba = p->lba;
 						spec->IO_size[ind].cmp_n_write.lblen = p->lblen;
-						for (i = 1; i < _PSZ ; i++) {
+						for (i = 1; i < _PSZ; i++) {
 							spec->IO_size[ind].cmp_n_write.caller[i] = p->caller[i];
 							spec->IO_size[ind].cmp_n_write.tdiff[i].tv_sec = p->tdiff[i].tv_sec;
 							spec->IO_size[ind].cmp_n_write.tdiff[i].tv_nsec = p->tdiff[i].tv_nsec;
@@ -5526,7 +5526,7 @@ prof_log(ISTGT_LU_CMD_Ptr p, const char *caller)
 						spec->IO_size[ind].unmp.total_time.tv_nsec = _r.tv_nsec;
 						spec->IO_size[ind].unmp.lba = p->lba;
 						spec->IO_size[ind].unmp.lblen = p->lblen;
-						for (i = 1; i < _PSZ ; i++) {
+						for (i = 1; i < _PSZ; i++) {
 							spec->IO_size[ind].unmp.caller[i] = p->caller[i];
 							spec->IO_size[ind].unmp.tdiff[i].tv_sec = p->tdiff[i].tv_sec;
 							spec->IO_size[ind].unmp.tdiff[i].tv_nsec = p->tdiff[i].tv_nsec;
@@ -5540,7 +5540,7 @@ prof_log(ISTGT_LU_CMD_Ptr p, const char *caller)
 						spec->IO_size[ind].write_same.total_time.tv_nsec = _r.tv_nsec;
 						spec->IO_size[ind].write_same.lba = p->lba;
 						spec->IO_size[ind].write_same.lblen = p->lblen;
-						for (i = 1; i < _PSZ ; i++) {
+						for (i = 1; i < _PSZ; i++) {
 							spec->IO_size[ind].write_same.caller[i] = p->caller[i];
 							spec->IO_size[ind].write_same.tdiff[i].tv_sec = p->tdiff[i].tv_sec;
 							spec->IO_size[ind].write_same.tdiff[i].tv_nsec = p->tdiff[i].tv_nsec;
@@ -5689,7 +5689,7 @@ sender(void *arg)
 	int rc;
 	ISCSI_PDU_Ptr pdu = NULL;
 	pthread_t slf = pthread_self();
-	snprintf(tinfo , sizeof tinfo, "s#%d.%ld.%d", conn->id, (uint64_t)(((uint64_t *)slf)[0]), ntohs(conn->iport));
+	snprintf(tinfo, sizeof tinfo, "s#%d.%ld.%d", conn->id, (uint64_t)(((uint64_t *)slf)[0]), ntohs(conn->iport));
 #ifdef HAVE_PTHREAD_SET_NAME_NP
 	pthread_set_name_np(slf, tinfo);
 #endif
@@ -5877,7 +5877,7 @@ worker(void *arg)
 	int rc;
 
 	pthread_t slf = pthread_self();
-	snprintf(tinfo , sizeof tinfo, "c#%d.%ld.%d", conn->id, (uint64_t)(((uint64_t *)slf)[0]), ntohs(conn->iport));
+	snprintf(tinfo, sizeof tinfo, "c#%d.%ld.%d", conn->id, (uint64_t)(((uint64_t *)slf)[0]), ntohs(conn->iport));
 #ifdef HAVE_PTHREAD_SET_NAME_NP
 	pthread_set_name_np(slf, tinfo);
 #endif
@@ -6242,7 +6242,7 @@ worker(void *arg)
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "loop ended (%d)\n", conn->id);
 
 	cleanup_exit:
-	;
+;
 	pthread_cleanup_pop(0);
 	conn->state = CONN_STATE_EXITING;
 	if (conn->sess != NULL) {
