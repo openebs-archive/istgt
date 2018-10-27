@@ -162,14 +162,14 @@ extern int iscsi_ops_indx_table[256];
 #define	ISTGT_USE_IOVEC
 
 #define	MATCH_DIGEST_WORD(BUF, CRC32C) \
-	(	((((uint32_t) *((uint8_t *)(BUF)+0)) << 0)		\
+	    (((((uint32_t) *((uint8_t *)(BUF)+0)) << 0)		\
 		| (((uint32_t) *((uint8_t *)(BUF)+1)) << 8)		\
 		| (((uint32_t) *((uint8_t *)(BUF)+2)) << 16)	\
 		| (((uint32_t) *((uint8_t *)(BUF)+3)) << 24))	\
 		== (CRC32C))
 
 #define	MAKE_DIGEST_WORD(BUF, CRC32C) \
-	(   ((*((uint8_t *)(BUF)+0)) = (uint8_t)((uint32_t)(CRC32C) >> 0)), \
+	   (((*((uint8_t *)(BUF)+0)) = (uint8_t)((uint32_t)(CRC32C) >> 0)), \
 		((*((uint8_t *)(BUF)+1)) = (uint8_t)((uint32_t)(CRC32C) >> 8)), \
 		((*((uint8_t *)(BUF)+2)) = (uint8_t)((uint32_t)(CRC32C) >> 16)), \
 		((*((uint8_t *)(BUF)+3)) = (uint8_t)((uint32_t)(CRC32C) >> 24)))
@@ -1777,7 +1777,7 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 		ISTGT_TRACELOG(ISTGT_TRACE_ISCSI,
 				"op_login CSN:%x T=%d, C=%d, CSG=%d, NSG=%d, Min=%d, Max=%d, ITT=%x ExpStatSN=%x, StatSN=%x (session)\n",
 				CmdSN, T_bit, C_bit, CSG, NSG, VersionMin, VersionMax, task_tag,
-				ExpStatSN, conn->StatSN); //, conn->sess->ExpCmdSN, conn->sess->MaxCmdSN);
+				ExpStatSN, conn->StatSN); // conn->sess->ExpCmdSN, conn->sess->MaxCmdSN);
 		// SESS_MTX_UNLOCK(conn);
 	} else {
 		ISTGT_TRACELOG(ISTGT_TRACE_ISCSI,
@@ -2071,7 +2071,7 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 			int i;
 			xfree(conn->r2t_tasks);
 			conn->max_r2t = conn->max_pending;
-			conn->r2t_tasks = xmalloc (sizeof (*conn->r2t_tasks)
+			conn->r2t_tasks = xmalloc(sizeof (*conn->r2t_tasks)
 				* (conn->max_r2t + 1));
 			for (i = 0; i < (conn->max_r2t + 1); i++) {
 				conn->r2t_tasks[i] = NULL;
@@ -2925,7 +2925,7 @@ istgt_iscsi_transfer_in_internal(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 		} else {
 			DSET32(&rsp[24], 0); // StatSN or Reserved
 		}
-		if (F_bit && S_bit && lu_cmd->I_bit == 0 ) {
+		if (F_bit && S_bit && lu_cmd->I_bit == 0) {
 			if (likely(lu_cmd->lu->limit_q_size == 0 || ((int)(conn->sess->MaxCmdSN - conn->sess->ExpCmdSN) < lu_cmd->lu->limit_q_size))) {
 				conn->sess->MaxCmdSN++;
 				conn->sess->MaxCmdSN_local++;
@@ -6323,7 +6323,7 @@ istgt_create_conn(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock, struct sockaddr 
 	conn->inflight = 0;
 	conn->sender_waiting = 0;
 	istgt_queue_init(&conn->pending_pdus);
-	conn->r2t_tasks = xmalloc ((sizeof (conn->r2t_tasks))
+	conn->r2t_tasks = xmalloc((sizeof (conn->r2t_tasks))
 		* (conn->max_r2t + 1));
 	for (i = 0; i < (conn->max_r2t + 1); i++) {
 		conn->r2t_tasks[i] = NULL;
@@ -6405,7 +6405,7 @@ istgt_create_conn(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock, struct sockaddr 
 		ISTGT_ERRLOG("istgt_set_sendtimeo() failed\n");
 		goto error_return;
 	}
-#if defined (ISTGT_USE_IOVEC)
+#if defined(ISTGT_USE_IOVEC)
 	/* set low water mark */
 	rc = istgt_set_recvlowat(conn->sock, ISCSI_BHS_LEN);
 	if (rc != 0) {
