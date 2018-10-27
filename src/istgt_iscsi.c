@@ -502,16 +502,16 @@ istgt_iscsi_write_pdu_queue(CONN_Ptr conn, ISCSI_PDU_Ptr pdu, int req_type, int 
 		DGET8(&cp[0]), DGET32(&cp[32]), DGET32(&cp[28]), DGET32(&cp[32]));
 #endif
 	/* allocate for queued PDU */
-	alloc_len = ISCSI_ALIGN(sizeof *lu_task);
-	alloc_len += ISCSI_ALIGN(sizeof *lu_task->lu_cmd.pdu);
+	alloc_len = ISCSI_ALIGN(sizeof (*lu_task));
+	alloc_len += ISCSI_ALIGN(sizeof (*lu_task->lu_cmd.pdu));
 	// alloc_len += ISCSI_ALIGN(4 * total_ahs_len);
 	// alloc_len += ISCSI_ALIGN(data_len);
 	lu_task = xmalloc(alloc_len);
 	memset(lu_task, 0, alloc_len);
 	lu_task->lu_cmd.pdu = (ISCSI_PDU_Ptr) ((uintptr_t)lu_task
-		+ ISCSI_ALIGN(sizeof *lu_task));
+		+ ISCSI_ALIGN(sizeof (*lu_task)));
 	// lu_task->lu_cmd.pdu->ahs = (ISCSI_AHS *) ((uintptr_t)lu_task->lu_cmd.pdu
-	//	+ ISCSI_ALIGN(sizeof *lu_task->lu_cmd.pdu));
+	//	+ ISCSI_ALIGN(sizeof (*lu_task->lu_cmd.pdu)));
 	// lu_task->lu_cmd.pdu->data = (uint8_t *) ((uintptr_t)lu_task->lu_cmd.pdu->ahs
 	//	+ ISCSI_ALIGN(4 * total_ahs_len));
 
@@ -1820,9 +1820,9 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 			StatusDetail = 0x07;
 			goto response;
 		}
-		snprintf(conn->initiator_name, sizeof conn->initiator_name,
+		snprintf(conn->initiator_name, sizeof (conn->initiator_name),
 			"%s", val);
-		snprintf(conn->initiator_port, sizeof conn->initiator_port,
+		snprintf(conn->initiator_port, sizeof (conn->initiator_port),
 			"%s" ",i,0x" "%12.12" PRIx64, val, isid);
 		/*
 		 * We did this because of some normalization issue.
@@ -1863,9 +1863,9 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 				StatusDetail = 0x07;
 				goto response;
 			}
-			snprintf(conn->target_name, sizeof conn->target_name,
+			snprintf(conn->target_name, sizeof (conn->target_name),
 				"%s", val);
-			snprintf(conn->target_port, sizeof conn->target_port,
+			snprintf(conn->target_port, sizeof (conn->target_port),
 				"%s" ",t,0x" "%4.4x", val, conn->portal.tag);
 			 strlwr(conn->target_name);
 			 strlwr(conn->target_port);
@@ -1996,9 +1996,9 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 			}
 			MTX_UNLOCK(&lu->mutex);
 		} else if (strcasecmp(session_type, "Discovery") == 0) {
-			snprintf(conn->target_name, sizeof conn->target_name,
+			snprintf(conn->target_name, sizeof (conn->target_name),
 				"%s", "dummy");
-			snprintf(conn->target_port, sizeof conn->target_port,
+			snprintf(conn->target_port, sizeof (conn->target_port),
 				"%s" ",t,0x" "%4.4x", "dummy", conn->portal.tag);
 			lu = NULL;
 			tsih = 0;
@@ -2071,7 +2071,7 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 			int i;
 			xfree(conn->r2t_tasks);
 			conn->max_r2t = conn->max_pending;
-			conn->r2t_tasks = xmalloc (sizeof *conn->r2t_tasks
+			conn->r2t_tasks = xmalloc (sizeof (*conn->r2t_tasks)
 				* (conn->max_r2t + 1));
 			for (i = 0; i < (conn->max_r2t + 1); i++) {
 				conn->r2t_tasks[i] = NULL;
@@ -2120,9 +2120,9 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 		if (lu != NULL) {
 			MTX_LOCK(&lu->mutex);
 			if (lu->alias != NULL) {
-				snprintf(buf, sizeof buf, "%s", lu->alias);
+				snprintf(buf, sizeof (buf), "%s", lu->alias);
 			} else {
-				snprintf(buf, sizeof buf, "%s", "");
+				snprintf(buf, sizeof (buf), "%s", "");
 			}
 			MTX_UNLOCK(&lu->mutex);
 			SESS_MTX_LOCK(conn);
@@ -2134,7 +2134,7 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 				goto error_return;
 			}
 		}
-		snprintf(buf, sizeof buf, "%s:%s,%d",
+		snprintf(buf, sizeof (buf), "%s:%s,%d",
 			conn->portal.host, conn->portal.port, conn->portal.tag);
 		SESS_MTX_LOCK(conn);
 		rc = istgt_iscsi_param_set(conn->sess->params,
@@ -2144,7 +2144,7 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 			ISTGT_ERRLOG("iscsi_param_set() failed\n");
 			goto error_return;
 		}
-		snprintf(buf, sizeof buf, "%d", conn->portal.tag);
+		snprintf(buf, sizeof (buf), "%d", conn->portal.tag);
 		SESS_MTX_LOCK(conn);
 		rc = istgt_iscsi_param_set(conn->sess->params,
 			"TargetPortalGroupTag", buf);
@@ -2300,7 +2300,7 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 					/* multiple connection */
 				}
 				conn->sess->lu->conns++;
-				snprintf(buf, sizeof buf, "Login from %s (%s) on %s LU%d"
+				snprintf(buf, sizeof (buf), "Login from %s (%s) on %s LU%d"
 					" (%s:%s,%d), ISID=%"PRIx64", TSIH=%u,"
 					" CID=%u, HeaderDigest=%s, DataDigest=%s\n",
 					conn->initiator_name, conn->initiator_addr,
@@ -2334,7 +2334,7 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 				conn->sess->tsih = tsih;
 				MTX_UNLOCK(&g_last_tsih_mutex);
 
-				snprintf(buf, sizeof buf, "Login(discovery) from %s (%s) on"
+				snprintf(buf, sizeof (buf), "Login(discovery) from %s (%s) on"
 					" (%s:%s,%d), ISID=%"PRIx64", TSIH=%u,"
 					" CID=%u, HeaderDigest=%s, DataDigest=%s\n",
 					conn->initiator_name, conn->initiator_addr,
@@ -2766,7 +2766,7 @@ istgt_iscsi_op_logout(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 
 	SESS_MTX_LOCK(conn);
 	if (ISCSI_EQVAL(conn->sess->params, "SessionType", "Normal")) {
-		snprintf(buf, sizeof buf, "Logout from %s (%s) on %s LU%d"
+		snprintf(buf, sizeof (buf), "Logout from %s (%s) on %s LU%d"
 			" (%s:%s,%d), ISID=%"PRIx64", TSIH=%u,"
 			" CID=%u, HeaderDigest=%s, DataDigest=%s\n",
 			conn->initiator_name, conn->initiator_addr,
@@ -2780,7 +2780,7 @@ istgt_iscsi_op_logout(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 		ioctl_call(conn, TYPE_LOGOUT);
 	} else {
 		/* discovery session */
-		snprintf(buf, sizeof buf, "Logout(discovery) from %s (%s) on"
+		snprintf(buf, sizeof (buf), "Logout(discovery) from %s (%s) on"
 			" (%s:%s,%d), ISID=%"PRIx64", TSIH=%u,"
 			" CID=%u, HeaderDigest=%s, DataDigest=%s\n",
 			conn->initiator_name, conn->initiator_addr,
@@ -3439,7 +3439,7 @@ istgt_iscsi_op_scsi(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 				time_t start, now;
 
 				start = now = time(NULL);
-				memset(&abstime, 0, sizeof abstime);
+				memset(&abstime, 0, sizeof (abstime));
 				abstime.tv_sec = now + (MAX_MCSREVWAIT / 1000);
 				abstime.tv_nsec = (MAX_MCSREVWAIT % 1000) * 1000000;
 
@@ -4316,7 +4316,7 @@ istgt_add_transfer_task(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 	if (offset >= first_burst_len) {
 		len = DMIN32(max_burst_len, (transfer_len - offset));
 
-		r2t_task = xmalloc(sizeof *r2t_task);
+		r2t_task = xmalloc(sizeof (*r2t_task));
 		r2t_task->conn = conn;
 		r2t_task->lu = lu_cmd->lu;
 		r2t_task->lun = lu_cmd->lun;
@@ -4838,7 +4838,7 @@ start:
 					goto error_return;
 				}
 				ISTGT_TRACELOG(ISTGT_TRACE_ISCSI, "c#%d non DATAOUT PDU, move to pending:%d/%d  OP=0x%x cmdsn:0x%x expstatsn:0x%x\n", conn->id, rc, conn->max_pending, opcode, wCmdSN, ExpStatSN);
-				save_pdu = xmalloc(sizeof *save_pdu);
+				save_pdu = xmalloc(sizeof (*save_pdu));
 				istgt_iscsi_copy_pdu(save_pdu, &data_pdu);
 				r_ptr = istgt_queue_enqueue(&conn->pending_pdus, save_pdu);
 				if (r_ptr == NULL) {
@@ -5646,13 +5646,13 @@ sender(void *arg)
 	int rc;
 	ISCSI_PDU_Ptr pdu = NULL;
 	pthread_t slf = pthread_self();
-	snprintf(tinfo, sizeof tinfo, "s#%d.%ld.%d", conn->id, (uint64_t)(((uint64_t *)slf)[0]), ntohs(conn->iport));
+	snprintf(tinfo, sizeof (tinfo), "s#%d.%ld.%d", conn->id, (uint64_t)(((uint64_t *)slf)[0]), ntohs(conn->iport));
 #ifdef HAVE_PTHREAD_SET_NAME_NP
 	pthread_set_name_np(slf, tinfo);
 #endif
 
 	pthread_cleanup_push(snd_cleanup, (void *)conn);
-	memset(&abstime, 0, sizeof abstime);
+	memset(&abstime, 0, sizeof (abstime));
 	/* handle DATA-IN/SCSI status */
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "sender loop start (%d)\n", conn->id);
 	// MTX_LOCK(&conn->sender_mutex);
@@ -5832,7 +5832,7 @@ worker(void *arg)
 	int rc;
 
 	pthread_t slf = pthread_self();
-	snprintf(tinfo, sizeof tinfo, "c#%d.%ld.%d", conn->id, (uint64_t)(((uint64_t *)slf)[0]), ntohs(conn->iport));
+	snprintf(tinfo, sizeof (tinfo), "c#%d.%ld.%d", conn->id, (uint64_t)(((uint64_t *)slf)[0]), ntohs(conn->iport));
 #ifdef HAVE_PTHREAD_SET_NAME_NP
 	pthread_set_name_np(slf, tinfo);
 #endif
@@ -5954,7 +5954,7 @@ worker(void *arg)
 		ISTGT_ERRLOG("pthread_create() failed\n");
 		goto cleanup_exit;
 	}
-	snprintf(conn->sthr, sizeof conn->sthr, "s#%d.%ld.%d", conn->id, (uint64_t)(((uint64_t *)(conn->sender_thread))[0]), ntohs(conn->iport));
+	snprintf(conn->sthr, sizeof (conn->sthr), "s#%d.%ld.%d", conn->id, (uint64_t)(((uint64_t *)(conn->sender_thread))[0]), ntohs(conn->iport));
 	conn->wsock = conn->sock;
 
 	sigemptyset(&signew);
@@ -6268,8 +6268,8 @@ istgt_create_conn(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock, struct sockaddr 
 	int rc;
 	int i;
 
-	conn = xmalloc(sizeof *conn);
-	memset(conn, 0, sizeof *conn);
+	conn = xmalloc(sizeof (*conn));
+	memset(conn, 0, sizeof (*conn));
 
 	conn->istgt = istgt;
 	MTX_LOCK(&istgt->mutex);
@@ -6323,7 +6323,7 @@ istgt_create_conn(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock, struct sockaddr 
 	conn->inflight = 0;
 	conn->sender_waiting = 0;
 	istgt_queue_init(&conn->pending_pdus);
-	conn->r2t_tasks = xmalloc ((sizeof conn->r2t_tasks)
+	conn->r2t_tasks = xmalloc ((sizeof (conn->r2t_tasks))
 		* (conn->max_r2t + 1));
 	for (i = 0; i < (conn->max_r2t + 1); i++) {
 		conn->r2t_tasks[i] = NULL;
@@ -6336,15 +6336,15 @@ istgt_create_conn(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock, struct sockaddr 
 	conn->exec_lu_task = NULL;
 	conn->running_tasks = 0;
 
-	// memset(conn->initiator_addr, 0, sizeof conn->initiator_addr);
-	// memset(conn->target_addr, 0, sizeof conn->target_addr);
+	// memset(conn->initiator_addr, 0, sizeof (conn->initiator_addr));
+	// memset(conn->target_addr, 0, sizeof (conn->target_addr));
 
 	switch (sa->sa_family) {
 	case AF_INET6:
 		conn->initiator_family = AF_INET6;
 		rc = istgt_getaddr(sock, conn->target_addr,
-			sizeof conn->target_addr,
-			conn->initiator_addr, sizeof conn->initiator_addr, &conn->iaddr, &conn->iport);
+			sizeof (conn->target_addr),
+			conn->initiator_addr, sizeof (conn->initiator_addr), &conn->iaddr, &conn->iport);
 		if (rc < 0) {
 			ISTGT_ERRLOG("istgt_getaddr() failed\n");
 			goto error_return;
@@ -6353,8 +6353,8 @@ istgt_create_conn(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock, struct sockaddr 
 	case AF_INET:
 		conn->initiator_family = AF_INET;
 		rc = istgt_getaddr(sock, conn->target_addr,
-			sizeof conn->target_addr,
-			conn->initiator_addr, sizeof conn->initiator_addr, &conn->iaddr, &conn->iport);
+			sizeof (conn->target_addr),
+			conn->initiator_addr, sizeof (conn->initiator_addr), &conn->iaddr, &conn->iport);
 		if (rc < 0) {
 			ISTGT_ERRLOG("istgt_getaddr() failed\n");
 			goto error_return;
@@ -6375,7 +6375,7 @@ istgt_create_conn(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock, struct sockaddr 
 			ISTGT_ERRLOG("address family error\n");
 			goto error_return;
 		}
-		snprintf(buf, sizeof buf, "[%s]", conn->target_addr);
+		snprintf(buf, sizeof (buf), "[%s]", conn->target_addr);
 		xfree(conn->portal.host);
 		conn->portal.host = xstrdup(buf);
 	} else if (strcasecmp(conn->portal.host, "0.0.0.0") == 0
@@ -6384,15 +6384,15 @@ istgt_create_conn(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock, struct sockaddr 
 			ISTGT_ERRLOG("address family error\n");
 			goto error_return;
 		}
-		snprintf(buf, sizeof buf, "%s", conn->target_addr);
+		snprintf(buf, sizeof (buf), "%s", conn->target_addr);
 		xfree(conn->portal.host);
 		conn->portal.host = xstrdup(buf);
 	}
 
-	// memset(conn->initiator_name, 0, sizeof conn->initiator_name);
-	// memset(conn->target_name, 0, sizeof conn->target_name);
-	// memset(conn->initiator_port, 0, sizeof conn->initiator_port);
-	// memset(conn->target_port, 0, sizeof conn->target_port);
+	// memset(conn->initiator_name, 0, sizeof (conn->initiator_name));
+	// memset(conn->target_name, 0, sizeof (conn->target_name));
+	// memset(conn->initiator_port, 0, sizeof (conn->initiator_port));
+	// memset(conn->target_port, 0, sizeof (conn->target_port));
 
 	/* set timeout msec. */
 	rc = istgt_set_recvtimeout(conn->sock, conn->timeout * 1000);
@@ -6539,7 +6539,7 @@ istgt_create_conn(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock, struct sockaddr 
 		ISTGT_ERRLOG("pthread_create() failed\n");
 		goto error_return;
 	}
-	snprintf(conn->thr, sizeof conn->thr, "c#%d.%ld.%d", conn->id, (uint64_t)(((uint64_t *)(conn->thread))[0]), ntohs(conn->iport));
+	snprintf(conn->thr, sizeof (conn->thr), "c#%d.%ld.%d", conn->id, (uint64_t)(((uint64_t *)(conn->thread))[0]), ntohs(conn->iport));
 	rc = pthread_detach(conn->thread);
 	if (rc != 0) {
 		ISTGT_ERRLOG("pthread_detach() failed\n");
@@ -6554,8 +6554,8 @@ istgt_create_sess(ISTGT_Ptr istgt, CONN_Ptr conn, ISTGT_LU_Ptr lu)
 	SESS_Ptr sess;
 	int rc;
 
-	sess = xmalloc(sizeof *sess);
-	memset(sess, 0, sizeof *sess);
+	sess = xmalloc(sizeof (*sess));
+	memset(sess, 0, sizeof (*sess));
 
 	/* configuration values */
 	MTX_LOCK(&istgt->mutex);
@@ -6620,8 +6620,8 @@ istgt_create_sess(ISTGT_Ptr istgt, CONN_Ptr conn, ISTGT_LU_Ptr lu)
 	sess->tag = conn->portal.tag;
 
 	sess->max_conns = sess->MaxConnections;
-	sess->conns = xmalloc(sizeof *sess->conns * sess->max_conns);
-	memset(sess->conns, 0, sizeof *sess->conns * sess->max_conns);
+	sess->conns = xmalloc(sizeof (*sess->conns * sess->max_conns));
+	memset(sess->conns, 0, sizeof (*sess->conns * sess->max_conns));
 	sess->connections = 0;
 
 	sess->conns[sess->connections] = conn;
@@ -7181,23 +7181,23 @@ static void ioctl_call(CONN_Ptr conn, enum iscsi_log log_type)
 
 		switch (log_type) {
 		case TYPE_LOGIN:
-				snprintf(info, sizeof info, "login");
+				snprintf(info, sizeof (info), "login");
 				break;
 		case TYPE_LOGOUT:
-				snprintf(info, sizeof info, "logout");
+				snprintf(info, sizeof (info), "logout");
 				break;
 		case TYPE_CONNBRK:
-				snprintf(info, sizeof info, "logout_connbrk");
+				snprintf(info, sizeof (info), "logout_connbrk");
 				break;
 	default:
-				snprintf(info, sizeof info, "invalid");
+				snprintf(info, sizeof (info), "invalid");
 				break;
 		}
 
 	// Send ioctl to kernel for logging purpose
 		fd = open(ISCSI_SOCKET, O_WRONLY);
 		if (fd == -1) {
-				snprintf(ebuf, sizeof ebuf,
+				snprintf(ebuf, sizeof (ebuf),
 						"fd opening failed: %s %s %s %s %s %s %s %s %s errno= %d",
 						info, "Initiator IP:",
 						conn->initiator_addr, "Name:", conn->initiator_name, "Target IP:",
@@ -7208,7 +7208,7 @@ static void ioctl_call(CONN_Ptr conn, enum iscsi_log log_type)
 
 	idetail = (struct istgt_detail *)malloc(sizeof (*idetail));
 		if (idetail == (struct istgt_detail *)NULL) {
-				snprintf(ebuf, sizeof ebuf,
+				snprintf(ebuf, sizeof (ebuf),
 						"out of memory: %s %s %s %s %s %s %s %s %s errno= %d",
 						info, "Initiator IP:",
 						conn->initiator_addr, "Name:", conn->initiator_name, "Target IP:",
@@ -7223,7 +7223,7 @@ static void ioctl_call(CONN_Ptr conn, enum iscsi_log log_type)
 		strncpy(idetail->initiator_name, conn->initiator_name, 256);
 		strncpy(idetail->target_name, conn->target_name, 256);
 		if (ioctl(fd, DIO_ISCSIWR, idetail) == -1) {
-				snprintf(ebuf, sizeof ebuf,
+				snprintf(ebuf, sizeof (ebuf),
 						"ioctl failed: %s %s %s %s %s %s %s %s %s errno= %d",
 						info, "Initiator IP:",
 						conn->initiator_addr, "Name:", conn->initiator_name, "Target IP:",
@@ -7368,7 +7368,7 @@ istgt_iscsi_init(ISTGT_Ptr istgt)
 	g_max_connidx = -1;
 	g_nconns = MAX_LOGICAL_UNIT * istgt->MaxSessions * istgt->MaxConnections;
 	g_nconns += MAX_LOGICAL_UNIT * istgt->MaxConnections;
-	// g_conns = xmalloc(sizeof *g_conns * g_nconns);
+	// g_conns = xmalloc(sizeof (*g_conns * g_nconns));
 	allocsize = ((sizeof (CONN_Ptr *)) * (g_nconns + 100));
 	g_conns = xmalloc(allocsize);
 	bzero(g_conns, allocsize);
