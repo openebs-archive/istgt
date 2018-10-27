@@ -191,13 +191,13 @@ static uint8_t *
 istgt_make_digest_word(uint8_t *buf, size_t len, uint32_t crc32c)
 {
 	if (len < ISCSI_DIGEST_LEN)
-		return NULL;
+		return (NULL);
 
 	buf[0] = (crc32c >> 0) & 0xffU;
 	buf[1] = (crc32c >> 8) & 0xffU;
 	buf[2] = (crc32c >> 16) & 0xffU;
 	buf[3] = (crc32c >> 24) & 0xffU;
-	return buf;
+	return (buf);
 }
 #endif
 
@@ -246,17 +246,17 @@ istgt_iscsi_read_pdu(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 			ISTGT_ERRLOG("iscsi_read() failed (errno=%d,%s,time=%lu)\n",
 				errno, conn->initiator_name, (unsigned long)(now.tv_sec - pdu->start0.tv_sec));
 		}
-		return -1;
+		return (-1);
 	}
 	if (rc == 0) {
 		ISTGT_TRACELOG(ISTGT_TRACE_NET, "recv() EOF (%s)\n",
 			conn->initiator_name);
 		conn->state = CONN_STATE_EXITING;
-		return -1;
+		return (-1);
 	}
 	if (rc != ISCSI_BHS_LEN) {
 		ISTGT_ERRLOG("invalid BHS length (%d,%s)\n", rc, conn->initiator_name);
-		return -1;
+		return (-1);
 	}
 	total += ISCSI_BHS_LEN;
 
@@ -298,7 +298,7 @@ istgt_iscsi_read_pdu(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 		if (data_len > segment_len) {
 			ISTGT_ERRLOG("Data(%d) > Segment(%d)\n",
 				data_len, segment_len);
-			return -1;
+			return (-1);
 		}
 		// pdu->data = xmalloc(ISCSI_ALIGN(segment_len));
 		pdu->data_segment_len = data_len;
@@ -334,13 +334,13 @@ istgt_iscsi_read_pdu(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 			clock_gettime(clockid, &now); // time(NULL);
 			ISTGT_ERRLOG("readv() failed (%d,errno=%d,%s,time=%lu)\n",
 				rc, errno, conn->initiator_name, (unsigned long)(now.tv_sec - pdu->start.tv_sec));
-			return -1;
+			return (-1);
 		}
 		if (rc == 0) {
 			ISTGT_TRACELOG(ISTGT_TRACE_NET, "readv() EOF (%s)\n",
 				conn->initiator_name);
 			conn->state = CONN_STATE_EXITING;
-			return -1;
+			return (-1);
 		}
 		nbytes -= rc;
 		if (nbytes == 0)
@@ -379,7 +379,7 @@ istgt_iscsi_read_pdu(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 		rc = MATCH_DIGEST_WORD(pdu->header_digest, crc32c);
 		if (rc == 0) {
 			ISTGT_ERRLOG("header digest error (%s)\n", conn->initiator_name);
-			return -1;
+			return (-1);
 		}
 	}
 	if (conn->data_digest && data_len != 0) {
@@ -387,11 +387,11 @@ istgt_iscsi_read_pdu(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 		rc = MATCH_DIGEST_WORD(pdu->data_digest, crc32c);
 		if (rc == 0) {
 			ISTGT_ERRLOG("data digest error (%s)\n", conn->initiator_name);
-			return -1;
+			return (-1);
 		}
 	}
 
-	return total;
+	return (total);
 }
 
 static int istgt_iscsi_write_pdu_internal(CONN_Ptr conn, ISCSI_PDU_Ptr pdu);
@@ -415,12 +415,10 @@ static int istgt_update_pdu(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 	if ((opcode == ISCSI_OP_R2T)
 		|| (opcode == ISCSI_OP_NOPIN && task_tag == 0xffffffffU)) {
 
-		if (opcode == ISCSI_OP_R2T)
-		{
+		if (opcode == ISCSI_OP_R2T) {
 			spec = (ISTGT_LU_DISK *)(conn->sess->lu->lun[0].spec);
 			if (spec->error_inject & SEND_R2T)
-			if (spec->inject_cnt > 0)
-			{
+			if (spec->inject_cnt > 0) {
 				spec->inject_cnt--;
 				sleep_val = istgt_get_sleep_val(spec);
 				sleep(sleep_val);
@@ -435,12 +433,10 @@ static int istgt_update_pdu(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 	} else if ((opcode == ISCSI_OP_TASK_RSP)
 		|| (opcode == ISCSI_OP_NOPIN && task_tag != 0xffffffffU)) {
 
-		if (opcode == ISCSI_OP_TASK_RSP)
-		{
+		if (opcode == ISCSI_OP_TASK_RSP) {
 			spec = (ISTGT_LU_DISK *)(conn->sess->lu->lun[0].spec);
 			if (spec->error_inject & SEND_TASK_RSP)
-			if (spec->inject_cnt > 0)
-			{
+			if (spec->inject_cnt > 0) {
 				spec->inject_cnt--;
 				sleep_val = istgt_get_sleep_val(spec);
 				sleep(sleep_val);
@@ -468,19 +464,19 @@ static int istgt_update_pdu(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 		DSET32(&rsp[32], conn->sess->MaxCmdSN);
 		SESS_MTX_UNLOCK(conn);
 	}
-	return 0;
+	return (0);
 }
 
 static int
 istgt_iscsi_write_pdu(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 {
-	return istgt_iscsi_write_pdu_queue(conn, pdu, ISTGT_LU_TASK_REQPDU, 0);
+	return (istgt_iscsi_write_pdu_queue(conn, pdu, ISTGT_LU_TASK_REQPDU, 0));
 }
 
 static int
 istgt_iscsi_write_pdu_upd(CONN_Ptr conn, ISCSI_PDU_Ptr pdu, int I_bit)
 {
-	return istgt_iscsi_write_pdu_queue(conn, pdu, ISTGT_LU_TASK_REQUPDPDU, I_bit);
+	return (istgt_iscsi_write_pdu_queue(conn, pdu, ISTGT_LU_TASK_REQUPDPDU, I_bit));
 }
 
 static int
@@ -576,7 +572,7 @@ istgt_iscsi_write_pdu_queue(CONN_Ptr conn, ISCSI_PDU_Ptr pdu, int req_type, int 
 	if (r_ptr == NULL) {
 		MTX_UNLOCK(&conn->result_queue_mutex);
 		ISTGT_ERRLOG("queue_enqueue() failed\n");
-		return -1;
+		return (-1);
 	}
 	/* notify to thread */
 	if (conn->sender_waiting == 1)
@@ -584,12 +580,12 @@ istgt_iscsi_write_pdu_queue(CONN_Ptr conn, ISCSI_PDU_Ptr pdu, int req_type, int 
 	MTX_UNLOCK(&conn->result_queue_mutex);
 	if (rc != 0) {
 		ISTGT_ERRLOG("cond_broadcast() failed\n");
-		return -1;
+		return (-1);
 	}
 
 	/* total bytes should be sent in queue */
 	rc = total;
-	return rc;
+	return (rc);
 }
 
 static int
@@ -686,7 +682,7 @@ istgt_iscsi_write_pdu_internal(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 			now = time(NULL);
 			ISTGT_ERRLOG("writev() failed (errno=%d,%s,time=%f)\n",
 				errno, conn->initiator_name, difftime(now, start));
-			return -1;
+			return (-1);
 		}
 		nbytes -= rc;
 		if (nbytes == 0)
@@ -705,7 +701,7 @@ istgt_iscsi_write_pdu_internal(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 		}
 	}
 
-	return total;
+	return (total);
 }
 
 static inline void
@@ -735,48 +731,14 @@ typedef struct iscsi_param_table_t
 } ISCSI_PARAM_TABLE;
 
 static ISCSI_PARAM_TABLE conn_param_table[] =
-{
-	{ "HeaderDigest", "None", "CRC32C,None", ISPT_LIST },
-	{ "DataDigest", "None", "CRC32C,None", ISPT_LIST },
-	{ "MaxRecvDataSegmentLength", "8192", "512,16777215", ISPT_NUMERICAL },
-	{ "OFMarker", "No", "Yes,No", ISPT_BOOLEAN_AND },
-	{ "IFMarker", "No", "Yes,No", ISPT_BOOLEAN_AND },
-	{ "OFMarkInt", "1", "1,65535", ISPT_NUMERICAL },
-	{ "IFMarkInt", "1", "1,65535", ISPT_NUMERICAL },
-	{ "AuthMethod", "None", "CHAP,None", ISPT_LIST },
-	{ "CHAP_A", "5", "5", ISPT_LIST },
-	{ "CHAP_N", "", "", ISPT_DECLARATIVE },
-	{ "CHAP_R", "", "", ISPT_DECLARATIVE },
-	{ "CHAP_I", "", "", ISPT_DECLARATIVE },
-	{ "CHAP_C", "", "", ISPT_DECLARATIVE },
-	{ NULL, NULL, NULL, ISPT_INVALID },
+{ { "HeaderDigest", "None", "CRC32C,None", ISPT_LIST }, { "DataDigest", "None", "CRC32C,None", ISPT_LIST }, { "MaxRecvDataSegmentLength", "8192", "512,16777215", ISPT_NUMERICAL }, { "OFMarker", "No", "Yes,No", ISPT_BOOLEAN_AND }, { "IFMarker", "No", "Yes,No", ISPT_BOOLEAN_AND }, { "OFMarkInt", "1", "1,65535", ISPT_NUMERICAL }, { "IFMarkInt", "1", "1,65535", ISPT_NUMERICAL }, { "AuthMethod", "None", "CHAP,None", ISPT_LIST }, { "CHAP_A", "5", "5", ISPT_LIST }, { "CHAP_N", "", "", ISPT_DECLARATIVE }, { "CHAP_R", "", "", ISPT_DECLARATIVE }, { "CHAP_I", "", "", ISPT_DECLARATIVE }, { "CHAP_C", "", "", ISPT_DECLARATIVE }, { NULL, NULL, NULL, ISPT_INVALID },
 };
 
 static ISCSI_PARAM_TABLE sess_param_table[] =
-{
-	{ "MaxConnections", "1", "1,65535", ISPT_NUMERICAL },
+{ { "MaxConnections", "1", "1,65535", ISPT_NUMERICAL },
 #if 0
-	/* need special handling */
-	{ "SendTargets", "", "", ISPT_DECLARATIVE },
-#endif
-	{ "TargetName", "", "", ISPT_DECLARATIVE },
-	{ "InitiatorName", "", "", ISPT_DECLARATIVE },
-	{ "TargetAlias", "", "", ISPT_DECLARATIVE },
-	{ "InitiatorAlias", "", "", ISPT_DECLARATIVE },
-	{ "TargetAddress", "", "", ISPT_DECLARATIVE },
-	{ "TargetPortalGroupTag", "1", "1,65535", ISPT_NUMERICAL },
-	{ "InitialR2T", "Yes", "Yes,No", ISPT_BOOLEAN_OR },
-	{ "ImmediateData", "Yes", "Yes,No", ISPT_BOOLEAN_AND },
-	{ "MaxBurstLength", "262144", "512,16777215", ISPT_NUMERICAL },
-	{ "FirstBurstLength", "65536", "512,16777215", ISPT_NUMERICAL },
-	{ "DefaultTime2Wait", "2", "0,3600", ISPT_NUMERICAL_MAX },
-	{ "DefaultTime2Retain", "20", "0,3600", ISPT_NUMERICAL },
-	{ "MaxOutstandingR2T", "1", "1,65536", ISPT_NUMERICAL },
-	{ "DataPDUInOrder", "Yes", "Yes,No", ISPT_BOOLEAN_OR },
-	{ "DataSequenceInOrder", "Yes", "Yes,No", ISPT_BOOLEAN_OR },
-	{ "ErrorRecoveryLevel", "0", "0,2", ISPT_NUMERICAL },
-	{ "SessionType", "Normal", "Normal,Discovery", ISPT_DECLARATIVE },
-	{ NULL, NULL, NULL, ISPT_INVALID },
+	/* need special handling */ { "SendTargets", "", "", ISPT_DECLARATIVE },
+#endif { "TargetName", "", "", ISPT_DECLARATIVE }, { "InitiatorName", "", "", ISPT_DECLARATIVE }, { "TargetAlias", "", "", ISPT_DECLARATIVE }, { "InitiatorAlias", "", "", ISPT_DECLARATIVE }, { "TargetAddress", "", "", ISPT_DECLARATIVE }, { "TargetPortalGroupTag", "1", "1,65535", ISPT_NUMERICAL }, { "InitialR2T", "Yes", "Yes,No", ISPT_BOOLEAN_OR }, { "ImmediateData", "Yes", "Yes,No", ISPT_BOOLEAN_AND }, { "MaxBurstLength", "262144", "512,16777215", ISPT_NUMERICAL }, { "FirstBurstLength", "65536", "512,16777215", ISPT_NUMERICAL }, { "DefaultTime2Wait", "2", "0,3600", ISPT_NUMERICAL_MAX }, { "DefaultTime2Retain", "20", "0,3600", ISPT_NUMERICAL }, { "MaxOutstandingR2T", "1", "1,65536", ISPT_NUMERICAL }, { "DataPDUInOrder", "Yes", "Yes,No", ISPT_BOOLEAN_OR }, { "DataSequenceInOrder", "Yes", "Yes,No", ISPT_BOOLEAN_OR }, { "ErrorRecoveryLevel", "0", "0,2", ISPT_NUMERICAL }, { "SessionType", "Normal", "Normal,Discovery", ISPT_DECLARATIVE }, { NULL, NULL, NULL, ISPT_INVALID },
 };
 
 static int
@@ -790,23 +752,23 @@ istgt_iscsi_params_init_internal(ISCSI_PARAM **params, ISCSI_PARAM_TABLE *table)
 			table[i].list, table[i].type);
 		if (rc < 0) {
 			ISTGT_ERRLOG("iscsi_param_add() failed\n");
-			return -1;
+			return (-1);
 		}
 	}
 
-	return 0;
+	return (0);
 }
 
 static int
 istgt_iscsi_conn_params_init(ISCSI_PARAM **params)
 {
-	return istgt_iscsi_params_init_internal(params, &conn_param_table[0]);
+	return (istgt_iscsi_params_init_internal(params, &conn_param_table[0]));
 }
 
 static int
 istgt_iscsi_sess_params_init(ISCSI_PARAM **params)
 {
-	return istgt_iscsi_params_init_internal(params, &sess_param_table[0]);
+	return (istgt_iscsi_params_init_internal(params, &sess_param_table[0]));
 }
 
 static char *
@@ -816,8 +778,8 @@ istgt_iscsi_param_get_val(ISCSI_PARAM *params, const char *key)
 
 	param = istgt_iscsi_param_find(params, key);
 	if (param == NULL)
-		return NULL;
-	return param->val;
+		return (NULL);
+	return (param->val);
 }
 
 static int
@@ -827,10 +789,10 @@ istgt_iscsi_param_eq_val(ISCSI_PARAM *params, const char *key, const char *val)
 
 	param = istgt_iscsi_param_find(params, key);
 	if (param == NULL)
-		return 0;
+		return (0);
 	if (strcasecmp(param->val, val) == 0)
-		return 1;
-	return 0;
+		return (1);
+	return (0);
 }
 
 #if 0
@@ -843,7 +805,7 @@ istgt_iscsi_print_params(ISCSI_PARAM *params)
 		printf("key=[%s] val=[%s] list=[%s] type=%d\n",
 			param->key, param->val, param->list, param->type);
 	}
-	return 0;
+	return (0);
 }
 #endif
 
@@ -868,17 +830,17 @@ istgt_iscsi_negotiate_params(CONN_Ptr conn, ISCSI_PARAM *params, uint8_t *data, 
 
 	total = data_len;
 	if (alloc_len < 1) {
-		return 0;
+		return (0);
 	}
 	if (total > alloc_len) {
 		total = alloc_len;
 		data[total - 1] = '\0';
-		return total;
+		return (total);
 	}
 
 	if (params == NULL) {
 		/* no input */
-		return total;
+		return (total);
 	}
 
 	/* discovery? */
@@ -1141,7 +1103,7 @@ istgt_iscsi_negotiate_params(CONN_Ptr conn, ISCSI_PARAM *params, uint8_t *data, 
 				xfree(valid_list);
 				xfree(in_val);
 				xfree(cur_val);
-				return total;
+				return (total);
 			}
 			ISTGT_TRACELOG(ISTGT_TRACE_ISCSI, "negotiated %s=%s\n",
 				param->key, new_val);
@@ -1156,7 +1118,7 @@ istgt_iscsi_negotiate_params(CONN_Ptr conn, ISCSI_PARAM *params, uint8_t *data, 
 	xfree(in_val);
 	xfree(cur_val);
 
-	return total;
+	return (total);
 }
 
 static int
@@ -1167,23 +1129,23 @@ istgt_iscsi_append_text(CONN_Ptr conn __attribute__((__unused__)), const char *k
 
 	total = data_len;
 	if (alloc_len < 1) {
-		return 0;
+		return (0);
 	}
 	if (total > alloc_len) {
 		total = alloc_len;
 		data[total - 1] = '\0';
-		return total;
+		return (total);
 	}
 
 	if (alloc_len - total < 1) {
 		ISTGT_ERRLOG("data space small %d\n", alloc_len);
-		return total;
+		return (total);
 	}
 	len = snprintf((char *) data + total, alloc_len - total, "%s=%s",
 		key, val);
 	total += len + 1;
 
-	return total;
+	return (total);
 }
 
 static int
@@ -1198,12 +1160,12 @@ istgt_iscsi_append_param(CONN_Ptr conn, const char *key, uint8_t *data, int allo
 		if (param == NULL) {
 			ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "no key %.64s\n",
 				key);
-			return data_len;
+			return (data_len);
 		}
 	}
 	rc = istgt_iscsi_append_text(conn, param->key, param->val, data,
 		alloc_len, data_len);
-	return rc;
+	return (rc);
 }
 
 int
@@ -1232,7 +1194,7 @@ istgt_chap_get_authinfo(ISTGT_CHAP_AUTH *auth, const char *authfile, const char 
 	if (rc < 0) {
 		ISTGT_ERRLOG("auth conf error\n");
 		istgt_free_config(config);
-		return -1;
+		return (-1);
 	}
 	// istgt_print_config(config);
 
@@ -1242,7 +1204,7 @@ istgt_chap_get_authinfo(ISTGT_CHAP_AUTH *auth, const char *authfile, const char 
 			if (sp->num == 0) {
 				ISTGT_ERRLOG("Group 0 is invalid\n");
 				istgt_free_config(config);
-				return -1;
+				return (-1);
 			}
 			if (ag_tag != sp->num) {
 				goto skip_ag_tag;
@@ -1264,7 +1226,7 @@ istgt_chap_get_authinfo(ISTGT_CHAP_AUTH *auth, const char *authfile, const char 
 				if (!user || !secret || !muser || !msecret) {
 					ISTGT_ERRLOG("Invalid argument\n");
 					istgt_free_config(config);
-					return -1;
+					return (-1);
 				}
 				if (strcasecmp(authuser, user) == 0) {
 					/* match user */
@@ -1273,7 +1235,7 @@ istgt_chap_get_authinfo(ISTGT_CHAP_AUTH *auth, const char *authfile, const char 
 					auth->muser = xstrdup(muser);
 					auth->msecret = xstrdup(msecret);
 					istgt_free_config(config);
-					return 0;
+					return (0);
 				}
 			}
 		}
@@ -1282,7 +1244,7 @@ istgt_chap_get_authinfo(ISTGT_CHAP_AUTH *auth, const char *authfile, const char 
 	}
 
 	istgt_free_config(config);
-	return 0;
+	return (0);
 }
 
 static int
@@ -1314,10 +1276,10 @@ istgt_iscsi_get_authinfo(CONN_Ptr conn, const char *authuser)
 	if (rc < 0) {
 		ISTGT_ERRLOG("chap_get_authinfo() failed\n");
 		xfree(authfile);
-		return -1;
+		return (-1);
 	}
 	xfree(authfile);
-	return 0;
+	return (0);
 }
 
 static int
@@ -1334,23 +1296,23 @@ istgt_iscsi_auth_params(CONN_Ptr conn, ISCSI_PARAM *params, const char *method, 
 	int rc;
 
 	if (conn == NULL || params == NULL || method == NULL) {
-		return -1;
+		return (-1);
 	}
 	if (strcasecmp(method, "CHAP") == 0) {
 		/* method OK */
 	} else {
 		ISTGT_ERRLOG("unsupported AuthMethod %.64s\n", method);
-		return -1;
+		return (-1);
 	}
 
 	total = data_len;
 	if (alloc_len < 1) {
-		return 0;
+		return (0);
 	}
 	if (total > alloc_len) {
 		total = alloc_len;
 		data[total - 1] = '\0';
-		return total;
+		return (total);
 	}
 
 	/* for temporary store */
@@ -1535,12 +1497,12 @@ istgt_iscsi_auth_params(CONN_Ptr conn, ISCSI_PARAM *params, const char *method, 
 	}
 
 	xfree(in_val);
-	return total;
+	return (total);
 
 error_return:
 	conn->auth.chap_phase = ISTGT_CHAP_PHASE_WAIT_A;
 	xfree(in_val);
-	return -1;
+	return (-1);
 }
 
 static int
@@ -1624,10 +1586,10 @@ istgt_iscsi_reject(CONN_Ptr conn, ISCSI_PDU_Ptr pdu, int reason)
 	rc = istgt_iscsi_write_pdu(conn, &rsp_pdu);
 	if (rc < 0) {
 		ISTGT_ERRLOG("iscsi_write_pdu() failed\n");
-		return -1;
+		return (-1);
 	}
 
-	return 0;
+	return (0);
 }
 
 static void
@@ -1713,40 +1675,40 @@ istgt_iscsi_check_values(CONN_Ptr conn)
 			conn->sess->FirstBurstLength,
 			conn->sess->MaxBurstLength);
 		SESS_MTX_UNLOCK(conn);
-		return -1;
+		return (-1);
 	}
 	if (conn->sess->MaxBurstLength > 0x00ffffff) {
 		ISTGT_ERRLOG("MaxBurstLength(%d) > 0x00ffffff\n",
 			conn->sess->MaxBurstLength);
 		SESS_MTX_UNLOCK(conn);
-		return -1;
+		return (-1);
 	}
 	if (conn->TargetMaxRecvDataSegmentLength < 512) {
 		ISTGT_ERRLOG("MaxRecvDataSegmentLength(%d) < 512\n",
 			conn->TargetMaxRecvDataSegmentLength);
 		SESS_MTX_UNLOCK(conn);
-		return -1;
+		return (-1);
 	}
 	if (conn->TargetMaxRecvDataSegmentLength > 0x00ffffff) {
 		ISTGT_ERRLOG("MaxRecvDataSegmentLength(%d) > 0x00ffffff\n",
 			conn->TargetMaxRecvDataSegmentLength);
 		SESS_MTX_UNLOCK(conn);
-		return -1;
+		return (-1);
 	}
 	if (conn->MaxRecvDataSegmentLength < 512) {
 		ISTGT_ERRLOG("MaxRecvDataSegmentLength(%d) < 512\n",
 			conn->MaxRecvDataSegmentLength);
 		SESS_MTX_UNLOCK(conn);
-		return -1;
+		return (-1);
 	}
 	if (conn->MaxRecvDataSegmentLength > 0x00ffffff) {
 		ISTGT_ERRLOG("MaxRecvDataSegmentLength(%d) > 0x00ffffff\n",
 			conn->MaxRecvDataSegmentLength);
 		SESS_MTX_UNLOCK(conn);
-		return -1;
+		return (-1);
 	}
 	SESS_MTX_UNLOCK(conn);
-	return 0;
+	return (0);
 }
 
 static int
@@ -1827,7 +1789,7 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 	if (T_bit && C_bit) {
 		ISTGT_ERRLOG("transit error\n");
 		xfree(data);
-		return -1;
+		return (-1);
 	}
 	if (VersionMin > ISCSI_VERSION || VersionMax < ISCSI_VERSION) {
 		ISTGT_ERRLOG("unsupported version %d/%d\n", VersionMin, VersionMax);
@@ -1844,7 +1806,7 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 	error_return:
 		istgt_iscsi_param_free(params);
 		xfree(data);
-		return -1;
+		return (-1);
 	}
 
 	/* set port identifiers and parameters */
@@ -2456,7 +2418,7 @@ response:
 	if (rc < 0) {
 		ISTGT_ERRLOG("iscsi_write_pdu() failed\n");
 		istgt_iscsi_param_free(params);
-		return -1;
+		return (-1);
 	}
 
 	/* after send PDU digest on/off */
@@ -2470,12 +2432,12 @@ response:
 			istgt_iscsi_param_free(params);
 			if (data != NULL)
 				xfree(data);
-			return -1;
+			return (-1);
 		}
 	}
 
 	istgt_iscsi_param_free(params);
-	return 0;
+	return (0);
 }
 
 static int
@@ -2502,7 +2464,7 @@ istgt_iscsi_op_text(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 	int  step = 0;
 	if (!conn->full_feature) {
 		ISTGT_ERRLOG("before Full Feature\n");
-		return -1;
+		return (-1);
 	}
 
 	data_len = 0;
@@ -2534,7 +2496,7 @@ istgt_iscsi_op_text(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 				CmdSN, sExpCmdSN, sMaxCmdSN,
 				I_bit, F_bit, C_bit, task_tag, transfer_tag, ExpStatSN, cStatSN);
 			xfree(data);
-			return -1;
+			return (-1);
 		}
 	} else if (CmdSN != conn->sess->ExpCmdSN) {
 		SESS_MTX_UNLOCK(conn);
@@ -2542,7 +2504,7 @@ istgt_iscsi_op_text(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 			CmdSN, sExpCmdSN, sMaxCmdSN,
 			I_bit, F_bit, C_bit, task_tag, transfer_tag, ExpStatSN, cStatSN);
 		xfree(data);
-		return -1;
+		return (-1);
 	}
 	if (SN32_GT(ExpStatSN, conn->StatSN)) {
 		step = 1;
@@ -2575,7 +2537,7 @@ istgt_iscsi_op_text(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 			ISTGT_ERRLOG("CSN=%x final and continue\n", CmdSN);
 		}
 		xfree(data);
-		return -1;
+		return (-1);
 	}
 
 	if (step == 0) {
@@ -2593,7 +2555,7 @@ istgt_iscsi_op_text(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 		ISTGT_ERRLOG("iscsi_parse_params() failed\n");
 		istgt_iscsi_param_free(params);
 		xfree(data);
-		return -1;
+		return (-1);
 	}
 
 	/* negotiate parameters */
@@ -2678,7 +2640,7 @@ istgt_iscsi_op_text(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 	if (rc < 0) {
 		ISTGT_ERRLOG("iscsi_write_pdu() failed\n");
 		istgt_iscsi_param_free(params);
-		return -1;
+		return (-1);
 	}
 
 	/* update internal variables */
@@ -2688,11 +2650,11 @@ istgt_iscsi_op_text(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 	if (rc < 0) {
 		ISTGT_ERRLOG("iscsi_check_values() failed\n");
 		istgt_iscsi_param_free(params);
-		return -1;
+		return (-1);
 	}
 
 	istgt_iscsi_param_free(params);
-	return 0;
+	return (0);
 }
 
 static int
@@ -2799,7 +2761,7 @@ istgt_iscsi_op_logout(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 	rc = istgt_iscsi_write_pdu(conn, &rsp_pdu);
 	if (rc < 0) {
 		ISTGT_ERRLOG("iscsi_write_pdu() failed\n");
-		return -1;
+		return (-1);
 	}
 
 	SESS_MTX_LOCK(conn);
@@ -2835,7 +2797,7 @@ istgt_iscsi_op_logout(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 	ISTGT_NOTICELOG("%s", buf);
 
 	conn->exec_logout = 1;
-	return 0;
+	return (0);
 }
 
 static int istgt_iscsi_transfer_in_internal(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd);
@@ -2848,7 +2810,7 @@ istgt_iscsi_transfer_in(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 	// MTX_LOCK(&conn->wpdu_mutex);
 	rc = istgt_iscsi_transfer_in_internal(conn, lu_cmd);
 	// MTX_UNLOCK(&conn->wpdu_mutex);
-	return rc;
+	return (rc);
 }
 
 static int
@@ -2902,7 +2864,7 @@ istgt_iscsi_transfer_in_internal(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 		len = DMIN32(segment_len, (transfer_len - offset));
 		if (offset + len > transfer_len) {
 			ISTGT_ERRLOG("transfer missing\n");
-			return -1;
+			return (-1);
 		} else if (offset + len == transfer_len) {
 			/* final PDU */
 			F_bit = 1;
@@ -2991,14 +2953,14 @@ istgt_iscsi_transfer_in_internal(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 		rc = istgt_iscsi_write_pdu_internal(conn, &rsp_pdu);
 		if (rc < 0) {
 			ISTGT_ERRLOG("iscsi_write_pdu() failed\n");
-			return -1;
+			return (-1);
 		}
 	}
 
 	if (sent_status) {
-		return 1;
+		return (1);
 	}
-	return 0;
+	return (0);
 }
 
 static void
@@ -3387,7 +3349,7 @@ istgt_iscsi_op_scsi(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 	const char *msg = "", *que = "";
 	if (!conn->full_feature) {
 		ISTGT_ERRLOG("before Full Feature\n");
-		return -1;
+		return (-1);
 	}
 
 	data_len = 0;
@@ -3522,7 +3484,7 @@ istgt_iscsi_op_scsi(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 						"(time=%f)\n",
 						CmdSN, s_ExpCmdSN,
 						difftime(now, start));
-					return -1;
+					return (-1);
 				}
 #if 0
 				ISTGT_WARNLOG("MCS: reverse CmdSN=%u(retry=%d, yields=%d)\n",
@@ -3537,7 +3499,7 @@ istgt_iscsi_op_scsi(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 			|| SN32_GT(CmdSN, s_MaxCmdSN)) {
 			ISTGT_ERRLOG("CmdSN(%u) ignore (ExpCmdSN=%u, MaxCmdSN=%u)\n",
 				CmdSN, s_ExpCmdSN, s_MaxCmdSN);
-			return -1;
+			return (-1);
 		}
 		if (SN32_GT(CmdSN, s_ExpCmdSN)) {
 			ISTGT_WARNLOG("CmdSN(%u) > ExpCmdSN(%u)\n",
@@ -3546,7 +3508,7 @@ istgt_iscsi_op_scsi(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 	} else if (CmdSN != s_ExpCmdSN) {
 		ISTGT_ERRLOG("CmdSN(%u) error ExpCmdSN=%u\n",
 			CmdSN, s_ExpCmdSN);
-		return -1;
+		return (-1);
 	}
 	if (SN32_GT(ExpStatSN, c_StatSN)) {
 		ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "StatSN(%u) advanced\n",
@@ -3570,7 +3532,7 @@ istgt_iscsi_op_scsi(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 		SESS_MTX_UNLOCK(conn);
 		ISTGT_ERRLOG("StatSN(%u/%u) QCmdSN(%u) error\n",
 			ExpStatSN, c_StatSN, QCmdSN);
-		return -1;
+		return (-1);
 	}
 
 	lu_cmd.pdu = pdu;
@@ -3583,7 +3545,7 @@ istgt_iscsi_op_scsi(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 			if (rc != 0) {
 				SESS_MTX_UNLOCK(conn);
 				ISTGT_ERRLOG("cond_broadcast() failed\n");
-				return -1;
+				return (-1);
 			}
 		}
 	}
@@ -3591,11 +3553,11 @@ istgt_iscsi_op_scsi(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 
 	if (R_bit != 0 && W_bit != 0) {
 		ISTGT_ERRLOG("Bidirectional CDB is not supported\n");
-		return -1;
+		return (-1);
 	}
 	if (lu == NULL) {
 		ISTGT_ERRLOG("lu not found\n");
-		return -1;
+		return (-1);
 	}
 
 	istgt_state = istgt_get_state(lu->istgt);
@@ -3626,7 +3588,7 @@ istgt_iscsi_op_scsi(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 				rc = istgt_add_transfer_task(conn, &lu_cmd);
 				if (rc < 0) {
 					ISTGT_ERRLOG("add_transfer_task() failed\n");
-					return -1;
+					return (-1);
 				}
 			}
 		}
@@ -3635,11 +3597,11 @@ istgt_iscsi_op_scsi(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 		rc = istgt_lu_disk_queue(conn, &lu_cmd);
 		if (rc < 0) {
 			ISTGT_ERRLOG("LU%d: lu_disk_queue() failed\n", lu->num);
-			return -1;
+			return (-1);
 		}
 		switch (rc) {
 			case ISTGT_LU_TASK_RESULT_QUEUE_OK:
-				return 0;
+				return (0);
 			case ISTGT_LU_TASK_RESULT_QUEUE_FULL:
 				que =  "QueueFull ";
 				ISTGT_WARNLOG("Queue Full\n");
@@ -3650,7 +3612,7 @@ istgt_iscsi_op_scsi(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 				break;
 			default:
 				ISTGT_ERRLOG("lu_disk_queue unknown rc=%d\n", rc);
-				return -1;
+				return (-1);
 		}
 	}
 
@@ -3662,11 +3624,11 @@ istgt_iscsi_op_scsi(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 		rc = istgt_iscsi_transfer_in(conn, &lu_cmd);
 		if (rc < 0) {
 			ISTGT_ERRLOG("iscsi_transfer_in() failed\n");
-			return -1;
+			return (-1);
 		}
 		if (rc > 0) {
 			/* sent status by last DATAIN PDU */
-			return 0;
+			return (0);
 		}
 	}
 
@@ -3743,7 +3705,7 @@ istgt_iscsi_op_scsi(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 			xfree(lu_cmd.sense_data);
 		if (lu_cmd.data != NULL)
 			xfree(lu_cmd.data);
-		return -1;
+		return (-1);
 	}
 
 	ISTGT_TRACELOG(ISTGT_TRACE_ISCSI,
@@ -3756,7 +3718,7 @@ istgt_iscsi_op_scsi(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 		xfree(lu_cmd.sense_data);
 	if (lu_cmd.data != NULL)
 		xfree(lu_cmd.data);
-	return 0;
+	return (0);
 }
 
 static int
@@ -3802,11 +3764,11 @@ istgt_iscsi_task_response(CONN_Ptr conn, ISTGT_LU_TASK_Ptr lu_task)
 		}
 		if (rc < 0) {
 			ISTGT_ERRLOG("iscsi_transfer_in() failed\n");
-			return -1;
+			return (-1);
 		}
 		if (rc > 0) {
 			/* sent status by last DATAIN PDU */
-			return 0;
+			return (0);
 		}
 	}
 
@@ -3883,13 +3845,13 @@ istgt_iscsi_task_response(CONN_Ptr conn, ISTGT_LU_TASK_Ptr lu_task)
 	}
 	if (rc < 0) {
 		ISTGT_ERRLOG("iscsi_write_pdu() failed\n");
-		return -1;
+		return (-1);
 	}
 	if (msg) {
 		ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "SCSI response CSN=%x done, status:%x  %s %zu/%u\n",
 				CmdSN, lstat, msg, data_len, transfer_len);
 	}
-	return 0;
+	return (0);
 }
 
 static int
@@ -3919,7 +3881,7 @@ istgt_iscsi_op_task(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 
 	if (!conn->full_feature) {
 		ISTGT_ERRLOG("before Full Feature\n");
-		return -1;
+		return (-1);
 	}
 	initport[0] = '\0';
 	initport[MAX_INITIATOR_NAME-2] = '\0';
@@ -4136,14 +4098,14 @@ istgt_iscsi_op_task(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 	rc = istgt_iscsi_write_pdu_upd(conn, &rsp_pdu, I_bit);
 	if (rc < 0) {
 		ISTGT_ERRLOG("iscsi_write_pdu() failed in iscsi_op_task\n");
-		return -1;
+		return (-1);
 	}
 	ISTGT_LOG("scsitask:%d:%s %s done. CSN=0x%x, ExpStatSN=0x%x, StatSN=0x%x/0x%x, ExpCmdSN=0x%x/0x%x, MaxCmdSN=0x%x (%s) "
 		"I=%d, ITT=0x%x, ref TT=0x%x, LUN=0x%16.16lx\n",
 		function, fname, initport, CmdSN, ExpStatSN, cStatSN, nStatSN, sExpCmdSN, nExpCmdSN,
 		conn->sess->MaxCmdSN, msg,
 		I_bit, task_tag, ref_task_tag, lun);
-	return 0;
+	return (0);
 }
 
 static int
@@ -4165,7 +4127,7 @@ istgt_iscsi_op_nopout(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 	uint32_t s_ExpCmdSN, s_MaxCmdSN, lc_StatSN = 0;
 	if (!conn->full_feature) {
 		ISTGT_ERRLOG("before Full Feature\n");
-		return -1;
+		return (-1);
 	}
 
 	data_len = 0;
@@ -4194,7 +4156,7 @@ istgt_iscsi_op_nopout(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 					"I=%d, ITT=%x, TTT=%x\n",
 					CmdSN, ExpStatSN, conn->StatSN, s_ExpCmdSN,
 					s_MaxCmdSN, I_bit, task_tag, transfer_tag);
-			return -1;
+			return (-1);
 		}
 	} else if (CmdSN != s_ExpCmdSN) {
 		ISTGT_ERRLOG("CmdSN != ExpCmdSN "
@@ -4202,7 +4164,7 @@ istgt_iscsi_op_nopout(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 					"I=%d, ITT=%x, TTT=%x\n",
 					CmdSN, ExpStatSN, conn->StatSN, s_ExpCmdSN,
 					s_MaxCmdSN, I_bit, task_tag, transfer_tag);
-		return -1;
+		return (-1);
 	}
 	if (SN32_GT(ExpStatSN, conn->StatSN)) {
 		ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "StatSN(%x->%x) advanced "
@@ -4222,17 +4184,17 @@ istgt_iscsi_op_nopout(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 				ExpStatSN, lc_StatSN, QCmdSN,
 				CmdSN, ExpStatSN, conn->StatSN, s_ExpCmdSN,
 				s_MaxCmdSN, I_bit, task_tag, transfer_tag);
-		return -1;
+		return (-1);
 	}
 
 	if (task_tag == 0xffffffffU) {
 		if (I_bit == 1) {
 			ISTGT_TRACELOG(ISTGT_TRACE_DEBUG,
 				"got NOPOUT ITT=0xffffffff\n");
-			return 0;
+			return (0);
 		} else {
 			ISTGT_ERRLOG("got NOPOUT ITT=0xffffffff, I=0\n");
-			return -1;
+			return (-1);
 		}
 	}
 
@@ -4269,10 +4231,10 @@ istgt_iscsi_op_nopout(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 	rc = istgt_iscsi_write_pdu_upd(conn, &rsp_pdu, I_bit);
 	if (rc < 0) {
 		ISTGT_ERRLOG("iscsi_write_pdu() failed\n");
-		return -1;
+		return (-1);
 	}
 
-	return 0;
+	return (0);
 }
 
 
@@ -4300,7 +4262,7 @@ istgt_get_transfer_task(CONN_Ptr conn, uint32_t transfer_tag)
 	MTX_LOCK(&conn->r2t_mutex);
 	if (conn->pending_r2t == 0) {
 		MTX_UNLOCK(&conn->r2t_mutex);
-		return NULL;
+		return (NULL);
 	}
 	for (i = 0; i < conn->pending_r2t; i++) {
 		r2t_task = conn->r2t_tasks[i];
@@ -4314,11 +4276,11 @@ istgt_get_transfer_task(CONN_Ptr conn, uint32_t transfer_tag)
 			ISTGT_TRACELOG(ISTGT_TRACE_DEBUG,
 				"Match index=%d, CmdSN=%d, TransferTag=%x\n",
 				i, r2t_task->CmdSN, r2t_task->transfer_tag);
-			return r2t_task;
+			return (r2t_task);
 		}
 	}
 	MTX_UNLOCK(&conn->r2t_mutex);
-	return NULL;
+	return (NULL);
 }
 
 static int
@@ -4341,7 +4303,7 @@ istgt_add_transfer_task(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 		// ISTGT_WARNLOG("No R2T space available (%d/%d)\n",
 		//	conn->pending_r2t, conn->max_r2t);
 		MTX_UNLOCK(&conn->r2t_mutex);
-		return 0;
+		return (0);
 	}
 	MTX_UNLOCK(&conn->r2t_mutex);
 
@@ -4391,10 +4353,10 @@ istgt_add_transfer_task(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 		timediff(lu_cmd, 'R', __LINE__);
 		if (rc < 0) {
 			ISTGT_ERRLOG("iscsi_send_r2t() failed\n");
-			return -1;
+			return (-1);
 		}
 	}
-	return 0;
+	return (0);
 }
 
 static void
@@ -4503,7 +4465,7 @@ istgt_iscsi_op_data(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 	int iondx;
 	if (!conn->full_feature) {
 		ISTGT_ERRLOG("before Full Feature\n");
-		return -1;
+		return (-1);
 	}
 	MTX_LOCK(&conn->r2t_mutex);
 	if (conn->pending_r2t == 0) {
@@ -4513,9 +4475,9 @@ istgt_iscsi_op_data(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 		rc = istgt_iscsi_reject(conn, pdu, 0x09);
 		if (rc < 0) {
 			ISTGT_ERRLOG("iscsi_reject() failed\n");
-			return -1;
+			return (-1);
 		}
-		return 0;
+		return (0);
 	}
 	MTX_UNLOCK(&conn->r2t_mutex);
 
@@ -4543,25 +4505,25 @@ istgt_iscsi_op_data(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 
 	if (DataSN != ExpDataSN) {
 		ISTGT_ERRLOG("DataSN(%x) error\n", DataSN);
-		return -1;
+		return (-1);
 	}
 	if (task_tag != current_task_tag) {
 		ISTGT_ERRLOG("task_tag(%x/%x) error\n",
 			task_tag, current_task_tag);
-		return -1;
+		return (-1);
 	}
 	if (transfer_tag != current_transfer_tag) {
 		ISTGT_ERRLOG("transfer_tag(%x/%x) error\n",
 			transfer_tag, current_transfer_tag);
-		return -1;
+		return (-1);
 	}
 	if (buffer_offset != offset) {
 		ISTGT_ERRLOG("offset(%u) error\n", buffer_offset);
-		return -1;
+		return (-1);
 	}
 	// if (buffer_offset + data_len > alloc_len) {
 	// 	ISTGT_ERRLOG("offset error\n");
-	// 	return -1;
+	// 	return (-1);
 	// }
 
 	ISTGT_TRACELOG(ISTGT_TRACE_ISCSI,
@@ -4580,7 +4542,7 @@ istgt_iscsi_op_data(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 	r2t_task->offset = offset;
 	r2t_task->DataSN = ExpDataSN;
 	r2t_task->F_bit = F_bit;
-	return 0;
+	return (0);
 }
 
 uint8_t istgt_get_sleep_val(ISTGT_LU_DISK *spec)
@@ -4590,7 +4552,7 @@ uint8_t istgt_get_sleep_val(ISTGT_LU_DISK *spec)
 	tot = 0;
 
 	if (spec->percent_count == 0)
-		return 0;
+		return (0);
 
 	for (i = 0; i < spec->percent_count && i < 31; i++)
 		if ((tot+spec->percent_val[i]) <= val)
@@ -4598,7 +4560,7 @@ uint8_t istgt_get_sleep_val(ISTGT_LU_DISK *spec)
 		else
 			break;
 
-	return spec->percent_latency[i];
+	return (spec->percent_latency[i]);
 }
 
 static int
@@ -4633,11 +4595,11 @@ istgt_iscsi_send_r2t(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, int offset, int len
 	rc = istgt_iscsi_write_pdu_upd(conn, &rsp_pdu, 0);
 	if (rc < 0) {
 		ISTGT_ERRLOG("iscsi_write_pdu() failed\n");
-		return -1;
+		return (-1);
 	}
 	ISTGT_TRACELOG(ISTGT_TRACE_ISCSI, "sentR2T sn:%x  off:%u len:%u\n", *R2TSN, offset, len);
 
-	return 0;
+	return (0);
 }
 
 int
@@ -4688,15 +4650,14 @@ istgt_iscsi_transfer_out(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, size_t transfer
 
 	// if (transfer_len > alloc_len) {
 	//	ISTGT_ERRLOG("transfer_len > alloc_len\n");
-	//	return -1;
+	//	return (-1);
 	// }
 
 start:
-	if (lu_cmd->aborted == 1)
-	{
+	if (lu_cmd->aborted == 1) {
 		ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "c#%d aborted CmdSN:0x%x Transfered=%zd, Offset=%zd\n",
 				conn->id, lu_cmd->CmdSN, transfer_len, offset);
-		return 0;
+		return (0);
 	}
 
 	r2t_task = istgt_get_transfer_task(conn, current_transfer_tag);
@@ -4753,17 +4714,17 @@ start:
 		} else if (offset == transfer_len) {
 			if (F_bit == 0) {
 				ISTGT_ERRLOG("c#%d F_bit not set on the last PDU\n", conn->id);
-				return -1;
+				return (-1);
 			}
 		}
-		return 0;
+		return (0);
 	}
 
 	if (data_len != 0) {
 		if (data_len > first_burst_len) {
 			ISTGT_ERRLOG("c#%d data_len > first_burst_len,  Transfer=%zd, First=%zd, Max=%zd, Segment=%zd\n",
 					conn->id, transfer_len, data_len, max_burst_len, segment_len);
-			return -1;
+			return (-1);
 		}
 		if (lu_cmd->pdu->data) {
 			i = ++lu_cmd->iobufindx;
@@ -4972,21 +4933,21 @@ start:
 		F_bit = BGET8(&cp[1], 7);
 		if (F_bit == 0) {
 			ISTGT_ERRLOG("c#%d F_bit not set on the last PDU\n", conn->id);
-			return -1;
+			return (-1);
 		}
 	} else {
 		cp = (uint8_t *) &lu_cmd->pdu->bhs;
 		F_bit = BGET8(&cp[1], 7);
 		if (F_bit == 0) {
 			ISTGT_ERRLOG("c#%d F_bit not set on the last PDU\n", conn->id);
-			return -1;
+			return (-1);
 		}
 	}
 
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "c#%d Transfered=%zd, Offset=%zd\n",
 		conn->id, transfer_len, offset);
 
-	return 0;
+	return (0);
 
 error_return:
 	if (data_pdu.ahs != NULL) {
@@ -4997,7 +4958,7 @@ error_return:
 		xfree(data_pdu.data);
 		data_pdu.data = NULL;
 	}
-	return -1;
+	return (-1);
 }
 
 static int
@@ -5013,11 +4974,11 @@ istgt_iscsi_send_nopin(CONN_Ptr conn)
 	uint16_t l_tsih;
 	uint32_t s_ExpCmdSN, s_MaxCmdSN;
 	if (conn->sess == NULL) {
-		return 0;
+		return (0);
 	}
 	if (!conn->full_feature) {
 		ISTGT_ERRLOG("before Full Feature\n");
-		return -1;
+		return (-1);
 	}
 
 	SESS_MTX_LOCK(conn);
@@ -5056,10 +5017,10 @@ istgt_iscsi_send_nopin(CONN_Ptr conn)
 	rc = istgt_iscsi_write_pdu_upd(conn, &rsp_pdu, 0);
 	if (rc < 0) {
 		ISTGT_ERRLOG("iscsi_write_pdu() failed\n");
-		return -1;
+		return (-1);
 	}
 
-	return 0;
+	return (0);
 }
 
 int
@@ -5074,11 +5035,11 @@ istgt_iscsi_send_async(CONN_Ptr conn)
 	ISTGT_NOTICELOG("SEND ASYNC EVENT for the Initiator");
 
 	if (conn->sess == NULL) {
-		return 0;
+		return (0);
 	}
 	if (!conn->full_feature) {
 		ISTGT_ERRLOG("before Full Feature\n");
-		return -1;
+		return (-1);
 	}
 
 	SESS_MTX_LOCK(conn);
@@ -5112,11 +5073,11 @@ istgt_iscsi_send_async(CONN_Ptr conn)
 	rc = istgt_iscsi_write_pdu_upd(conn, &rsp_pdu, 0);
 	if (rc < 0) {
 		ISTGT_ERRLOG("iscsi_write_pdu() failed\n");
-		return -1;
+		return (-1);
 	}
 	istgt_iscsi_drop_all_conns(conn);
 
-	return 0;
+	return (0);
 }
 
 static int
@@ -5127,7 +5088,7 @@ istgt_iscsi_execute(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 	const char *op = "--";
 
 	if (pdu == NULL)
-		return -1;
+		return (-1);
 
 	uint8_t bhsopcode = BGET8W(&pdu->bhs.opcode, 5, 6);
 	opcode = pdu->opcode;
@@ -5196,20 +5157,20 @@ istgt_iscsi_execute(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 		rc = istgt_iscsi_reject(conn, pdu, 0x04);
 		if (rc < 0) {
 			ISTGT_ERRLOG("iscsi_reject() failed\n");
-			return -1;
+			return (-1);
 		}
 		break;
 	}
 
 	ISTGT_TRACELOG(ISTGT_TRACE_ISCSI, "isid=%"PRIx64", tsih=%u, cid=%u, OP=%x:%s done\n",
 		conn->isid, conn->tsih, conn->cid, opcode, op);
-	return ret;
+	return (ret);
 
 	error_out:
 
 	ISTGT_ERRLOG("failed:%d: op:%x:%s, isid=%"PRIx64", tsih=%u, cid=%u\n",
 			rc, opcode, op, conn->isid, conn->tsih, conn->cid);
-	return -1;
+	return (-1);
 }
 
 static void
@@ -5551,13 +5512,10 @@ prof_log(ISTGT_LU_CMD_Ptr p, const char *caller)
 		}
 	}
 	levels = 8;
-	if (unlikely(spec != NULL && spec->do_avg == 1))
-	{
+	if (unlikely(spec != NULL && spec->do_avg == 1)) {
 		// if (p->caller[1] == 'q' && p->caller[2] == 'w' && p->caller[3] == 'D' && p->caller[4] == 'r' && p->caller[5] == 's')
-		if (p->caller[2] == '1' && p->caller[3] == 'q' && p->caller[4] == 'w' && p->caller[5] == 'D' && p->caller[6] == 'r' && p->caller[7] == 's')
-		{
-			for (i = 2; i < levels; i++)
-			{
+		if (p->caller[2] == '1' && p->caller[3] == 'q' && p->caller[4] == 'w' && p->caller[5] == 'D' && p->caller[6] == 'r' && p->caller[7] == 's') {
+			for (i = 2; i < levels; i++) {
 				spec->avgs[i].count++;
 				spec->avgs[i].tot_sec += p->tdiff[i].tv_sec;
 				spec->avgs[i].tot_nsec += p->tdiff[i].tv_nsec;
@@ -5566,8 +5524,7 @@ prof_log(ISTGT_LU_CMD_Ptr p, const char *caller)
 				spec->avgs[i].tot_sec += secs;
 				spec->avgs[i].tot_nsec = nsecs;
 			}
-		}
-		{
+		} {
 			spec->avgs[levels].count++;
 			spec->avgs[levels].tot_sec += (_r.tv_sec);
 			spec->avgs[levels].tot_nsec += (_r.tv_nsec);
@@ -5724,8 +5681,7 @@ sender(void *arg)
 				goto dequeue_result_queue;
 			}
 		}
-		if (lu_task->lu_cmd.aborted == 1 || lu_task->lu_cmd.release_aborted == 1)
-		{
+		if (lu_task->lu_cmd.aborted == 1 || lu_task->lu_cmd.release_aborted == 1) {
 			ISTGT_LOG("Aborted from result queue\n");
 			MTX_UNLOCK(&conn->result_queue_mutex);
 			rc = istgt_lu_destroy_task(lu_task);
@@ -5740,8 +5696,7 @@ sender(void *arg)
 //		MTX_LOCK(&conn->wpdu_mutex);
 		do {
 			lu_task->lu_cmd.flags |= ISTGT_RESULT_Q_DEQUEUED;
-			if (lu_task->lu_cmd.aborted == 1)
-			{
+			if (lu_task->lu_cmd.aborted == 1) {
 				ISTGT_LOG("Aborted from result queue\n");
 				rc = istgt_lu_destroy_task(lu_task);
 				if (rc < 0)
@@ -5854,7 +5809,7 @@ sender(void *arg)
 	// MTX_UNLOCK(&conn->sender_mutex);
 	pthread_cleanup_pop(0);
 	ISTGT_NOTICELOG("sender loop ended (%d:%d:%d)\n", conn->id, conn->epfd, ntohs(conn->iport));
-	return NULL;
+	return (NULL);
 }
 
 
@@ -5884,7 +5839,7 @@ worker(void *arg)
 	epfd = epoll_create1(0);
 	if (epfd == -1) {
 		ISTGT_ERRLOG("epoll_create1() failed\n");
-		return NULL;
+		return (NULL);
 	}
 	ISTGT_NOTICELOG("con:%d/%d [%x:%d->%s:%s,%d]",
 		conn->id, epfd, conn->iaddr, ntohs(conn->iport),
@@ -5904,7 +5859,7 @@ worker(void *arg)
 		if (rc == -1) {
 		ISTGT_ERRLOG("epoll_ctl() failed\n");
 		close(epfd);
-		return NULL;
+		return (NULL);
 		}
 	events.data.fd = conn->task_pipe[0];
 		events.events = EPOLLIN;
@@ -5912,7 +5867,7 @@ worker(void *arg)
 		if (rc == -1) {
 		ISTGT_ERRLOG("epoll_ctl() failed\n");
 		close(epfd);
-		return NULL;
+		return (NULL);
 		}
 
 
@@ -5924,7 +5879,7 @@ worker(void *arg)
 	// 	if (rc == -1) {
 	// 		ISTGT_ERRLOG("epoll_ctl() failed\n");
 	// 		close(epfd);
-	// 		return NULL;
+	// 		return (NULL);
 	// 	}
 	// 	event.data.fd = SIGTERM;
 	// 	event.events = EPOLLIN;
@@ -5932,7 +5887,7 @@ worker(void *arg)
 	// 	if (rc == -1) {
 	// 		ISTGT_ERRLOG("epoll_ctl() failed\n");
 	// 		close(epfd);
-	// 		return NULL;
+	// 		return (NULL);
 	// 	}
 	// }
 
@@ -5941,7 +5896,7 @@ worker(void *arg)
 // 	kq = kqueue();
 // 	if (kq == -1) {
 // 		istgt_errlog("kqueue() failed\n");
-// 		return null;
+// 		return (null);
 // 	}
 // 	istgt_noticelog("con:%d/%d [%x:%d->%s:%s,%d]",
 // 		conn->id, kq, conn->iaddr, ntohs(conn->iport),
@@ -5956,14 +5911,14 @@ worker(void *arg)
 // 	if (rc == -1) {
 // 		istgt_errlog("kevent() failed\n");
 // 		close(kq);
-// 		return null;
+// 		return (null);
 // 	}
 // 	istgt_ev_set(&kev, conn->task_pipe[0], evfilt_read, ev_add, 0, 0, null);
 // 	rc = kevent(kq, &kev, 1, null, 0, null);
 // 	if (rc == -1) {
 // 		istgt_errlog("kevent() failed\n");
 // 		close(kq);
-// 		return null;
+// 		return (null);
 // 	}
 
 // 	if (!conn->istgt->daemon) {
@@ -5972,14 +5927,14 @@ worker(void *arg)
 // 		if (rc == -1) {
 // 			istgt_errlog("kevent() failed\n");
 // 			close(kq);
-// 			return null;
+// 			return (null);
 // 		}
 // 		istgt_ev_set(&kev, sigterm, evfilt_signal, ev_add, 0, 0, null);
 // 		rc = kevent(kq, &kev, 1, null, 0, null);
 // 		if (rc == -1) {
 // 			istgt_errlog("kevent() failed\n");
 // 			close(kq);
-// 			return null;
+// 			return (null);
 // 		}
 // 	}
 
@@ -6303,7 +6258,7 @@ worker(void *arg)
 	g_conns[conn->id] = NULL;
 	istgt_remove_conn(conn);
 	MTX_UNLOCK(&g_conns_mutex);
-	return NULL;
+	return (NULL);
 }
 int
 istgt_create_conn(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock, struct sockaddr *sa, socklen_t salen __attribute__((__unused__)))
@@ -6575,7 +6530,7 @@ istgt_create_conn(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock, struct sockaddr 
 		xfree(conn->recvbuf);
 		xfree(conn->sendbuf);
 		xfree(conn);
-		return -1;
+		return (-1);
 	}
 
 	/* create new thread */
@@ -6590,7 +6545,7 @@ istgt_create_conn(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock, struct sockaddr 
 		ISTGT_ERRLOG("pthread_detach() failed\n");
 		goto error_return;
 	}
-	return 0;
+	return (0);
 }
 
 int
@@ -6691,7 +6646,7 @@ istgt_create_sess(ISTGT_Ptr istgt, CONN_Ptr conn, ISTGT_LU_Ptr lu)
 		xfree(sess->conns);
 		xfree(sess);
 		conn->sess = NULL;
-		return -1;
+		return (-1);
 	}
 	rc = pthread_cond_init(&sess->mcs_cond, NULL);
 	if (rc != 0) {
@@ -6808,7 +6763,7 @@ istgt_create_sess(ISTGT_Ptr istgt, CONN_Ptr conn, ISTGT_LU_Ptr lu)
 
 	/* sess for first connection of session */
 	conn->sess = sess;
-	return 0;
+	return (0);
 }
 
 static int
@@ -6845,7 +6800,7 @@ istgt_append_sess(CONN_Ptr conn, uint64_t isid, uint16_t tsih, uint16_t cid)
 		MTX_UNLOCK(&g_conns_mutex);
 		ISTGT_ERRLOG("no MCS session for isid=%"PRIx64", tsih=%d, cid=%d\n",
 			isid, tsih, cid);
-		return -1;
+		return (-1);
 	}
 	/* sess is LOCK by loop */
 	if (sess->connections >= sess->max_conns
@@ -6856,7 +6811,7 @@ istgt_append_sess(CONN_Ptr conn, uint64_t isid, uint16_t tsih, uint16_t cid)
 		ISTGT_ERRLOG("too many connections for isid=%"PRIx64
 			", tsih=%d, cid=%d\n",
 			isid, tsih, cid);
-		return -1;
+		return (-1);
 	}
 	printf("Connections(tsih %d): %d\n", sess->tsih, sess->connections);
 	conn->sess = sess;
@@ -6865,7 +6820,7 @@ istgt_append_sess(CONN_Ptr conn, uint64_t isid, uint16_t tsih, uint16_t cid)
 	MTX_UNLOCK(&sess->mutex);
 	MTX_UNLOCK(&g_conns_mutex);
 
-	return 0;
+	return (0);
 }
 
 static void
@@ -7130,7 +7085,7 @@ istgt_iscsi_drop_all_conns(CONN_Ptr conn)
 		}
 	}
 	MTX_UNLOCK(&g_conns_mutex);
-	return 0;
+	return (0);
 }
 
 static int
@@ -7211,7 +7166,7 @@ istgt_iscsi_drop_old_conns(CONN_Ptr conn)
 		}
 	}
 	MTX_UNLOCK(&g_conns_mutex);
-	return 0;
+	return (0);
 }
 
 #ifdef __linux__
@@ -7295,15 +7250,15 @@ istgt_unlock_gconns(void)
 int
 istgt_get_gnconns(void)
 {
-	return g_nconns;
+	return (g_nconns);
 }
 
 CONN_Ptr
 istgt_get_gconn(int idx)
 {
 	if (idx >= g_nconns)
-		return NULL;
-	return g_conns[idx];
+		return (NULL);
+	return (g_conns[idx]);
 }
 
 int
@@ -7321,7 +7276,7 @@ istgt_get_active_conns(void)
 		num++;
 	}
 	MTX_UNLOCK(&g_conns_mutex);
-	return num;
+	return (num);
 }
 
 int
@@ -7346,7 +7301,7 @@ istgt_stop_conns(void)
 		}
 	}
 	MTX_UNLOCK(&g_conns_mutex);
-	return 0;
+	return (0);
 }
 
 CONN_Ptr
@@ -7380,11 +7335,11 @@ istgt_find_conn(const char *initiator_port, const char *target_name, uint16_t ts
 	}
 	if (rc < 0) {
 		// MTX_UNLOCK(&g_conns_mutex);
-		return NULL;
+		return (NULL);
 	}
 	MTX_UNLOCK(&sess->mutex);
 	// MTX_UNLOCK(&g_conns_mutex);
-	return conn;
+	return (conn);
 }
 
 int
@@ -7397,18 +7352,18 @@ istgt_iscsi_init(ISTGT_Ptr istgt)
 	sp = istgt_find_cf_section(istgt->config, "Global");
 	if (sp == NULL) {
 		ISTGT_ERRLOG("find_cf_section failed()\n");
-		return -1;
+		return (-1);
 	}
 
 	rc = pthread_mutex_init(&g_conns_mutex, NULL);
 	if (rc != 0) {
 		ISTGT_ERRLOG("mutex_init() failed\n");
-		return -1;
+		return (-1);
 	}
 	rc = pthread_mutex_init(&g_last_tsih_mutex, NULL);
 	if (rc != 0) {
 		ISTGT_ERRLOG("mutex_init() failed\n");
-		return -1;
+		return (-1);
 	}
 	g_max_connidx = -1;
 	g_nconns = MAX_LOGICAL_UNIT * istgt->MaxSessions * istgt->MaxConnections;
@@ -7419,7 +7374,7 @@ istgt_iscsi_init(ISTGT_Ptr istgt)
 	bzero(g_conns, allocsize);
 	g_last_tsih = 0;
 
-	return 0;
+	return (0);
 }
 
 int
@@ -7469,12 +7424,12 @@ istgt_iscsi_shutdown(ISTGT_Ptr istgt __attribute__((__unused__)))
 	rc = pthread_mutex_destroy(&g_last_tsih_mutex);
 	if (rc != 0) {
 		ISTGT_ERRLOG("mutex_destroy() failed\n");
-		return -1;
+		return (-1);
 	}
 	rc = pthread_mutex_destroy(&g_conns_mutex);
 	if (rc != 0) {
 		ISTGT_ERRLOG("mutex_destroy() failed\n");
-		return -1;
+		return (-1);
 	}
 
 	if (num == 0) {
@@ -7482,5 +7437,5 @@ istgt_iscsi_shutdown(ISTGT_Ptr istgt __attribute__((__unused__)))
 		g_conns = NULL;
 	}
 
-	return 0;
+	return (0);
 }
