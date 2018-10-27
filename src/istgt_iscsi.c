@@ -4544,8 +4544,7 @@ istgt_iscsi_op_data(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 	return (0);
 }
 
-uint8_t istgt_get_sleep_val(ISTGT_LU_DISK *spec)
-{
+uint8_t istgt_get_sleep_val(ISTGT_LU_DISK *spec) {
 	int i, val, tot;
 	val = random() % 100;
 	tot = 0;
