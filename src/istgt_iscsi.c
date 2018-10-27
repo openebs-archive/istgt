@@ -1863,11 +1863,11 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 		snprintf(conn->initiator_port, sizeof conn->initiator_port,
 		    "%s" ",i,0x" "%12.12" PRIx64, val, isid);
 		/*
-                 * We did this because of some normalization issue.
-                 * But need to comment out this for logging issue.
-                 * May be another solution will be needed in future if
-                 * normalization is mandatory.
-                 */
+		 * We did this because of some normalization issue.
+		 * But need to comment out this for logging issue.
+		 * May be another solution will be needed in future if
+		 * normalization is mandatory.
+		 */
 		 strlwr(conn->initiator_name);
 		 strlwr(conn->initiator_port);
 		ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "Initiator name: %s\n",
@@ -3031,54 +3031,52 @@ parse_scsi_cdb(ISTGT_LU_CMD_Ptr lu_cmd)
 	lu_cmd->lba   = 0;
 	lu_cmd->lblen = 0;
 
-	/*
-	ISTGT_LU_DISK *spec = NULL;
-    int lun_i = istgt_lu_islun2lun(lu_cmd->lun);
-	if (lun_i < lu_cmd->lu->maxlun)
-		spec = (ISTGT_LU_DISK *) (lu_cmd->lu->lun[lun_i].spec);
-	*/
+	// ISTGT_LU_DISK *spec = NULL;
+	// int lun_i = istgt_lu_islun2lun(lu_cmd->lun);
+	// if (lun_i < lu_cmd->lu->maxlun)
+	// 	spec = (ISTGT_LU_DISK *) (lu_cmd->lu->lun[lun_i].spec);
+
 	switch(cdb[0]) {
-		/* ....................
-		  case SBC_READ_6:
-		  case SBC_WRITE_6:
-		  lu_cmd->cdb0  = lu_cmd->cdb[0];
-		  lu_cmd->lba   = (uint64_t) (DGET24(&lu_cmd->cdb[1]) & 0x001fffffU);
-		  lu_cmd->lblen = (uint32_t) DGET8(&lu_cmd->cdb[4]);
-		  break;
-		  case SBC_READ_10:
-		  case SBC_WRITE_10:
-		  lu_cmd->cdb0  = lu_cmd->cdb[0];
-		  lu_cmd->lba   = (uint64_t) DGET32(&lu_cmd->cdb[2]);
-		  lu_cmd->lblen = (uint32_t) DGET16(&lu_cmd->cdb[7]);
-		  break;
-		  case SBC_WRITE_AND_VERIFY_10:
-		  lu_cmd->cdb0  = lu_cmd->cdb[0];
-		  lu_cmd->lba   = (uint64_t) DGET32(&lu_cmd->cdb[2])
-		  lu_cmd->lblen = (uint32_t) DGET16(&lu_cmd->cdb[7]);
-		  break;
-		  case SBC_READ_12:
-		  case SBC_WRITE_12:
-		  lu_cmd->cdb0  = lu_cmd->cdb[0];
-		  lu_cmd->lba   = (uint64_t) DGET32(&lu_cmd->cdb[2]);
-		  lu_cmd->lblen = (uint32_t) DGET32(&lu_cmd->cdb[6]);
-		  break;
-		  case SBC_WRITE_AND_VERIFY_12:
-		  lu_cmd->cdb0 = lu_cmd->cdb[0];
-		  lu_cmd->lba   = (uint64_t) DGET32(&lu_cmd->cdb[2]);
-		  lu_cmd->lblen = (uint32_t) DGET32(&lu_cmd->cdb[6]);
-		  break;
-		  case SBC_READ_16:
-		  case SBC_WRITE_16:
-		  lu_cmd->cdb0  = lu_cmd->cdb[0];
-		  lu_cmd->lba   = (uint64_t) DGET64(&lu_cmd->cdb[2]);
-		  lu_cmd->lblen = (uint32_t) DGET32(&lu_cmd->cdb[10]);
-		  break;
-		  case SBC_WRITE_AND_VERIFY_16:
-		  lu_cmd->cdb0  = lu_cmd->cdb[0];
-		  lu_cmd->lba   = (uint64_t) DGET64(&lu_cmd->cdb[2]);
-		  lu_cmd->lblen = (uint32_t) DGET32(&lu_cmd->cdb[10]);
-		  break;
-		  ................. */
+		  // case SBC_READ_6:
+		  // case SBC_WRITE_6:
+		  // lu_cmd->cdb0  = lu_cmd->cdb[0];
+		  // lu_cmd->lba   = (uint64_t) (DGET24(&lu_cmd->cdb[1]) & 0x001fffffU);
+		  // lu_cmd->lblen = (uint32_t) DGET8(&lu_cmd->cdb[4]);
+		  // break;
+		  // case SBC_READ_10:
+		  // case SBC_WRITE_10:
+		  // lu_cmd->cdb0  = lu_cmd->cdb[0];
+		  // lu_cmd->lba   = (uint64_t) DGET32(&lu_cmd->cdb[2]);
+		  // lu_cmd->lblen = (uint32_t) DGET16(&lu_cmd->cdb[7]);
+		  // break;
+		  // case SBC_WRITE_AND_VERIFY_10:
+		  // lu_cmd->cdb0  = lu_cmd->cdb[0];
+		  // lu_cmd->lba   = (uint64_t) DGET32(&lu_cmd->cdb[2])
+		  // lu_cmd->lblen = (uint32_t) DGET16(&lu_cmd->cdb[7]);
+		  // break;
+		  // case SBC_READ_12:
+		  // case SBC_WRITE_12:
+		  // lu_cmd->cdb0  = lu_cmd->cdb[0];
+		  // lu_cmd->lba   = (uint64_t) DGET32(&lu_cmd->cdb[2]);
+		  // lu_cmd->lblen = (uint32_t) DGET32(&lu_cmd->cdb[6]);
+		  // break;
+		  // case SBC_WRITE_AND_VERIFY_12:
+		  // lu_cmd->cdb0 = lu_cmd->cdb[0];
+		  // lu_cmd->lba   = (uint64_t) DGET32(&lu_cmd->cdb[2]);
+		  // lu_cmd->lblen = (uint32_t) DGET32(&lu_cmd->cdb[6]);
+		  // break;
+		  // case SBC_READ_16:
+		  // case SBC_WRITE_16:
+		  // lu_cmd->cdb0  = lu_cmd->cdb[0];
+		  // lu_cmd->lba   = (uint64_t) DGET64(&lu_cmd->cdb[2]);
+		  // lu_cmd->lblen = (uint32_t) DGET32(&lu_cmd->cdb[10]);
+		  // break;
+		  // case SBC_WRITE_AND_VERIFY_16:
+		  // lu_cmd->cdb0  = lu_cmd->cdb[0];
+		  // lu_cmd->lba   = (uint64_t) DGET64(&lu_cmd->cdb[2]);
+		  // lu_cmd->lblen = (uint32_t) DGET32(&lu_cmd->cdb[10]);
+		  // break;
+
 		case SBC_READ_6:
 			if (lu_cmd->R_bit == 0)
 				NOR=1;
@@ -3227,11 +3225,10 @@ parse_scsi_cdb(ISTGT_LU_CMD_Ptr lu_cmd)
 			lba = (uint64_t) DGET64(&cdb[2]);
 			transfer_len = (uint32_t) DGET8(&cdb[13]);
 
-			/* maxlen = ISTGT_LU_WORK_ATS_BLOCK_SIZE / spec->blocklen;
-			if (maxlen > 0xff)
-				maxlen = 0xff;
-			if (transfer_len > maxlen)
-				inv = 1; */
+			// if (maxlen > 0xff)
+			// 	maxlen = 0xff;
+			// if (transfer_len > maxlen)
+			// 	inv = 1;
 			break;
 
 		case SBC_SYNCHRONIZE_CACHE_10:
@@ -4562,10 +4559,10 @@ istgt_iscsi_op_data(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 		ISTGT_ERRLOG("offset(%u) error\n", buffer_offset);
 		return -1;
 	}
-	/* if (buffer_offset + data_len > alloc_len) {
-		ISTGT_ERRLOG("offset error\n");
-		return -1;
-	} */
+	// if (buffer_offset + data_len > alloc_len) {
+	// 	ISTGT_ERRLOG("offset error\n");
+	// 	return -1;
+	// }
 
 	ISTGT_TRACELOG(ISTGT_TRACE_ISCSI,
 	    "copy pdu.data %lu to r2ttask.iobuf at %u; pending r2t=%d, StatSN=%x, ExpStatSN=%x, DataSN=%x\n",
@@ -5579,15 +5576,13 @@ prof_log(ISTGT_LU_CMD_Ptr p, const char *caller)
 			spec->avgs[levels].tot_sec += secs;
 			spec->avgs[levels].tot_nsec = nsecs;
 		}
-/*
-		levels++;
-		spec->avgs[levels].count += istgt_queue_count(&spec->cmd_queue);
-		levels++;
-		spec->avgs[levels].count += istgt_queue_count(&spec->blocked_queue);
-		levels++;
-		levels++;
-		spec->avgs[levels].count += spec->inflight;
-*/
+		// levels++;
+		// spec->avgs[levels].count += istgt_queue_count(&spec->cmd_queue);
+		// levels++;
+		// spec->avgs[levels].count += istgt_queue_count(&spec->blocked_queue);
+		// levels++;
+		// levels++;
+		// spec->avgs[levels].count += spec->inflight;
 	}
 
         if (g_logtimes == 1 && (_r.tv_sec || (_r.tv_nsec > (long)g_logdelayns))) {
@@ -5874,11 +5869,11 @@ worker(void *arg)
 	int epfd;
 	struct epoll_event events;
 	struct timespec ep_timeout;
-	/*
-	int kq;
-	struct kevent kev;
-	struct timespec kev_timeout;
-	*/
+	
+	// int kq;
+	// struct kevent kev;
+	// struct timespec kev_timeout;
+	
 	int rc;
 
 	pthread_t slf = pthread_self();
@@ -5896,13 +5891,13 @@ worker(void *arg)
 	    conn->portal.host, conn->portal.port, conn->portal.tag);
 	conn->epfd = epfd;
 
-/ *// TODO
-#if defined (ISTGT_USE_IOVEC) && defined (NOTE_LOWAT)
-	ISTGT_EV_SET(&kev, conn->sock, EVFILT_READ, EV_ADD, NOTE_LOWAT, ISCSI_BHS_LEN, NULL);
-#else
-	ISTGT_EV_SET(&kev, conn->sock, EVFILT_READ, EV_ADD, 0, 0, NULL);
-#endif
-*/
+//  TODO
+// #if defined (ISTGT_USE_IOVEC) && defined (NOTE_LOWAT)
+// 	ISTGT_EV_SET(&kev, conn->sock, EVFILT_READ, EV_ADD, NOTE_LOWAT, ISCSI_BHS_LEN, NULL);
+// #else
+// 	ISTGT_EV_SET(&kev, conn->sock, EVFILT_READ, EV_ADD, 0, 0, NULL);
+// #endif
+
 	events.data.fd = conn->sock;
         events.events = EPOLLIN;
         rc = epoll_ctl(epfd, EPOLL_CTL_ADD, conn->sock, &events);
@@ -5920,73 +5915,74 @@ worker(void *arg)
 		return NULL;
         }
 
-	/* TODO
-	if (!conn->istgt->daemon) {
-		event.data.fd = SIGINT;
-		event.events = EPOLLIN;
-		rc = epoll_ctl(epfd, EPOLL_CTL_ADD, SIGINT, &event);
-		if (rc == -1) {
-			ISTGT_ERRLOG("epoll_ctl() failed\n");
-			close(epfd);
-			return NULL;
-		}
-		event.data.fd = SIGTERM;
-		event.events = EPOLLIN;
-		rc = epoll_ctl(epfd, EPOLL_CTL_ADD, SIGTERM, &event);
-		if (rc == -1) {
-			ISTGT_ERRLOG("epoll_ctl() failed\n");
-			close(epfd);
-			return NULL;
-		}
-	}
-	*/
+	
+ 	// TODO
+	// if (!conn->istgt->daemon) {
+	// 	event.data.fd = SIGINT;
+	// 	event.events = EPOLLIN;
+	// 	rc = epoll_ctl(epfd, EPOLL_CTL_ADD, SIGINT, &event);
+	// 	if (rc == -1) {
+	// 		ISTGT_ERRLOG("epoll_ctl() failed\n");
+	// 		close(epfd);
+	// 		return NULL;
+	// 	}
+	// 	event.data.fd = SIGTERM;
+	// 	event.events = EPOLLIN;
+	// 	rc = epoll_ctl(epfd, EPOLL_CTL_ADD, SIGTERM, &event);
+	// 	if (rc == -1) {
+	// 		ISTGT_ERRLOG("epoll_ctl() failed\n");
+	// 		close(epfd);
+	// 		return NULL;
+	// 	}
+	// }
+	
 
-	/*
-	kq = kqueue();
-	if (kq == -1) {
-		ISTGT_ERRLOG("kqueue() failed\n");
-		return NULL;
-	}
-	ISTGT_NOTICELOG("con:%d/%d [%x:%d->%s:%s,%d]",
-		conn->id, kq, conn->iaddr, ntohs(conn->iport),
-	    conn->portal.host, conn->portal.port, conn->portal.tag);
-	conn->kq = kq;
-#if defined (ISTGT_USE_IOVEC) && defined (NOTE_LOWAT)
-	ISTGT_EV_SET(&kev, conn->sock, EVFILT_READ, EV_ADD, NOTE_LOWAT, ISCSI_BHS_LEN, NULL);
-#else
-	ISTGT_EV_SET(&kev, conn->sock, EVFILT_READ, EV_ADD, 0, 0, NULL);
-#endif
-	rc = kevent(kq, &kev, 1, NULL, 0, NULL);
-	if (rc == -1) {
-		ISTGT_ERRLOG("kevent() failed\n");
-		close(kq);
-		return NULL;
-	}
-	ISTGT_EV_SET(&kev, conn->task_pipe[0], EVFILT_READ, EV_ADD, 0, 0, NULL);
-	rc = kevent(kq, &kev, 1, NULL, 0, NULL);
-	if (rc == -1) {
-		ISTGT_ERRLOG("kevent() failed\n");
-		close(kq);
-		return NULL;
-	}
+	
+// 	kq = kqueue();
+// 	if (kq == -1) {
+// 		istgt_errlog("kqueue() failed\n");
+// 		return null;
+// 	}
+// 	istgt_noticelog("con:%d/%d [%x:%d->%s:%s,%d]",
+// 		conn->id, kq, conn->iaddr, ntohs(conn->iport),
+// 	    conn->portal.host, conn->portal.port, conn->portal.tag);
+// 	conn->kq = kq;
+// #if defined (istgt_use_iovec) && defined (note_lowat)
+// 	istgt_ev_set(&kev, conn->sock, evfilt_read, ev_add, note_lowat, iscsi_bhs_len, null);
+// #else
+// 	istgt_ev_set(&kev, conn->sock, evfilt_read, ev_add, 0, 0, null);
+// #endif
+// 	rc = kevent(kq, &kev, 1, null, 0, null);
+// 	if (rc == -1) {
+// 		istgt_errlog("kevent() failed\n");
+// 		close(kq);
+// 		return null;
+// 	}
+// 	istgt_ev_set(&kev, conn->task_pipe[0], evfilt_read, ev_add, 0, 0, null);
+// 	rc = kevent(kq, &kev, 1, null, 0, null);
+// 	if (rc == -1) {
+// 		istgt_errlog("kevent() failed\n");
+// 		close(kq);
+// 		return null;
+// 	}
 
-	if (!conn->istgt->daemon) {
-		ISTGT_EV_SET(&kev, SIGINT, EVFILT_SIGNAL, EV_ADD, 0, 0, NULL);
-		rc = kevent(kq, &kev, 1, NULL, 0, NULL);
-		if (rc == -1) {
-			ISTGT_ERRLOG("kevent() failed\n");
-			close(kq);
-			return NULL;
-		}
-		ISTGT_EV_SET(&kev, SIGTERM, EVFILT_SIGNAL, EV_ADD, 0, 0, NULL);
-		rc = kevent(kq, &kev, 1, NULL, 0, NULL);
-		if (rc == -1) {
-			ISTGT_ERRLOG("kevent() failed\n");
-			close(kq);
-			return NULL;
-		}
-	}
-	*/
+// 	if (!conn->istgt->daemon) {
+// 		istgt_ev_set(&kev, sigint, evfilt_signal, ev_add, 0, 0, null);
+// 		rc = kevent(kq, &kev, 1, null, 0, null);
+// 		if (rc == -1) {
+// 			istgt_errlog("kevent() failed\n");
+// 			close(kq);
+// 			return null;
+// 		}
+// 		istgt_ev_set(&kev, sigterm, evfilt_signal, ev_add, 0, 0, null);
+// 		rc = kevent(kq, &kev, 1, null, 0, null);
+// 		if (rc == -1) {
+// 			istgt_errlog("kevent() failed\n");
+// 			close(kq);
+// 			return null;
+// 		}
+// 	}
+	
 	conn->pdu.ahs = NULL;
 	conn->pdu.data = NULL;
 	conn->state = CONN_STATE_RUNNING;
@@ -6385,8 +6381,8 @@ istgt_create_conn(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock, struct sockaddr 
 	conn->exec_lu_task = NULL;
 	conn->running_tasks = 0;
 
-	/* memset(conn->initiator_addr, 0, sizeof conn->initiator_addr);
-	memset(conn->target_addr, 0, sizeof conn->target_addr); */
+    // memset(conn->initiator_addr, 0, sizeof conn->initiator_addr);
+	// memset(conn->target_addr, 0, sizeof conn->target_addr);
 
 	switch (sa->sa_family) {
 	case AF_INET6:
@@ -6413,9 +6409,9 @@ istgt_create_conn(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock, struct sockaddr 
 		ISTGT_ERRLOG("unsupported family\n");
 		goto error_return;
 	}
-	/* printf("sock=%d, addr=%s, peer=%s\n",
-		   sock, conn->target_addr,
-		   conn->initiator_addr); */
+	// printf("sock=%d, addr=%s, peer=%s\n",
+	// 	   sock, conn->target_addr,
+	// 	   conn->initiator_addr);
 
 	/* wildcard? */
 	if (strcasecmp(conn->portal.host, "[::]") == 0
@@ -6438,10 +6434,10 @@ istgt_create_conn(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock, struct sockaddr 
 		conn->portal.host = xstrdup(buf);
 	}
 
-	/* memset(conn->initiator_name, 0, sizeof conn->initiator_name);
-	memset(conn->target_name, 0, sizeof conn->target_name);
-	memset(conn->initiator_port, 0, sizeof conn->initiator_port);
-	memset(conn->target_port, 0, sizeof conn->target_port); */
+	// memset(conn->initiator_name, 0, sizeof conn->initiator_name);
+	// memset(conn->target_name, 0, sizeof conn->target_name);
+	// memset(conn->initiator_port, 0, sizeof conn->initiator_port);
+	// memset(conn->target_port, 0, sizeof conn->target_port);
 
 	/* set timeout msec. */
 	rc = istgt_set_recvtimeout(conn->sock, conn->timeout * 1000);
@@ -6903,14 +6899,14 @@ istgt_close_conn(CONN_Ptr conn)
 void
 istgt_free_conn(CONN_Ptr conn)
 {
-/*
-	if (conn == NULL)
-		return;
-	if (conn->task_pipe[0] != -1)
-		close(conn->task_pipe[0]);
-	if (conn->task_pipe[1] != -1)
-		close(conn->task_pipe[1]);
-*/
+	
+	// if (conn == NULL)
+	// 	return;
+	// if (conn->task_pipe[0] != -1)
+	// 	close(conn->task_pipe[0]);
+	// if (conn->task_pipe[1] != -1)
+	// 	close(conn->task_pipe[1]);
+	
 	(void) pthread_mutex_destroy(&conn->task_queue_mutex);
 	(void) pthread_mutex_destroy(&conn->result_queue_mutex);
 	(void) pthread_mutex_destroy(&conn->diskioflag_mutex);
@@ -7050,10 +7046,10 @@ istgt_remove_conn(CONN_Ptr conn)
 	    (delayedFree == 1) ? "delay_free" : "", ioPending);
 	if (strcmp(conn->target_name, "dummy") && conn->exec_logout == 0)
 		ioctl_call(conn, TYPE_CONNBRK);
-/*
-	if (delayedFree == 0)
-	   istgt_free_conn(conn);
-*/
+
+	// if (delayedfree == 0)
+	//    istgt_free_conn(conn);
+
 	istgt_close_conn(conn);
 	istgt_queue_enqueue(&closedconns, conn);
 }
