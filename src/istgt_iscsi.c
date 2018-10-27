@@ -6647,8 +6647,8 @@ istgt_create_sess(ISTGT_Ptr istgt, CONN_Ptr conn, ISTGT_LU_Ptr lu)
 	sess->tag = conn->portal.tag;
 
 	sess->max_conns = sess->MaxConnections;
-	sess->conns = xmalloc(sizeof (*sess->conns * sess->max_conns));
-	memset(sess->conns, 0, sizeof (*sess->conns * sess->max_conns));
+	sess->conns = xmalloc(sizeof (*sess->conns) * sess->max_conns);
+	memset(sess->conns, 0, sizeof (*sess->conns) * sess->max_conns);
 	sess->connections = 0;
 
 	sess->conns[sess->connections] = conn;
