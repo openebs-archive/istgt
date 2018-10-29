@@ -17,7 +17,7 @@ typedef struct istgt_lu_disk_t spec_t;
 typedef struct rcmd_s rcmd_t;
 
 /*
- * state of commands queued for replica according to send/recieve
+ * state of commands queued for replica according to send/receive
  */
 typedef enum {
 	READ_IO_RESP_HDR = 1,	/* to read mgmt IO hdr */
