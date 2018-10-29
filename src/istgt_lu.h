@@ -36,8 +36,10 @@
 #include "istgt.h"
 #include "istgt_queue.h"
 
+#ifdef	REPLICATION
 #include "replication.h"
 #include "ring_mempool.h"
+#endif
 
 #ifdef __linux__
 #include <x86_64-linux-gnu/sys/queue.h>
@@ -311,7 +313,6 @@ typedef struct istgt_lu_t {
 	int type;
 	int online;
 	int readonly;
-	int quiesce;
 	int blocklen;
 	int recordsize;
 	int rshift;
@@ -327,8 +328,8 @@ typedef struct istgt_lu_t {
 	ISTGT_LU_MAP map[MAX_LU_MAP];
 	int conns;
 #ifdef REPLICATION
-	int replication_factor;
-	int consistency_factor;
+	uint8_t replication_factor;
+	uint8_t consistency_factor;
 #endif
 } ISTGT_LU;
 typedef ISTGT_LU *ISTGT_LU_Ptr;
@@ -428,6 +429,7 @@ typedef struct istgt_lu_cmd_t {
 	uint8_t	   release_aborted;
 #ifdef REPLICATION
 	uint32_t   luworkerindx;
+	struct timespec start_rw_time;
 #endif
 } ISTGT_LU_CMD;
 typedef ISTGT_LU_CMD *ISTGT_LU_CMD_Ptr;
@@ -747,7 +749,10 @@ typedef struct istgt_lu_disk_t {
 	int num;
 	int lun;
 	int inflight;
-	int persist;	
+	int persist;
+#ifdef	REPLICATION
+	char *volname;
+#endif
 	int fd;
 	const char *file;
 	const char *disktype;
@@ -760,10 +765,28 @@ typedef struct istgt_lu_disk_t {
 	uint32_t rsize;
 	uint32_t rshift;
 	uint32_t rshiftreal;
-	uint64_t inflight_write_io_cnt;
-	uint32_t max_unmap_sectors;
-	struct IO_types IO_size[10];	
 
+#ifdef	REPLICATION
+	/* inflight write IOs at spec layer */
+	uint64_t inflight_write_io_cnt;
+	/* inflight read IOs at spec layer*/
+	uint64_t inflight_read_io_cnt;
+	/* inflight sync IOs at spec layer */
+	uint64_t inflight_sync_io_cnt;
+#endif
+
+	uint32_t max_unmap_sectors;
+	struct IO_types IO_size[10];
+#ifdef REPLICATION
+	uint64_t writes;
+	uint64_t reads;
+	uint64_t readbytes;
+	uint64_t writebytes;
+	uint64_t totalreadtime;
+	uint64_t totalwritetime;
+	uint64_t totalreadblockcount;
+	uint64_t totalwriteblockcount;
+#endif
 	/* modify lun */
 	int dofake;
 	pthread_t diskmod_thr;
@@ -820,18 +843,27 @@ typedef struct istgt_lu_disk_t {
 	rte_smempool_t rcommon_deadlist;	// Contains completed IOs
 	TAILQ_HEAD(, replica_s) rq; //Queue of replicas connected to this spec(volume)
 	TAILQ_HEAD(, replica_s) rwaitq; //Queue of replicas completed handshake, and yet to have data connection to this spec(volume)
-	int replica_count;
+	TAILQ_HEAD(, known_replica_s) identified_replica;	/* List of replicas known to spec */
 	int replication_factor;
 	int consistency_factor;
 	int healthy_rcount;
 	int degraded_rcount;
 	bool ready;
+	bool rebuild_in_progress;
+	struct replica_s *target_replica;
+
 	/*Common for both the above queues,
 	Since same cmd is part of both the queues*/
 	pthread_mutex_t rq_mtx; 
 	pthread_mutex_t rcommonq_mtx; 
 	pthread_mutex_t luworker_rmutex[ISTGT_MAX_NUM_LUWORKERS];
 	pthread_cond_t luworker_rcond[ISTGT_MAX_NUM_LUWORKERS];
+
+	/* stats */
+	struct {
+		uint64_t	used;
+		struct timespec	updated_stats_time;
+	} stats;
 #endif
 
 	/*Queue containing all the tasks. Instead of going to separate 
@@ -896,6 +928,9 @@ typedef struct istgt_lu_disk_t {
 	uint8_t percent_val[32];
 	uint8_t percent_latency[32];
 	uint64_t io_seq;
+#ifdef	REPLICATION
+	int quiesce;
+#endif
 
 	/* entry */
 	int (*open)(struct istgt_lu_disk_t *spec, int flags, int mode);

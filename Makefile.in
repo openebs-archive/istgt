@@ -69,6 +69,11 @@ dist: distdir
 distdir:
 	echo $(DISTDIR) >$@
 
+cstyle:
+	find $(top_srcdir) -name '*.[hc]' \
+                ! -path './src/config.h' \
+                ! -name 'rte_*.[hc]' -type f -exec $(top_srcdir)/cstyle.pl -cpP {} \+
+
 clean: local-clean
 	for subdir in $(SUBDIRS); do \
           (cd $$subdir; $(MAKE) $@) || exit $$?; \

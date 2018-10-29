@@ -26,12 +26,13 @@
  */
 
 #ifndef ISTGT_SOCK_H
-#define ISTGT_SOCK_H
+#define        ISTGT_SOCK_H
 
 #include <stddef.h>
 #include <unistd.h>
 
-int istgt_getaddr(int sock, char *saddr, int slen, char *caddr, int clen, uint32_t *iaddr, uint16_t *iport);
+int istgt_getaddr(int sock, char *saddr, int slen, char *caddr, int clen,
+    uint32_t *iaddr, uint16_t *iport);
 int istgt_listen(const char *ip, int port, int que);
 int istgt_listen_unx(const char *lpath, int que);
 int istgt_connect(const char *host, int port);
@@ -41,7 +42,8 @@ int istgt_set_sendtimeout(int s, int msec);
 int istgt_set_recvlowat(int s, int nbytes);
 ssize_t istgt_read_socket(int s, void *buf, size_t nbytes, int timeout);
 ssize_t istgt_write_socket(int s, const void *buf, size_t nbytes, int timeout);
-ssize_t istgt_readline_socket(int sock, char *buf, size_t size, char *tmp, size_t tmpsize, int *tmpidx, int *tmpcnt, int timeout);
+ssize_t istgt_readline_socket(int sock, char *buf, size_t size, char *tmp,
+    size_t tmpsize, int *tmpidx, int *tmpcnt, int timeout);
 ssize_t istgt_writeline_socket(int sock, const char *buf, int timeout);
 
 #endif /* ISTGT_SOCK_H */

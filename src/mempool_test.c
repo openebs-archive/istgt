@@ -6,7 +6,7 @@ typedef struct test_node {
 	int a;
 	int b;
 	int c;
-} test_node_t ;
+} test_node_t;
 
 struct test_node_entry {
 	int garbage;
@@ -15,6 +15,7 @@ struct test_node_entry {
 
 void check_mempool_size(rte_smempool_t *mempool);
 void verify_mempool_values_n_destroy(rte_smempool_t *mempool);
+__thread char  tinfo[50] =  {0};
 
 /*
  * Mempool size must be equal to mempool->length.
@@ -27,7 +28,7 @@ check_mempool_size(rte_smempool_t *mempool)
 	test_node_t **node = NULL;
 	test_node_t *temp;
 
-	node = (test_node_t **) malloc (sizeof (*node) * mempool->length);
+	node = (test_node_t **) malloc(sizeof (*node) * mempool->length);
 
 	for (i = 0; i < mempool->length; i++, temp = NULL) {
 		temp = get_from_mempool(mempool);
@@ -56,7 +57,7 @@ verify_mempool_values_n_destroy(rte_smempool_t *mempool)
 	test_node_t *temp;
 	int rc = 0;
 
-	node = (test_node_t **) malloc (sizeof (*node) * mempool->length);
+	node = (test_node_t **) malloc(sizeof (*node) * mempool->length);
 
 	for (i = 0; i < mempool->length; i++, temp = NULL) {
 		temp = get_from_mempool(mempool);
@@ -92,12 +93,12 @@ main(void)
 	    offsetof(struct test_node_entry, node), "test_mempool",
 	    NULL, NULL, NULL, true)) {
 		destroy_mempool(&mempool);
-		return 0;
+		return (0);
 	}
 
 	check_mempool_size(&mempool);
 	verify_mempool_values_n_destroy(&mempool);
 
 	destroy_mempool(&mempool);
-	return 0;
+	return (0);
 }

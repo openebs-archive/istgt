@@ -4,5 +4,5 @@
 /istgtcontrol
 /replication_test
 /mempool_test
-*.full
-*.debug
+/istgt_integration
+/zrepl_prot.h

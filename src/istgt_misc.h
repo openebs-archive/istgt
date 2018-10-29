@@ -143,12 +143,21 @@
 #define BUNSET32(B,N) ((B) &= ((uint32_t)(~((uint32_t)((1) << (N))))))
 
 /* memory allocate */
+#ifdef	REPLICATION
+#define xmalloc(size)		malloc(size)
+#define xfree(p)		free(p)
+#define xstrdup(s)		(s == NULL) ? NULL : strdup(s)
+#define	xmalloci(size, l)	malloc(size)
+#define	xfreei(p, l)		free(p)
+#define	xstrdupi(s, l)		(s == NULL) ? NULL : strdup(s)
+#else
 #define xmalloc(size)  xmalloci((size), __LINE__)
 #define xfree(p)  xfreei((p), __LINE__)
 #define xstrdup(s) xstrdupi((s), __LINE__)
 void *xmalloci(size_t size, uint16_t line);
 void xfreei(void *p, uint16_t line);
 char *xstrdupi(const char *s, uint16_t line);
+#endif
 
 /* string functions */
 char *strlwr(char *s);
@@ -199,4 +208,17 @@ void istgt_yield(void);
 void poolinit(void);
 void poolfini(void);
 int poolprint(char *inbuf, int len);
+
+#define timesdiff(_clockid, _st, _now, _re)				\
+{									\
+	clock_gettime(_clockid, &_now);					\
+	if ((_now.tv_nsec - _st.tv_nsec)<0) {				\
+		_re.tv_sec  = _now.tv_sec - _st.tv_sec - 1;		\
+		_re.tv_nsec = 1000000000 + _now.tv_nsec - _st.tv_nsec;	\
+	} else {							\
+		_re.tv_sec  = _now.tv_sec - _st.tv_sec;			\
+		_re.tv_nsec = _now.tv_nsec - _st.tv_nsec;		\
+	}								\
+}
+
 #endif /* ISTGT_MISC_H */
