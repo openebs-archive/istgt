@@ -5715,6 +5715,7 @@ istgt_lu_disk_lbread(ISTGT_LU_DISK *spec, CONN_Ptr conn __attribute__((__unused_
 	rc = pread(spec->fd, data, nbytes, offset);
 #endif
 	timediffw(lu_cmd, 'D');
+
 	exitblockingcall(endofmacro2)
 	if (markedForFree == 1 || markedForReturn == 1) {
 		ISTGT_TRACELOG(ISTGT_TRACE_NET, "c#%d connGone(%d)OrMarkedReturn(%d):%p:%d pendingIO:%d (read:%zd/%zd lba:%lu+%u)",

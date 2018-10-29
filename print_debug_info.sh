@@ -5,5 +5,6 @@ while sleep 60; do
     ps -auxwww;
     netstat -napt;
     tail /var/log/syslog
+    tail /tmp/istgt.log
     echo "============================================";
 done
