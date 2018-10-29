@@ -1061,7 +1061,7 @@ mock_repl(void *args)
 	}
 exit:
 	REPLICA_LOG("mock_repl exiting....\n");
-	if (rargs->snap_error == 2)
+	if (rargs->snap_error == 2 && !rargs->kill_is_over)
 		reregister_replica(rargs->volname, rargs, rargs->replica_port);
 	return NULL;
 }
@@ -1274,8 +1274,10 @@ rebuild_test(void *arg)
         	
 			case UNIT_TEST_STATE_KILL_SINGLE_REPLICA:
 				rargs = &(all_rargs[0]);
-				rargs->kill_replica = true;
-				test_args->state++;
+				if (!rargs->snap_error) {
+					rargs->kill_replica = true;
+					test_args->state++;
+				}
 				break; 
 
         		case UNIT_TEST_STATE_REREGISTER_REPLICA:
@@ -1438,6 +1440,7 @@ main(int argc, char **argv)
 	pthread_cond_wait(&test_args->test_state_cv, &test_args->test_mtx);
 	MTX_UNLOCK(&test_args->test_mtx);
 
+	REPLICA_LOG("Killing all replicas\n");
 	kill_all_replicas();
 
 	for (i = 0; i < MAXREPLICA; i++) {
