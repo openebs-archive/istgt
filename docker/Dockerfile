@@ -14,10 +14,6 @@ LABEL org.label-schema.build-date=$BUILD_DATE
 
 EXPOSE 3260 6060
 
-COPY istgt istgtcontrol /usr/local/bin/
-COPY istgt.conf istgtcontrol.conf /usr/local/etc/bkpistgt/
-COPY entrypoint-istgtimage.sh /usr/local/bin/
-
 RUN apt-get update && \
     apt-get install -y rsyslog net-tools iputils-ping libssl-dev libjson-c-dev libjemalloc-dev && \
     mkdir -p /usr/local/etc/bkpistgt /usr/local/etc/istgt && \
@@ -26,5 +22,9 @@ RUN apt-get update && \
     chmod +x /usr/local/bin/entrypoint-istgtimage.sh && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
+
+COPY istgt istgtcontrol /usr/local/bin/
+COPY istgt.conf istgtcontrol.conf /usr/local/etc/bkpistgt/
+COPY entrypoint-istgtimage.sh /usr/local/bin/
 
 ENTRYPOINT entrypoint-istgtimage.sh
