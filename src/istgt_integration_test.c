@@ -1052,16 +1052,23 @@ mock_repl(void *args)
 
 			pthread_cond_destroy(&rargs->io_recv_cv);
 			pthread_cond_destroy(&rargs->io_send_cv);
+
+			if (rargs->kill_replica)
+				rargs->snap_error = 0;
+
 			if (rargs->kill_replica)
 				rargs->kill_is_over = true;
+
 			REPLICA_ERRLOG("Killing of replica:%s port:%d"
-			    " err:%d completed\n", rargs->replica_ip, rargs->replica_port, rargs->snap_error);
+			    " killflag:%d snap_err:%d completed\n",
+			    rargs->replica_ip, rargs->replica_port,
+			    rargs->kill_replica, rargs->snap_error);
 			goto exit;
 		}
 	}
 exit:
 	REPLICA_LOG("mock_repl exiting....\n");
-	if (rargs->snap_error == 2 && !rargs->kill_is_over)
+	if (rargs->snap_error == 2)
 		reregister_replica(rargs->volname, rargs, rargs->replica_port);
 	return NULL;
 }
@@ -1223,6 +1230,9 @@ reregister_replica(char *volname, rargs_t *rargs, int port)
 	pthread_t replica_thread;
 
 	sleep(3);
+	if (rargs->kill_replica && rargs->snap_error)
+		return 0;
+
 	strncpy(rargs->replica_ip, "127.0.0.1", MAX_IP_LEN);
 	rargs->replica_port = port;
 	rargs->kill_replica = false;
@@ -1249,8 +1259,10 @@ kill_all_replicas(void)
 	int i; 
 
 	for (i = 0; i < MAXREPLICA; i++) {
-		if (all_rargs[i].replica_port)
+		if (all_rargs[i].replica_port) {
+			REPLICA_ERRLOG("killing replica %d from rebuild_test\n", all_rargs[i].replica_port);
 			all_rargs[i].kill_replica = true;
+		}
 	}
 }
 
@@ -1312,6 +1324,8 @@ rebuild_test(void *arg)
 					    reregister_replica(spec->volname, &(all_rargs[new_replica_count]), 6166);
 					test_args->state++;
 					new_replica_count += 1;
+				} else {
+					test_args->state--;
 				}
 				break;
        
