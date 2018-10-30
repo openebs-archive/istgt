@@ -1068,7 +1068,7 @@ mock_repl(void *args)
 	}
 exit:
 	REPLICA_LOG("mock_repl exiting....\n");
-	if (rargs->snap_error == 2)
+	if (rargs->snap_error == 2 && !rargs->kill_is_over)
 		reregister_replica(rargs->volname, rargs, rargs->replica_port);
 	return NULL;
 }
