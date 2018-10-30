@@ -101,6 +101,7 @@ run_istgt_integration()
 	$ISTGT_INTEGRATION >> $INTEGRATION_TEST_LOGFILE 2>&1
 	[[ $? -ne 0 ]] && echo "istgt integration test failed" && tail -30 $INTEGRATION_TEST_LOGFILE && exit 1
 	rm -f /tmp/test_vol*
+	rm $INTEGRATION_TEST_LOGFILE
 	return 0
 }
 
