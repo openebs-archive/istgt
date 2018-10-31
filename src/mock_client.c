@@ -14,6 +14,7 @@
 #include "istgt_misc.h"
 #include "istgt_proto.h"
 #include "replication_misc.h"
+#include "assert.h"
 
 typedef struct cargs_s {
 	spec_t *spec;
@@ -25,27 +26,32 @@ typedef struct cargs_s {
 
 extern int ignore_io_error;
 
-void create_mock_client(spec_t *);
+void create_mock_client(spec_t *, bool do_snap);
 void *reader(void *args);
-void *mgmt_thrd(void *args);
+void *snapshot_thread(void *args);
 void *writer(void *args);
 void check_settings(spec_t *spec);
 void wait_for_mock_clients(void);
-static void build_cmd(cargs_t *cargs, ISTGT_LU_CMD_Ptr lu_cmd, SBC_OPCODE opcode,
-    int len);
+static void build_cmd(cargs_t *cargs, ISTGT_LU_CMD_Ptr lu_cmd,
+    SBC_OPCODE opcode, int len);
+
+extern void init_snap_resp_list(void);
+extern void destroy_snap_resp_list(void);
+extern void update_snap_resp_list(spec_t *spec);
+extern void verify_snap_response(int res);
 
 cargs_t *all_cargs = NULL;
 pthread_t *all_cthreads = NULL;
 
 static void
 build_cmd(cargs_t *cargs, ISTGT_LU_CMD_Ptr cmd, SBC_OPCODE opcode,
-    int len)
+		int len)
 {
 	char *buf;
 	int i;
 
 	cmd->luworkerindx = cargs->workerid;
-	switch(opcode) {
+	switch (opcode) {
 		case SBC_WRITE_16:
 			buf = xmalloc(len);
 			for (i = 0; i < len; i++)
@@ -74,12 +80,11 @@ build_cmd(cargs_t *cargs, ISTGT_LU_CMD_Ptr cmd, SBC_OPCODE opcode,
 /*
  * Checks for settings on 'spec' to continue IOs
  */
-void check_settings(spec_t *spec)
+void
+check_settings(spec_t *spec)
 {
 	while (spec->ready != true)
 		sleep(1);
-
-	return;
 }
 
 /*
@@ -102,7 +107,7 @@ writer(void *args)
 	pthread_mutex_t *mtx = cargs->mtx;
 	pthread_cond_t *cv = cargs->cv;
 	int *cnt = cargs->count;
-	SBC_OPCODE opcode; 
+	SBC_OPCODE opcode;
 
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	srandom(now.tv_sec);
@@ -120,7 +125,7 @@ writer(void *args)
 
 	while (1) {
 
-		opcode = SBC_WRITE_16; 
+		opcode = SBC_WRITE_16;
 		blk_offset = random() % num_blocks;
 		offset = blk_offset * blklen;
 		len_in_blocks = random() % 15;
@@ -145,7 +150,7 @@ writer(void *args)
 			break;
 		if (now.tv_sec - prev.tv_sec > 1) {
 			prev = now;
-			REPLICA_ERRLOG("wrote %d from %s\n", count, tinfo);
+//			REPLICA_ERRLOG("wrote %d from %s\n", count, tinfo);
 		}
 	}
 end:
@@ -158,7 +163,7 @@ end:
 	pthread_cond_signal(cv);
 	MTX_UNLOCK(mtx);
 
-	return NULL;
+	return (NULL);
 }
 
 /*
@@ -181,7 +186,7 @@ reader(void *args)
 	pthread_mutex_t *mtx = cargs->mtx;
 	pthread_cond_t *cv = cargs->cv;
 	int *cnt = cargs->count;
-	SBC_OPCODE opcode = SBC_READ_16; 
+	SBC_OPCODE opcode = SBC_READ_16;
 
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	srandom(now.tv_sec);
@@ -222,7 +227,7 @@ reader(void *args)
 			break;
 		if (now.tv_sec - prev.tv_sec > 1) {
 			prev = now;
-			REPLICA_ERRLOG("read %d from %s\n", count, tinfo);
+//			REPLICA_ERRLOG("read %d from %s\n", count, tinfo);
 		}
 	}
 end:
@@ -237,11 +242,11 @@ end:
 	pthread_cond_signal(cv);
 	MTX_UNLOCK(mtx);
 
-	return NULL;
+	return (NULL);
 }
 
 void *
-mgmt_thrd(void *args)
+snapshot_thread(void *args)
 {
 	cargs_t *cargs = (cargs_t *)args;
 	spec_t *spec = (spec_t *)cargs->spec;
@@ -249,8 +254,10 @@ mgmt_thrd(void *args)
 	pthread_mutex_t *mtx = cargs->mtx;
 	pthread_cond_t *cv = cargs->cv;
 	int *cnt = cargs->count;
-	struct timespec now, start, prev, p;
+	struct timespec now, start, cmd_start, cmd_time;
 	char *snapname;
+	int ret;
+	int io_wait_time, wait_time;
 
 	snprintf(tinfo, 50, "clientmgmt%d", cargs->workerid);
 	prctl(PR_SET_NAME, tinfo, 0, 0, 0);
@@ -258,48 +265,55 @@ mgmt_thrd(void *args)
 	snapname = malloc(50);
 	strcpy(snapname, "snap1");
 
+	init_snap_resp_list();
+
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	srandom(now.tv_sec);
 
 	clock_gettime(CLOCK_MONOTONIC, &start);
-	clock_gettime(CLOCK_MONOTONIC, &prev);
 	while (1) {
-		clock_gettime(CLOCK_MONOTONIC, &p);
-		(void) istgt_lu_create_snapshot(spec, snapname, random() % 2 + 2,
-		    random() % 2 + 4);
-		clock_gettime(CLOCK_MONOTONIC, &now);
+		update_snap_resp_list(spec);
+		io_wait_time = random() % 2 + 2;
+		wait_time = random() % 2 + 4;
+
+		clock_gettime(CLOCK_MONOTONIC, &cmd_start);
+		ret = istgt_lu_create_snapshot(spec, snapname, io_wait_time,
+		    wait_time);
+		timesdiff(CLOCK_MONOTONIC, cmd_start, now, cmd_time);
+
+		VERIFY(cmd_time.tv_sec <= (wait_time + 1));
+
+		verify_snap_response(ret);
 
 		sleep(1);
 		count++;
 		clock_gettime(CLOCK_MONOTONIC, &now);
 		if (now.tv_sec - start.tv_sec > 120)
 			break;
-		if (now.tv_sec - prev.tv_sec > 1) {
-			prev = now;
-			REPLICA_ERRLOG("sent %d from %s\n", count, tinfo);
-		}
 	}
-	REPLICA_ERRLOG("exiting mgmt_thrd %s sent %d\n", tinfo, count);
+	REPLICA_ERRLOG("exiting snapshot thread %s sent %d\n", tinfo, count);
 
+	destroy_snap_resp_list();
 	free(snapname);
 	MTX_LOCK(mtx);
 	*cnt = *cnt + 1;
 	pthread_cond_signal(cv);
 	MTX_UNLOCK(mtx);
 
-	return NULL;
+	return (NULL);
 }
 
 /*
- * creates client threads that are needed to send read/write IOs to replication module.
- * cargs_t stores details that are sent to reader/writer threads
- * which isends IOs to replication module.
+ * creates client threads that are needed to send read/write IOs to replication
+ * module.  cargs_t stores details that are sent to reader/writer threads which
+ * isends IOs to replication module.
  */
+
 void
-create_mock_client(spec_t *spec)
+create_mock_client(spec_t *spec, bool do_snap)
 {
 	int num_threads = 6;
-	int mgmt_threads = 2;
+	int snap_thread = (do_snap) ? 1 : 0;
 	int i;
 	cargs_t *cargs;
 	struct timespec now;
@@ -315,8 +329,10 @@ create_mock_client(spec_t *spec)
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	srandom(now.tv_sec);
 
-	all_cargs = (cargs_t *)malloc(sizeof (cargs_t) * (num_threads + mgmt_threads));
-	all_cthreads = (pthread_t *)malloc(sizeof (pthread_t) * (num_threads + mgmt_threads));
+	all_cargs = (cargs_t *)malloc(sizeof (cargs_t) *
+	    (num_threads + snap_thread));
+	all_cthreads = (pthread_t *)malloc(sizeof (pthread_t) *
+	    (num_threads + snap_thread));
 
 	for (i = 0; i < num_threads; i++) {
 		cargs = &(all_cargs[i]);
@@ -331,18 +347,19 @@ create_mock_client(spec_t *spec)
 			pthread_create(&all_cthreads[i], NULL, &reader, cargs);
 	}
 
-	for (i = 0; i < mgmt_threads; i++) {
-		cargs = &(all_cargs[num_threads + i]);
-		cargs->workerid = num_threads + i;
+	if (do_snap) {
+		cargs = &(all_cargs[num_threads]);
+		cargs->workerid = num_threads;
 		cargs->spec = spec;
 		cargs->mtx = &mtx;
 		cargs->cv = &cv;
 		cargs->count = &count;
-		pthread_create(&all_cthreads[cargs->workerid], NULL, &mgmt_thrd, cargs);
+		pthread_create( &all_cthreads[cargs->workerid], NULL, &snapshot_thread,
+		    cargs);
 	}
 
 	MTX_LOCK(&mtx);
-	while (count != (num_threads + mgmt_threads))
+	while (count != (num_threads + snap_thread))
 		pthread_cond_wait(&cv, &mtx);
 	MTX_UNLOCK(&mtx);
 
@@ -350,8 +367,6 @@ create_mock_client(spec_t *spec)
 	free(all_cthreads);
 	all_cthreads = NULL;
 	all_cargs = NULL;
-
-	return;
 }
 
 void
@@ -362,7 +377,7 @@ wait_for_mock_clients()
 		__sync_synchronize();
 		usleep(100000);
 		if (!all_cthreads)
-                        return;
+			return;
 		count--;
 	}
 
