@@ -119,8 +119,8 @@ istgt_queue_enqueuei(ISTGT_QUEUE_Ptr head, void *elem, uint16_t line)
 }
 
 ISTGT_QUEUE_Ptr
-istgt_queue_enqueue_afteri(ISTGT_QUEUE_Ptr head, ISTGT_QUEUE_Ptr current_ptr, 
-	void *elem, uint16_t line)
+istgt_queue_enqueue_afteri(ISTGT_QUEUE_Ptr head, ISTGT_QUEUE_Ptr current_ptr,
+    void *elem, uint16_t line)
 {
 	ISTGT_QUEUE_Ptr qp, next_ptr;
 
@@ -178,13 +178,15 @@ istgt_queue_dequeuei(ISTGT_QUEUE_Ptr head, uint16_t line)
 }
 
 void *
-istgt_queue_dequeue_middlei(ISTGT_QUEUE_Ptr head, 
-	ISTGT_QUEUE_Ptr complete_queue_ptr, uint16_t line)
+istgt_queue_dequeue_middlei(ISTGT_QUEUE_Ptr head,
+    ISTGT_QUEUE_Ptr complete_queue_ptr, uint16_t line)
 {
 	ISTGT_QUEUE_Ptr prev = NULL;
 	ISTGT_QUEUE_Ptr next = NULL;
-	if (head == NULL || complete_queue_ptr == NULL || complete_queue_ptr == head)
+	if (head == NULL || complete_queue_ptr == NULL ||
+	    complete_queue_ptr == head)
 		return (NULL);
+  
 	prev = complete_queue_ptr->prev;
 	next = complete_queue_ptr->next;
 
@@ -343,6 +345,7 @@ istgt_queue_walk(ISTGT_QUEUE_Ptr head, void ** cookie)
 	*cookie = cp->next;
 	if (unlikely(*cookie == NULL))
 		ISTGT_ERRLOG("cookie is NULL!!!!!!\n");
+  
 	return  (*cookie == NULL ? NULL :cp->elem);
 }
 
@@ -380,5 +383,6 @@ istgt_queue_reverse_walk(ISTGT_QUEUE_Ptr head, void ** cookie)
 	*cookie = cp->prev;
 	if (unlikely(*cookie == NULL))
 		ISTGT_ERRLOG("cookie is NULL!!!!!!\n");
-	return  (*cookie == NULL ? NULL :cp->elem);
+	
+  return  (*cookie == NULL ? NULL :cp->elem);
 }
