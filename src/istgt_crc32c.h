@@ -26,7 +26,7 @@
  */
 
 #ifndef ISTGT_CRC32C_H
-#define ISTGT_CRC32C_H
+#define	ISTGT_CRC32C_H
 
 #include <stdint.h>
 #include <stddef.h>
@@ -35,15 +35,16 @@
 #include <sys/uio.h>
 #endif
 
-#define ISTGT_USE_CRC32C_TABLE
-#define ISTGT_CRC32C_INITIAL    0xffffffffUL
-#define ISTGT_CRC32C_XOR        0xffffffffUL
-#define ISTGT_CRC32C_POLYNOMIAL 0x1edc6f41UL
+#define	ISTGT_USE_CRC32C_TABLE
+#define	ISTGT_CRC32C_INITIAL    0xffffffffUL
+#define	ISTGT_CRC32C_XOR	0xffffffffUL
+#define	ISTGT_CRC32C_POLYNOMIAL 0x1edc6f41UL
 
 void istgt_init_crc32c_table(void);
 uint32_t istgt_update_crc32c(const uint8_t *buf, size_t len, uint32_t crc);
 uint32_t istgt_fixup_crc32c(size_t total, uint32_t crc);
 uint32_t istgt_crc32c(const uint8_t *buf, size_t len);
-uint32_t istgt_iovec_crc32c(const struct iovec *iovp, int iovc, uint32_t offset, uint32_t len);
+uint32_t istgt_iovec_crc32c(const struct iovec *iovp, int iovc,\
+	uint32_t offset, uint32_t len);
 
 #endif /* ISTGT_CRC32C_H */

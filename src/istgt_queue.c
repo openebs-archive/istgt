@@ -186,6 +186,7 @@ istgt_queue_dequeue_middlei(ISTGT_QUEUE_Ptr head,
 	if (head == NULL || complete_queue_ptr == NULL ||
 	    complete_queue_ptr == head)
 		return (NULL);
+  
 	prev = complete_queue_ptr->prev;
 	next = complete_queue_ptr->next;
 
@@ -344,7 +345,8 @@ istgt_queue_walk(ISTGT_QUEUE_Ptr head, void ** cookie)
 	*cookie = cp->next;
 	if (unlikely(*cookie == NULL))
 		ISTGT_ERRLOG("cookie is NULL!!!!!!\n");
-	return (*cookie == NULL ? NULL :cp->elem);
+  
+	return  (*cookie == NULL ? NULL :cp->elem);
 }
 
 void *
@@ -381,5 +383,6 @@ istgt_queue_reverse_walk(ISTGT_QUEUE_Ptr head, void ** cookie)
 	*cookie = cp->prev;
 	if (unlikely(*cookie == NULL))
 		ISTGT_ERRLOG("cookie is NULL!!!!!!\n");
-	return (*cookie == NULL ? NULL :cp->elem);
+	
+  return  (*cookie == NULL ? NULL :cp->elem);
 }
