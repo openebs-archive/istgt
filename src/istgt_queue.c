@@ -40,17 +40,17 @@
 #include "istgt_lu.h"
 #include "istgt_log.h"
 
-/*Queues are implemented as Circular Doubly Linked Lists*/
+/* Queues are implemented as Circular Doubly Linked Lists */
 int
 istgt_queue_init(ISTGT_QUEUE_Ptr head)
 {
 	if (head == NULL)
-		return -1;
+		return (-1);
 	head->prev = head;
 	head->next = head;
 	head->elem = NULL;
 	head->num = 0;
-	return 0;
+	return (0);
 }
 
 void
@@ -77,16 +77,16 @@ istgt_queue_count(ISTGT_QUEUE_Ptr head)
 	int num;
 
 	if (head == NULL)
-		return 0;
+		return (0);
 	num = 0;
 	for (qp = head->next; qp != NULL && qp != head; qp = qp->next) {
 		num++;
 	}
-	return num;
+	return (num);
 #else
 	if (head == NULL)
-		return 0;
-	return head->num;
+		return (0);
+	return (head->num);
 #endif
 }
 
@@ -97,8 +97,8 @@ istgt_queue_enqueuei(ISTGT_QUEUE_Ptr head, void *elem, uint16_t line)
 	ISTGT_QUEUE_Ptr tail;
 
 	if (head == NULL)
-		return NULL;
-	qp = xmalloci(sizeof *qp, line);
+		return (NULL);
+	qp = xmalloci(sizeof (*qp), line);
 	qp->num = head->num;
 	qp->elem = elem;
 
@@ -115,25 +115,26 @@ istgt_queue_enqueuei(ISTGT_QUEUE_Ptr head, void *elem, uint16_t line)
 		qp->prev = tail;
 	}
 	head->num++;
-	return qp;
+	return (qp);
 }
 
 ISTGT_QUEUE_Ptr
-istgt_queue_enqueue_afteri(ISTGT_QUEUE_Ptr head, ISTGT_QUEUE_Ptr current_ptr, void *elem, uint16_t line)
+istgt_queue_enqueue_afteri(ISTGT_QUEUE_Ptr head, ISTGT_QUEUE_Ptr current_ptr, 
+	void *elem, uint16_t line)
 {
 	ISTGT_QUEUE_Ptr qp, next_ptr;
 
 	if (head == NULL)
-		return NULL;
+		return (NULL);
 	if (current_ptr == NULL)
-		return NULL;
-	qp = xmalloci(sizeof *qp, line);
+		return (NULL);
+	qp = xmalloci(sizeof (*qp), line);
 	qp->num = current_ptr->num + 1;
 	qp->elem = elem;
 
 	next_ptr = current_ptr->next;
 
-	if(next_ptr == NULL || next_ptr == current_ptr) {
+	if (next_ptr == NULL || next_ptr == current_ptr) {
 		current_ptr->next = qp;
 		current_ptr->prev = qp;
 		qp->next = current_ptr;
@@ -145,7 +146,7 @@ istgt_queue_enqueue_afteri(ISTGT_QUEUE_Ptr head, ISTGT_QUEUE_Ptr current_ptr, vo
 		qp->prev = current_ptr;
 	}
 	head->num++;
-	return qp;
+	return (qp);
 }
 
 void *
@@ -156,10 +157,10 @@ istgt_queue_dequeuei(ISTGT_QUEUE_Ptr head, uint16_t line)
 	void *elem;
 
 	if (head == NULL)
-		return NULL;
+		return (NULL);
 	first = head->next;
 	if (first == NULL || first == head) {
-		return NULL;
+		return (NULL);
 	} else {
 		elem = first->elem;
 		next = first->next;
@@ -173,27 +174,28 @@ istgt_queue_dequeuei(ISTGT_QUEUE_Ptr head, uint16_t line)
 		}
 	}
 	head->num--;
-	return elem;
+	return (elem);
 }
 
 void *
-istgt_queue_dequeue_middlei(ISTGT_QUEUE_Ptr head, ISTGT_QUEUE_Ptr complete_queue_ptr, uint16_t line)
+istgt_queue_dequeue_middlei(ISTGT_QUEUE_Ptr head, 
+	ISTGT_QUEUE_Ptr complete_queue_ptr, uint16_t line)
 {
 	ISTGT_QUEUE_Ptr prev = NULL;
 	ISTGT_QUEUE_Ptr next = NULL;
 	if (head == NULL || complete_queue_ptr == NULL || complete_queue_ptr == head)
-		return NULL;
+		return (NULL);
 	prev = complete_queue_ptr->prev;
 	next = complete_queue_ptr->next;
 
 	prev->next = next;
-	if(next == NULL)
+	if (next == NULL)
 		head->prev = NULL;
 	else
 		next->prev = prev;
 	xfreei(complete_queue_ptr, line);
 	head->num--;
-	return NULL;
+	return (NULL);
 }
 
 void *
@@ -203,14 +205,14 @@ istgt_queue_first(ISTGT_QUEUE_Ptr head)
 	void *elem;
 
 	if (head == NULL)
-		return NULL;
+		return (NULL);
 	first = head->next;
 	if (first == NULL || first == head) {
-		return NULL;
+		return (NULL);
 	} else {
 		elem = first->elem;
 	}
-	return elem;
+	return (elem);
 }
 ISTGT_QUEUE_Ptr
 istgt_queue_enqueue_firsti(ISTGT_QUEUE_Ptr head, void *elem, uint16_t line)
@@ -219,8 +221,8 @@ istgt_queue_enqueue_firsti(ISTGT_QUEUE_Ptr head, void *elem, uint16_t line)
 	ISTGT_QUEUE_Ptr first;
 
 	if (head == NULL)
-		return NULL;
-	qp = xmalloci(sizeof *qp, line);
+		return (NULL);
+	qp = xmalloci(sizeof (*qp), line);
 	qp->num = head->num;
 	qp->elem = elem;
 
@@ -237,7 +239,7 @@ istgt_queue_enqueue_firsti(ISTGT_QUEUE_Ptr head, void *elem, uint16_t line)
 		qp->prev = head;
 	}
 	head->num++;
-	return qp;
+	return (qp);
 }
 
 void *
@@ -245,14 +247,14 @@ istgt_queue_last(ISTGT_QUEUE_Ptr head, void *elem)
 {
 	ISTGT_QUEUE_Ptr last;
 	if (head == NULL)
-		return NULL;
+		return (NULL);
 
 	last = head->prev;
 	if (last == NULL || last == head)
-		return NULL;
+		return (NULL);
 	else
 		elem = last->elem;
-	return elem;
+	return (elem);
 }
 
 void *
@@ -262,38 +264,38 @@ istgt_queue_prev(ISTGT_QUEUE_Ptr head, void * elem)
 	ISTGT_QUEUE_Ptr first;
 
 	if (head == NULL || elem == NULL)
-		return NULL;
+		return (NULL);
 
 	first = head->next;
 
-	if (first == NULL || first == head ) 
-		return NULL;
- 
+	if (first == NULL || first == head)
+		return (NULL);
+
 	for (qp = head->next; qp != NULL && qp != head; qp = qp->next) {
 		if (qp == elem)
-			return qp->prev;
+			return (qp->prev);
 	}
-	return NULL;
+	return (NULL);
 }
 
 ISTGT_QUEUE_Ptr
 istgt_get_prev_qptr(void *cookie)
 {
 	ISTGT_QUEUE_Ptr cp;
-	if(cookie == NULL)
-		return NULL;
+	if (cookie == NULL)
+		return (NULL);
 	cp = (ISTGT_QUEUE_Ptr)cookie;
-	return cp->prev; 
+	return (cp->prev);
 }
 
 ISTGT_QUEUE_Ptr
 istgt_get_next_qptr(void *cookie)
 {
 	ISTGT_QUEUE_Ptr cp;
-	if(cookie == NULL)
-		return NULL;
+	if (cookie == NULL)
+		return (NULL);
 	cp = (ISTGT_QUEUE_Ptr)cookie;
-	return cp->next; 
+	return (cp->next);
 }
 
 /*
@@ -315,34 +317,33 @@ istgt_queue_walk(ISTGT_QUEUE_Ptr head, void ** cookie)
 	/* Empty queue */
 	if (head == NULL) {
 		*cookie = NULL;
-		return NULL;
+		return (NULL);
 	}
 
 	if (head->next == NULL) {
 		*cookie = NULL;
-		return NULL;
+		return (NULL);
 	}
 
 	if (*cookie == head) {
-		return NULL;
+		return (NULL);
 	}
 
 	if (head == head->next) {
 		*cookie = NULL;
-		return NULL;
+		return (NULL);
 	}
 
 	if (*cookie == NULL) {
 		cp = head->next;
-	}
-	else {
+	} else {
 		cp = (ISTGT_QUEUE_Ptr)*cookie;
 	}
 
 	*cookie = cp->next;
-	if(unlikely(*cookie == NULL))
+	if (unlikely(*cookie == NULL))
 		ISTGT_ERRLOG("cookie is NULL!!!!!!\n");
-	return  *cookie == NULL ? NULL :cp->elem;
+	return  (*cookie == NULL ? NULL :cp->elem);
 }
 
 void *
@@ -353,33 +354,31 @@ istgt_queue_reverse_walk(ISTGT_QUEUE_Ptr head, void ** cookie)
 	/* Empty queue */
 	if (head == NULL) {
 		*cookie = NULL;
-		return NULL;
+		return (NULL);
 	}
 
 	if (head->next == NULL) {
 		*cookie = NULL;
-		return NULL;
+		return (NULL);
 	}
 
 	if (*cookie == head) {
-		return NULL;
+		return (NULL);
 	}
 
 	if (head == head->next) {
 		*cookie = NULL;
-		return NULL;
+		return (NULL);
 	}
 
 	if (*cookie == NULL) {
 		cp = head->prev;
-	}
-	else {
+	} else {
 		cp = (ISTGT_QUEUE_Ptr)*cookie;
 	}
 
 	*cookie = cp->prev;
-	if(unlikely(*cookie == NULL))
+	if (unlikely(*cookie == NULL))
 		ISTGT_ERRLOG("cookie is NULL!!!!!!\n");
-	return  *cookie == NULL ? NULL :cp->elem;
+	return  (*cookie == NULL ? NULL :cp->elem);
 }
-
