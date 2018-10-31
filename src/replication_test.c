@@ -245,26 +245,15 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 	/* Init mgmt_ack_hdr */
 	build_mgmt_ack_hdr;
 	iovec[0].iov_base = mgmt_ack_hdr;
-	iovec[0].iov_len = 16;
-
-	iovec[1].iov_base = ((uint8_t *)mgmt_ack_hdr) + 16;
-	iovec[1].iov_len = 16;
-
-	iovec[2].iov_base = ((uint8_t *)mgmt_ack_hdr) + 32;
-	iovec[2].iov_len = sizeof (zvol_io_hdr_t) - 32;
+	iovec[0].iov_len = sizeof (zvol_io_hdr_t);
 
 	if (opcode == ZVOL_OPCODE_SNAP_DESTROY) {
-		iovec[2].iov_base = ((uint8_t *)mgmt_ack_hdr) + 32;
-		iovec[2].iov_len = 2;
 
-		iovec[3].iov_base = ((uint8_t *)mgmt_ack_hdr) + 34;
-		iovec[3].iov_len = sizeof (zvol_io_hdr_t) - 34;
-
-		iovec_count = 4;
+		iovec_count = 1;
 		mgmt_ack_hdr->status = (random() % 2) ? ZVOL_OP_STATUS_FAILED : ZVOL_OP_STATUS_OK;
 		mgmt_ack_hdr->len = 0;
 	} else if (opcode == ZVOL_OPCODE_SNAP_CREATE) {
-		iovec_count = 3;
+		iovec_count = 1;
 		sleep(random()%3 + 1);
 		mgmt_ack_hdr->status = (random() % 5 == 0) ? ZVOL_OP_STATUS_FAILED : ZVOL_OP_STATUS_OK;
 		mgmt_ack_hdr->len = 0;
@@ -282,32 +271,26 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 		}
 
 		mgmt_ack_hdr->len = sizeof (zrepl_status_ack_t);
-		iovec_count = 4;
-		iovec[3].iov_base = zrepl_status;
-		iovec[3].iov_len = sizeof (zrepl_status_ack_t);
+		iovec_count = 2;
+		iovec[1].iov_base = zrepl_status;
+		iovec[1].iov_len = sizeof (zrepl_status_ack_t);
 	} else if (opcode == ZVOL_OPCODE_START_REBUILD) {
 		zrepl_status->rebuild_status = ZVOL_REBUILDING_SNAP;
 		mgmt_ack_hdr->len = 0;
-		iovec_count = 3;
+		iovec_count = 1;
 	} else if (opcode == ZVOL_OPCODE_STATS) {
 		strcpy(stats.label, "used");
 		stats.value = 10000;
 		mgmt_ack_hdr->len = sizeof (zvol_op_stat_t);
-		iovec[3].iov_base = &stats;
-		iovec[3].iov_len = sizeof (zvol_op_stat_t);
-		iovec_count = 4;
+		iovec[1].iov_base = &stats;
+		iovec[1].iov_len = sizeof (zvol_op_stat_t);
+		iovec_count = 2;
 	} else {
 		build_mgmt_ack_data;
 
-		iovec[3].iov_base = mgmt_ack_data;
-		iovec[3].iov_len = 50;
-
-		iovec[4].iov_base = ((uint8_t *)mgmt_ack_data) + 50;
-		iovec[4].iov_len = 50;
-
-		iovec[5].iov_base = ((uint8_t *)mgmt_ack_data) + 100;
-		iovec[5].iov_len = sizeof (mgmt_ack_t) - 100;
-		iovec_count = 6;
+		iovec[1].iov_base = mgmt_ack_data;
+		iovec[1].iov_len = sizeof (mgmt_ack_t);
+		iovec_count = 2;
 	}
 
 	for (start = 0; start < iovec_count; start += 1) {
