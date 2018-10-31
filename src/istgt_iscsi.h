@@ -35,8 +35,11 @@
 #include "istgt_lu.h"
 #include "istgt_queue.h"
 #include <sys/uio.h>
-#define	ISCSI_BHS_LEN 48
-#define	ISCSI_ALIGNMENT 4
+
+/* Basic header segment length */
+#define ISCSI_BHS_LEN 48
+#define ISCSI_ALIGNMENT 4
+
 /* support version - RFC3720(10.12.4) */
 #define	ISCSI_VERSION 0x00
 
