@@ -150,7 +150,7 @@ writer(void *args)
 			break;
 		if (now.tv_sec - prev.tv_sec > 1) {
 			prev = now;
-			REPLICA_ERRLOG("wrote %d from %s\n", count, tinfo);
+//			REPLICA_ERRLOG("wrote %d from %s\n", count, tinfo);
 		}
 	}
 end:
@@ -227,7 +227,7 @@ reader(void *args)
 			break;
 		if (now.tv_sec - prev.tv_sec > 1) {
 			prev = now;
-			REPLICA_ERRLOG("read %d from %s\n", count, tinfo);
+//			REPLICA_ERRLOG("read %d from %s\n", count, tinfo);
 		}
 	}
 end:
