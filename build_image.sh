@@ -1,6 +1,13 @@
 #!/bin/bash
 set -e
 
+pwd
+make clean
+sh autogen.sh
+./configure --enable-replication
+make clean
+make
+
 BUILD_DATE=$(date +'%Y%m%d%H%M%S')
 REPO_NAME="openebs/cstor-istgt"
 
