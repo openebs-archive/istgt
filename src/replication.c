@@ -529,6 +529,14 @@ trigger_rebuild(spec_t *spec)
 
 	clock_gettime(CLOCK_MONOTONIC, &now);
 
+	/*
+	 * istgt starts rebuild on a replica after 2*timeout of its start time.
+	 * This is done to make sure that if any pending IOs on helping replicas
+	 * are already available at degraded replica before rebuild is started.
+
+	 * optimization is that rebuild will be started on a replica if all the
+	 * connected replicas are not having any pending IOs with them.
+	 */
 	non_zero_inflight_replica_found = 0;
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
 		if (replica->replica_inflight_write_io_cnt != 0 ||
