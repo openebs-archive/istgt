@@ -504,6 +504,7 @@ trigger_rebuild(spec_t *spec)
 	replica_t *replica = NULL;
 	replica_t *target_replica = NULL;
 	replica_t *healthy_replica = NULL;
+	int non_zero_inflight_replica_found = 0;
 
 	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 
@@ -528,6 +529,24 @@ trigger_rebuild(spec_t *spec)
 
 	clock_gettime(CLOCK_MONOTONIC, &now);
 
+	non_zero_inflight_replica_found = 0;
+	TAILQ_FOREACH(replica, &spec->rq, r_next) {
+		if (replica->replica_inflight_write_io_cnt != 0 ||
+		    replica->replica_inflight_sync_io_cnt != 0)
+			non_zero_inflight_replica_found = 1;
+	}
+
+#ifdef	DEBUG
+	const char* non_zero_inflight_replica_str =
+	    getenv("non_zero_inflight_replica_cnt");
+	unsigned int non_zero_inflight_replica_cnt = 0;
+
+	if (non_zero_inflight_replica_str != NULL)
+		non_zero_inflight_replica_cnt =
+		    (unsigned int)strtol(non_zero_inflight_replica_str, NULL, 10);
+	if (non_zero_inflight_replica_cnt == 1)
+		non_zero_inflight_replica_found = 1;
+#endif
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
 		/* Find healthy replica */
 		if (replica->state == ZVOL_STATUS_HEALTHY) {
@@ -537,11 +556,14 @@ trigger_rebuild(spec_t *spec)
 		}
 
 		timesdiff(CLOCK_MONOTONIC, replica->create_time, now, diff);
+
 		if ((spec->replication_factor != 1) &&
 		    (diff.tv_sec <= (2 * replica_timeout))) {
-			REPLICA_LOG("Replica:%p added very recently, "
-			    "skipping rebuild.\n", replica);
-			continue;
+			if (non_zero_inflight_replica_found == 1) {
+				REPLICA_LOG("Replica:%p added very recently, "
+				    "skipping rebuild.\n", replica);
+				continue;
+			}
 		}
 
 		if (max <= replica->initial_checkpointed_io_seq) {

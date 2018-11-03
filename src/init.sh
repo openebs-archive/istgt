@@ -58,11 +58,12 @@ sed -i "s|Portal UC1.*|Portal UC1 $portal:3261|g" $CONF_FILE
 sed -i "s|Portal DA1.*|Portal DA1 $portal:3260|g" $CONF_FILE
 sed -i "s|Netmask IP.*|Netmask $portal\/8|g" $CONF_FILE
 sed -i "s|LUN0 Storage.*|LUN0 Storage $size 32k|g" $CONF_FILE
+sed -i "s|MaxBurstLength.*|MaxBurstLength 8388608|g" $CONF_FILE
 
 cp $CONF_FILE /usr/local/etc/istgt/
 
 export externalIP=$externalIP
-echo $external
+echo $externalIP
 service rsyslog start
 #setting replica timeout to 20 seconds
 /usr/local/bin/istgt -R 20 &
