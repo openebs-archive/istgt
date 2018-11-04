@@ -489,7 +489,7 @@ run_lu_rf_test ()
 
 	sleep 5
 
-	cat $LOGFILE | grep "is ready for IOs now" > /dev/null 2>&1
+	grep "is ready for IOs now" $LOGFILE > /dev/null 2>&1
 	if [ $? -eq 0 ]; then
 		echo "lun refresh passed"
 	else
