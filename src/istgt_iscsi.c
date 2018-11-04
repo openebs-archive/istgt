@@ -3010,7 +3010,7 @@ parse_scsi_cdb(ISTGT_LU_CMD_Ptr lu_cmd)
 }
 	int sync_nv = 0, immed = 0;
 	int sa = 0;
-	int NOR = 0, NOW = 0, inv = 0;
+	int NOR = 0, NOW = 0;
 	int dpo = 0, fua = 0, fua_nv = 0; // cdb[1] bits 4, 3, 1
 	int bytchk = 0;     //cdb[1] bits 1
 	int anchor = 0, unmap = 0;  //cdb[1] bits 4,  3
@@ -3024,7 +3024,6 @@ parse_scsi_cdb(ISTGT_LU_CMD_Ptr lu_cmd)
 	SCSIstat_rest[sidx].opcode = cdb[0];
 	++SCSIstat_rest[sidx].req_start;
 
-	(void)inv;
 	lu_cmd->infdx = 0;
 	lu_cmd->cdbflags = 0;
 	lu_cmd->cdb0  = cdb[0];
@@ -3198,9 +3197,6 @@ parse_scsi_cdb(ISTGT_LU_CMD_Ptr lu_cmd)
 				lu_cmd->info[lu_cmd->infdx++] = 'P';
 			if (lbdata)
 				lu_cmd->info[lu_cmd->infdx++] = 'L';
-			/* only PBDATA=0 and LBDATA=0 support */
-			if (pbdata || lbdata)
-				inv = 1; //(ILLEGAL_REQUEST, 0x24, 0x00);
 			break;
 
 		case SBC_WRITE_SAME_16:
@@ -3218,11 +3214,6 @@ parse_scsi_cdb(ISTGT_LU_CMD_Ptr lu_cmd)
 				lu_cmd->info[lu_cmd->infdx++] = 'P';
 			if (lbdata)
 				lu_cmd->info[lu_cmd->infdx++] = 'L';
-			/* only PBDATA=0 and LBDATA=0 support */
-			if (pbdata || lbdata)
-				inv = 1; //(ILLEGAL_REQUEST, 0x24, 0x00);
-			if (anchor)
-				inv = 1; //(ILLEGAL_REQUEST, 0x24, 0x00);
 			break;
 
 		case SBC_COMPARE_AND_WRITE:
@@ -3300,8 +3291,6 @@ parse_scsi_cdb(ISTGT_LU_CMD_Ptr lu_cmd)
 
 		case SPC_EXTENDED_COPY:
 			sa = BGET8W(&cdb[1], 4, 5); /* LID1  - 00h / LID4 - 01h  */
-			if (sa != 0x00)
-				inv = 1;/* INVALID COMMAND SERVICE ACTION */
 			break;
 		case SPC2_RELEASE_6:
 			break;
@@ -3467,7 +3456,9 @@ istgt_iscsi_op_scsi(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 	lu_cmd.sense_alloc_len = 0; //conn->snsbufsize;
 	lu_cmd.sense_data_len = 0;
 	lu_cmd.connGone = 0;
-
+	#ifdef REPLICATION
+	clock_gettime(CLOCK_MONOTONIC_RAW, &lu_cmd.start_rw_time);
+	#endif
 	ISTGT_TRACELOG(ISTGT_TRACE_ISCSI,
 		"LU%d: CSN:%x ITT:%x (%lu/%u)[0x%x %lx+%x] PG=0x%4.4x, LUN=0x%lx "
 	    "ExpStatSN=%x StatSN=%x ExpCmdSN=%x MaxCmdSN=%x "
@@ -5462,7 +5453,7 @@ prof_log(ISTGT_LU_CMD_Ptr p, const char *caller)
 	struct timespec *_s = &(p->times[baseindx]);
 	struct timespec *_n = &(p->times[_inx]);
 	struct timespec _r;
-        ISTGT_LU_DISK *spec;
+	ISTGT_LU_DISK *spec;
 	unsigned long secs, nsecs;
 
 	if ((_n->tv_nsec - _s->tv_nsec) < 0) {
@@ -5480,7 +5471,7 @@ prof_log(ISTGT_LU_CMD_Ptr p, const char *caller)
 				len = (p->lblen * spec->blocklen)/ 1024;
 				for(; (x < len && ind < 9); x *= 2, ind++);
 			}
-			else 
+			else
 				ind = 0;
 			switch(p->cdb0) {
 				case SBC_WRITE_6:
@@ -5529,7 +5520,7 @@ prof_log(ISTGT_LU_CMD_Ptr p, const char *caller)
 							spec->IO_size[ind].cmp_n_write.tdiff[i].tv_sec = p->tdiff[i].tv_sec;
 							spec->IO_size[ind].cmp_n_write.tdiff[i].tv_nsec = p->tdiff[i].tv_nsec;
 						}
-					}	
+					}
 					break;
 				case SBC_UNMAP:
 					if((spec->IO_size[ind].unmp.total_time.tv_sec < _r.tv_sec) || (spec->IO_size[ind].unmp.total_time.tv_sec == _r.tv_sec && spec->IO_size[ind].unmp.total_time.tv_nsec < _r.tv_nsec)) {
@@ -5647,6 +5638,51 @@ prof_log(ISTGT_LU_CMD_Ptr p, const char *caller)
         }
 }
 
+#ifdef REPLICATION
+static void
+update_cummulative_rw_time(ISTGT_LU_TASK_Ptr lu_task)
+{
+	ISTGT_LU_DISK *spec = NULL;
+	struct timespec endtime, diff;
+	uint64_t ns = 0;
+
+	switch(lu_task->lu_cmd.cdb0) {
+		case SBC_WRITE_6:
+		case SBC_WRITE_10:
+		case SBC_WRITE_12:
+		case SBC_WRITE_16:
+		case SBC_WRITE_AND_VERIFY_10:
+		case SBC_WRITE_AND_VERIFY_12:
+		case SBC_WRITE_AND_VERIFY_16:
+				spec = (ISTGT_LU_DISK *)
+					lu_task->lu_cmd.lu->lun[0].spec;
+				clock_gettime(CLOCK_MONOTONIC_RAW, &endtime);
+				timesdiff(CLOCK_MONOTONIC_RAW,
+					lu_task->lu_cmd.start_rw_time,
+					endtime, diff);
+				ns = diff.tv_sec*1000000000;
+				ns += diff.tv_nsec;
+				__sync_fetch_and_add(&spec->totalwritetime, ns);
+				break;
+		case SBC_READ_6:
+		case SBC_READ_10:
+		case SBC_READ_12:
+		case SBC_READ_16:
+				spec = (ISTGT_LU_DISK *)
+					lu_task->lu_cmd.lu->lun[0].spec;
+				clock_gettime(CLOCK_MONOTONIC_RAW, &endtime);
+				timesdiff(CLOCK_MONOTONIC_RAW,
+					lu_task->lu_cmd.start_rw_time,
+					endtime, diff);
+				ns = diff.tv_sec*1000000000;
+				ns += diff.tv_nsec;
+				__sync_fetch_and_add(&spec->totalreadtime, ns);
+				break;
+        }
+	return;
+}
+#endif
+
 static void *
 sender(void *arg)
 {
@@ -5723,6 +5759,10 @@ sender(void *arg)
 			lu_task->lock = 1;
 			timediff(&lu_task->lu_cmd, 'r', __LINE__);
 			if (lu_task->type == ISTGT_LU_TASK_RESPONSE) {
+				#ifdef REPLICATION
+				update_cummulative_rw_time(lu_task);
+				#endif
+
 				/* send DATA-IN, SCSI status */
 				rc = istgt_iscsi_task_response(conn, lu_task);
 				if (rc < 0) {
