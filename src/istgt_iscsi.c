@@ -3220,6 +3220,7 @@ parse_scsi_cdb(ISTGT_LU_CMD_Ptr lu_cmd)
 			lba = (uint64_t) DGET64(&cdb[2]);
 			transfer_len = (uint32_t) DGET8(&cdb[13]);
 
+			// maxlen = ISTGT_LU_WORK_ATS_BLOCK_SIZE / spec->blocklen;
 			// if (maxlen > 0xff)
 			// 	maxlen = 0xff;
 			// if (transfer_len > maxlen)
