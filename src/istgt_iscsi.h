@@ -26,7 +26,7 @@
  */
 
 #ifndef ISTGT_ISCSI_H
-#define ISTGT_ISCSI_H
+#define	ISTGT_ISCSI_H
 
 #include <stdint.h>
 #include <pthread.h>
@@ -36,19 +36,19 @@
 #include "istgt_queue.h"
 #include <sys/uio.h>
 /* Basic header segment length */
-#define ISCSI_BHS_LEN 48
-#define ISCSI_ALIGNMENT 4
+#define	ISCSI_BHS_LEN	48
+#define	ISCSI_ALIGNMENT	4
 /* support version - RFC3720(10.12.4) */
-#define ISCSI_VERSION 0x00
+#define	ISCSI_VERSION	0x00
 
-#define ISCSI_ALIGN(SIZE) \
+#define	ISCSI_ALIGN(SIZE) \
 	(((SIZE) + (ISCSI_ALIGNMENT - 1)) & ~(ISCSI_ALIGNMENT - 1))
 
-#define ISCSI_TEXT_MAX_KEY_LEN 64
+#define	ISCSI_TEXT_MAX_KEY_LEN 64
 /* for authentication key (non encoded 1024bytes) RFC3720(5.1/11.1.4) */
-#define ISCSI_TEXT_MAX_VAL_LEN 8192
+#define	ISCSI_TEXT_MAX_VAL_LEN 8192
 
-#define SESS_MTX_LOCK(CONN) \
+#define	SESS_MTX_LOCK(CONN) \
 	do {								\
 		int _rc_;						\
 		if ((_rc_ = pthread_mutex_lock(&(CONN)->sess->mutex)) != 0) {	\
@@ -56,7 +56,7 @@
 			pthread_exit(NULL);				\
 		}							\
 	} while (0)
-#define SESS_MTX_UNLOCK(CONN) \
+#define	SESS_MTX_UNLOCK(CONN) \
 	do {								\
 		int _rc_;						\
 		if ((_rc_ = pthread_mutex_unlock(&(CONN)->sess->mutex)) != 0) {	\
@@ -67,43 +67,43 @@
 
 typedef enum {
 	/* Initiator opcodes */
-	ISCSI_OP_NOPOUT         = 0x00,
-	ISCSI_OP_SCSI           = 0x01,
-	ISCSI_OP_TASK           = 0x02,
-	ISCSI_OP_LOGIN          = 0x03,
-	ISCSI_OP_TEXT           = 0x04,
-	ISCSI_OP_SCSI_DATAOUT   = 0x05,
-	ISCSI_OP_LOGOUT         = 0x06,
-	ISCSI_OP_SNACK          = 0x10,
-	ISCSI_OP_VENDOR_1C      = 0x1c,
-	ISCSI_OP_VENDOR_1D      = 0x1d,
-	ISCSI_OP_VENDOR_1E      = 0x1e,
+	ISCSI_OP_NOPOUT	=	0x00,
+	ISCSI_OP_SCSI	=	0x01,
+	ISCSI_OP_TASK	=	0x02,
+	ISCSI_OP_LOGIN	=	0x03,
+	ISCSI_OP_TEXT	=	0x04,
+	ISCSI_OP_SCSI_DATAOUT	=	0x05,
+	ISCSI_OP_LOGOUT	=	0x06,
+	ISCSI_OP_SNACK	=	0x10,
+	ISCSI_OP_VENDOR_1C	=	0x1c,
+	ISCSI_OP_VENDOR_1D	=	0x1d,
+	ISCSI_OP_VENDOR_1E	=	0x1e,
 
 	/* Target opcodes */
-	ISCSI_OP_NOPIN          = 0x20,
-	ISCSI_OP_SCSI_RSP       = 0x21,
-	ISCSI_OP_TASK_RSP       = 0x22,
-	ISCSI_OP_LOGIN_RSP      = 0x23,
-	ISCSI_OP_TEXT_RSP       = 0x24,
-	ISCSI_OP_SCSI_DATAIN    = 0x25,
-	ISCSI_OP_LOGOUT_RSP     = 0x26,
-	ISCSI_OP_R2T            = 0x31,
-	ISCSI_OP_ASYNC          = 0x32,
-	ISCSI_OP_VENDOR_3C      = 0x3c,
-	ISCSI_OP_VENDOR_3D      = 0x3d,
-	ISCSI_OP_VENDOR_3E      = 0x3e,
-	ISCSI_OP_REJECT         = 0x3f,
+	ISCSI_OP_NOPIN	=	0x20,
+	ISCSI_OP_SCSI_RSP	=	0x21,
+	ISCSI_OP_TASK_RSP	=	0x22,
+	ISCSI_OP_LOGIN_RSP	=	0x23,
+	ISCSI_OP_TEXT_RSP	=	0x24,
+	ISCSI_OP_SCSI_DATAIN	=	0x25,
+	ISCSI_OP_LOGOUT_RSP	=	0x26,
+	ISCSI_OP_R2T	=	0x31,
+	ISCSI_OP_ASYNC	=	0x32,
+	ISCSI_OP_VENDOR_3C	=	0x3c,
+	ISCSI_OP_VENDOR_3D	=	0x3d,
+	ISCSI_OP_VENDOR_3E	=	0x3e,
+	ISCSI_OP_REJECT	=	0x3f,
 } ISCSI_OP;
 
 typedef enum {
-	ISCSI_TASK_FUNC_ABORT_TASK = 1,
-	ISCSI_TASK_FUNC_ABORT_TASK_SET = 2,
-	ISCSI_TASK_FUNC_CLEAR_ACA = 3,
-	ISCSI_TASK_FUNC_CLEAR_TASK_SET = 4,
-	ISCSI_TASK_FUNC_LOGICAL_UNIT_RESET = 5,
-	ISCSI_TASK_FUNC_TARGET_WARM_RESET = 6,
-	ISCSI_TASK_FUNC_TARGET_COLD_RESET = 7,
-	ISCSI_TASK_FUNC_TASK_REASSIGN = 8,
+	ISCSI_TASK_FUNC_ABORT_TASK	=	1,
+	ISCSI_TASK_FUNC_ABORT_TASK_SET	=	2,
+	ISCSI_TASK_FUNC_CLEAR_ACA	=	3,
+	ISCSI_TASK_FUNC_CLEAR_TASK_SET	=	4,
+	ISCSI_TASK_FUNC_LOGICAL_UNIT_RESET	=	5,
+	ISCSI_TASK_FUNC_TARGET_WARM_RESET	=	6,
+	ISCSI_TASK_FUNC_TARGET_COLD_RESET	=	7,
+	ISCSI_TASK_FUNC_TASK_REASSIGN	=	8,
 } ISCSI_TASK_FUNC;
 
 
@@ -139,7 +139,7 @@ typedef struct iscsi_ahs_t {
 	uint8_t ahs_specific2[];
 } ISCSI_AHS;
 
-#define ISCSI_DIGEST_LEN 4
+#define	ISCSI_DIGEST_LEN	4
 typedef struct iscsi_pdu_t {
 	ISCSI_BHS bhs;
 	ISCSI_AHS *ahs;
@@ -163,28 +163,28 @@ typedef struct iscsi_pdu_t {
 typedef ISCSI_PDU *ISCSI_PDU_Ptr;
 
 typedef enum {
-	CONN_STATE_INVALID = 0,
-	CONN_STATE_RUNNING = 1,
-	CONN_STATE_EXITING = 2,
-	CONN_STATE_SHUTDOWN = 3,
+	CONN_STATE_INVALID	=	0,
+	CONN_STATE_RUNNING	=	1,
+	CONN_STATE_EXITING	=	2,
+	CONN_STATE_SHUTDOWN	=	3,
 } CONN_STATE;
 
 typedef enum {
-	ISCSI_LOGIN_PHASE_NONE = 0,
-	ISCSI_LOGIN_PHASE_START = 1,
-	ISCSI_LOGIN_PHASE_SECURITY = 2,
-	ISCSI_LOGIN_PHASE_OPERATIONAL = 3,
-	ISCSI_LOGIN_PHASE_FULLFEATURE = 4,
+	ISCSI_LOGIN_PHASE_NONE	=	0,
+	ISCSI_LOGIN_PHASE_START	=	1,
+	ISCSI_LOGIN_PHASE_SECURITY	=	2,
+	ISCSI_LOGIN_PHASE_OPERATIONAL	=	3,
+	ISCSI_LOGIN_PHASE_FULLFEATURE	=	4,
 } ISCSI_LOGIN_PHASE;
 
 typedef enum {
-	ISTGT_CHAP_PHASE_NONE = 0,
-	ISTGT_CHAP_PHASE_WAIT_A = 1,
-	ISTGT_CHAP_PHASE_WAIT_NR = 2,
-	ISTGT_CHAP_PHASE_END = 3,
+	ISTGT_CHAP_PHASE_NONE	=	0,
+	ISTGT_CHAP_PHASE_WAIT_A	=	1,
+	ISTGT_CHAP_PHASE_WAIT_NR	=	2,
+	ISTGT_CHAP_PHASE_END	=	3,
 } ISTGT_CHAP_PHASE;
 
-#define ISTGT_CHAP_CHALLENGE_LEN 1024
+#define	ISTGT_CHAP_CHALLENGE_LEN	1024
 typedef struct istgt_chap_auth_t {
 	ISTGT_CHAP_PHASE chap_phase;
 
@@ -214,7 +214,6 @@ typedef struct istgt_r2t_task_t {
 	int iobufindx;
 	struct iovec iobuf[40];
 	//int iobufoff[20]; int iobufsize[20]; uint8_t *iobuf[20];
-
 	uint32_t R2TSN;
 	uint32_t DataSN;
 	int F_bit;
@@ -277,7 +276,6 @@ typedef struct istgt_conn_t {
 	int  diskIoPending;
 	int  flagDelayedFree;
 	pthread_mutex_t diskioflag_mutex;
-
 	/* Initiator/Target port binds */
 	char initiator_name[MAX_INITIATOR_NAME];
 	char target_name[MAX_TARGET_NAME];
