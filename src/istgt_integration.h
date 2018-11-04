@@ -58,6 +58,7 @@ typedef struct replica_s {
 
 	/* payload for current IO response for a replica */
 	void *ongoing_io_buf;
+
 	/* payload size for IO response for a replica */
 	uint64_t ongoing_io_len;
 	/* IO for which we are receiving response from replica */
@@ -80,6 +81,7 @@ typedef struct replica_s {
 	int data_eventfd;
 	/* Epoll descriptor for mgmt interface */
 	int epfd;
+
 	int dont_free;
 
 	struct timespec create_time;
@@ -103,6 +105,7 @@ typedef struct replica_s {
 	void *mgmt_io_resp_data;
 	/* mgmt command queue for management connection */
 	TAILQ_HEAD(, mgmt_cmd_s) mgmt_cmd_queue;
+
 	uint64_t initial_checkpointed_io_seq;
 #ifdef	DEBUG
 	/* port from which replica has made mgmt conn. */
