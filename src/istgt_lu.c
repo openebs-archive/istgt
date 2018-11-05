@@ -2185,6 +2185,8 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	int ret;
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "add unit %d\n", sp->num);
 
+	ret = sp_validate(istgt, sp);
+
 	lu = xmalloc(sizeof (*lu));
 	memset(lu, 0, sizeof (*lu));
 	lu->num = sp->num;
@@ -2198,7 +2200,6 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	nbs = 0;
 #endif
 
-	ret = sp_validate(istgt, sp);
 	if(ret == -1)
 		return (-1);
 	val = istgt_get_val(sp, "TargetName");
