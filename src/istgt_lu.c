@@ -2205,7 +2205,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	val = istgt_get_val(sp, "TargetName");
 	if (val == NULL) {
 		ISTGT_ERRLOG("LU%d: TargetName not found\n", lu->num);
-		return (-1);	
+		goto error_return;	
 	}
 	lu->volname = xstrdup(val);
 	if (strncasecmp(val, "iqn.", 4) != 0
