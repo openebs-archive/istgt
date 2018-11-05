@@ -2186,6 +2186,8 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "add unit %d\n", sp->num);
 
 	ret = sp_validate(istgt, sp);
+	if(ret == -1)
+		return (-1);
 
 	lu = xmalloc(sizeof (*lu));
 	memset(lu, 0, sizeof (*lu));
@@ -2200,8 +2202,6 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	nbs = 0;
 #endif
 
-	if(ret == -1)
-		return (-1);
 	val = istgt_get_val(sp, "TargetName");
 	if (val == NULL) {
 		ISTGT_ERRLOG("LU%d: TargetName not found\n", lu->num);
