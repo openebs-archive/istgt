@@ -32,6 +32,7 @@ cstor_conn_ops_t cstor_ops = {
 
 int replication_initialized = 0;
 size_t rcmd_mempool_count = RCMD_MEMPOOL_ENTRIES;
+struct timespec istgt_start_time;
 
 static int start_rebuild(void *buf, replica_t *replica, uint64_t data_len);
 static void handle_mgmt_conn_error(replica_t *r, int sfd, struct epoll_event *events,
@@ -44,6 +45,7 @@ static int handle_mgmt_event_fd(replica_t *replica);
 
 #define build_rcomm_cmd(rcomm_cmd, cmd, offset, nbytes) 						\
 	do {								\
+		uint64_t blockcnt = 0;                                  \
 		rcomm_cmd = malloc(sizeof (*rcomm_cmd));		\
 		memset(rcomm_cmd, 0, sizeof (*rcomm_cmd));		\
 		rcomm_cmd->copies_sent = 0;				\
@@ -72,7 +74,11 @@ static int handle_mgmt_event_fd(replica_t *replica);
 				rcomm_cmd->opcode = ZVOL_OPCODE_WRITE;	\
 				rcomm_cmd->iovcnt = cmd->iobufindx + 1;	\
 				__sync_add_and_fetch(&spec->writes, 1); \
-				__sync_add_and_fetch(&spec->writebytes, nbytes);\
+				__sync_add_and_fetch(&spec->writebytes, \
+							nbytes);        \
+				blockcnt = (nbytes/spec->blocklen);     \
+				__sync_add_and_fetch(&spec->totalwriteblockcount,\
+							blockcnt);      \
 				break;					\
 									\
 			case SBC_READ_6:				\
@@ -82,7 +88,11 @@ static int handle_mgmt_event_fd(replica_t *replica);
 				rcomm_cmd->opcode = ZVOL_OPCODE_READ;	\
 				rcomm_cmd->iovcnt = 0;			\
 				__sync_add_and_fetch(&spec->reads, 1);	\
-				__sync_add_and_fetch(&spec->readbytes, nbytes);\
+				__sync_add_and_fetch(&spec->readbytes,  \
+							nbytes);	\
+				blockcnt = (nbytes/spec->blocklen);     \
+				__sync_add_and_fetch(&spec->totalreadblockcount,\
+							blockcnt);      \
 				break;					\
 									\
 			case SBC_SYNCHRONIZE_CACHE_10:			\
@@ -494,6 +504,7 @@ trigger_rebuild(spec_t *spec)
 	replica_t *replica = NULL;
 	replica_t *target_replica = NULL;
 	replica_t *healthy_replica = NULL;
+	int non_zero_inflight_replica_found = 0;
 
 	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 
@@ -518,6 +529,34 @@ trigger_rebuild(spec_t *spec)
 
 	clock_gettime(CLOCK_MONOTONIC, &now);
 
+	/*
+	 * istgt starts rebuild on a replica after 2*timeout of its start time.
+	 * This is done to make sure that if any pending IOs on helping replicas
+	 * are already available at degraded replica before rebuild is started.
+
+	 * optimization is that rebuild will be started on a replica if all the
+	 * connected replicas are not having any pending IOs with them.
+	 */
+	non_zero_inflight_replica_found = 0;
+	TAILQ_FOREACH(replica, &spec->rq, r_next) {
+		if (replica->replica_inflight_write_io_cnt != 0 ||
+		    replica->replica_inflight_sync_io_cnt != 0) {
+			non_zero_inflight_replica_found = 1;
+			break;
+		}
+	}
+
+#ifdef	DEBUG
+	const char* non_zero_inflight_replica_str =
+	    getenv("non_zero_inflight_replica_cnt");
+	unsigned int non_zero_inflight_replica_cnt = 0;
+
+	if (non_zero_inflight_replica_str != NULL)
+		non_zero_inflight_replica_cnt =
+		    (unsigned int)strtol(non_zero_inflight_replica_str, NULL, 10);
+	if (non_zero_inflight_replica_cnt == 1)
+		non_zero_inflight_replica_found = 1;
+#endif
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
 		/* Find healthy replica */
 		if (replica->state == ZVOL_STATUS_HEALTHY) {
@@ -527,11 +566,14 @@ trigger_rebuild(spec_t *spec)
 		}
 
 		timesdiff(CLOCK_MONOTONIC, replica->create_time, now, diff);
+
 		if ((spec->replication_factor != 1) &&
 		    (diff.tv_sec <= (2 * replica_timeout))) {
-			REPLICA_LOG("Replica:%p added very recently, "
-			    "skipping rebuild.\n", replica);
-			continue;
+			if (non_zero_inflight_replica_found == 1) {
+				REPLICA_LOG("Replica:%p added very recently, "
+				    "skipping rebuild.\n", replica);
+				continue;
+			}
 		}
 
 		if (max <= replica->initial_checkpointed_io_seq) {
@@ -1191,7 +1233,7 @@ send_replica_snapshot(spec_t *spec, replica_t *replica, uint64_t io_seq,
 }
 
 static void
-disconnect_pending_replica(replica_t *replica, uint64_t io_seq,
+disconnect_nonresponding_replica(replica_t *replica, uint64_t io_seq,
     zvol_op_code_t opcode)
 {
 	mgmt_cmd_t *mgmt_cmd;
@@ -1389,7 +1431,7 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 		 * Snapshot failure will be handled by zrepl.
 		 */
 		TAILQ_FOREACH(replica, &spec->rq, r_next)
-			disconnect_pending_replica(replica, io_seq,
+			disconnect_nonresponding_replica(replica, io_seq,
 			    ZVOL_OPCODE_SNAP_CREATE);
 	}
 	MTX_UNLOCK(&spec->rq_mtx);
@@ -2466,7 +2508,6 @@ again:
 
 	ASSERT(spec->io_seq);
 	build_rcomm_cmd(rcomm_cmd, cmd, offset, nbytes);
-
 retry_read:
 	replica_choosen = false;
 	skip_count = 0;
@@ -2934,6 +2975,7 @@ initialize_replication()
 		REPLICA_ERRLOG("Failed to init specq_mtx err(%d)\n", rc);
 		return -1;
 	}
+	clock_gettime(CLOCK_MONOTONIC_RAW, &istgt_start_time);
 	return 0;
 }
 

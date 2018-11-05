@@ -62,7 +62,7 @@ sed -i "s|LUN0 Storage.*|LUN0 Storage $size 32k|g" $CONF_FILE
 cp $CONF_FILE /usr/local/etc/istgt/
 
 export externalIP=$externalIP
-echo $external
+echo $externalIP
 service rsyslog start
 #setting replica timeout to 20 seconds
 /usr/local/bin/istgt -R 20 &

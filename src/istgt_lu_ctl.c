@@ -3363,6 +3363,8 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 	ISTGT_LU_Ptr lu;
 	int rc, length;
 	uint64_t usedlogicalblocks;
+	struct timespec now;
+	uint64_t time_diff;
 	/* instantiate json_object from json-c library. */
 	struct json_object *jobj;
 	/*
@@ -3370,7 +3372,8 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 	 * at the end of the function.
 	 */
 	char *writes, *reads, *totalreadbytes, *totalwritebytes, *size,
-	    *usedblocks, *sectorsize;
+	*usedblocks, *sectorsize, *uptime, *totalreadtime, *totalwritetime,
+	*totalreadblockcount, *totalwriteblockcount;
 	ISTGT_LU_DISK *spec;
 	MTX_LOCK(&specq_mtx);
 	TAILQ_FOREACH(spec, &spec_q, spec_next) {
@@ -3402,41 +3405,89 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 		length = snprintf(NULL, 0, "%"PRIu64, spec->size);
 		size = malloc(length + 1);
 		snprintf(size, length + 1, "%"PRIu64, spec->size);
+
 		usedlogicalblocks = (spec->stats.used / spec->blocklen);
 
 		length = snprintf(NULL, 0, "%"PRIu64, usedlogicalblocks);
 		usedblocks = malloc(length + 1);
-		snprintf(usedblocks, length + 1, "%"PRIu64, usedlogicalblocks);
+		snprintf(usedblocks, length + 1, "%"PRIu64,
+			usedlogicalblocks);
 
 		length = snprintf(NULL, 0, "%"PRIu64, spec->blocklen);
 		sectorsize = malloc(length + 1);
 		snprintf(sectorsize, length + 1, "%"PRIu64, spec->blocklen);
 
-		json_object *jreads = json_object_new_string(
-		    reads);	/* instantiate child object */
+		length = snprintf(NULL, 0, "%"PRIu64, spec->totalreadtime);
+		totalreadtime = malloc(length + 1);
+		snprintf(totalreadtime, length + 1, "%"PRIu64,
+			spec->totalreadtime);
+
+		length = snprintf(NULL, 0, "%"PRIu64, spec->totalwritetime);
+		totalwritetime = malloc(length + 1);
+		snprintf(totalwritetime, length + 1, "%"PRIu64,
+			spec->totalwritetime);
+
+		length = snprintf(NULL, 0, "%"PRIu64,
+				spec->totalwriteblockcount);
+		totalwriteblockcount = malloc(length + 1);
+		snprintf(totalwriteblockcount, length + 1, "%"PRIu64,
+			spec->totalwriteblockcount);
+
+		length = snprintf(NULL, 0, "%"PRIu64,
+				spec->totalreadblockcount);
+		totalreadblockcount = malloc(length + 1);
+		snprintf(totalreadblockcount, length + 1, "%"PRIu64,
+			spec->totalreadblockcount);
+
+		clock_gettime(CLOCK_MONOTONIC_RAW, &now);
+		time_diff = (uint64_t)(now.tv_sec - istgt_start_time.tv_sec);
+		length = snprintf(NULL, 0, "%"PRIu64, time_diff);
+		uptime = malloc(length + 1);
+		snprintf(uptime, length + 1, "%"PRIu64, time_diff);
+
+		json_object *jreads = json_object_new_string(reads);	/* instantiate child object */
 		json_object *jwrites = json_object_new_string(writes);
 		json_object *jtotalreadbytes =
-		    json_object_new_string(totalreadbytes);
+				json_object_new_string(totalreadbytes);
 		json_object *jtotalwritebytes =
-		    json_object_new_string(totalwritebytes);
+				json_object_new_string(totalwritebytes);
 		json_object *jsize = json_object_new_string(size);
 		json_object *jusedlogicalblocks =
-		    json_object_new_string(usedblocks);
+				json_object_new_string(usedblocks);
 		json_object *jsectorsize = json_object_new_string(sectorsize);
+		json_object *juptime = json_object_new_string(uptime);
+		json_object *jtotalreadtime = json_object_new_string(
+						totalreadtime);
+		json_object *jtotalwritetime = json_object_new_string(
+						totalwritetime);
+		json_object *jtotalreadblockcount = json_object_new_string(
+							totalreadblockcount);
+		json_object *jtotalwriteblockcount = json_object_new_string(
+							totalwriteblockcount);
 
 		json_object_object_add(jobj, "WriteIOPS",
-		    jwrites);	/* add values to object field */
+			jwrites);	/* add values to object field */
 		json_object_object_add(jobj, "ReadIOPS", jreads);
 		json_object_object_add(jobj, "TotalWriteBytes",
-		    jtotalwritebytes);
-		json_object_object_add(jobj, "TotalReadBytes", jtotalreadbytes);
+			jtotalwritebytes);
+		json_object_object_add(jobj, "TotalReadBytes",
+			jtotalreadbytes);
 		json_object_object_add(jobj, "Size", jsize);
 		json_object_object_add(jobj, "UsedLogicalBlocks",
-		    jusedlogicalblocks);
+			jusedlogicalblocks);
 		json_object_object_add(jobj, "SectorSize", jsectorsize);
+		json_object_object_add(jobj, "Uptime", juptime);
+		json_object_object_add(jobj, "TotalReadTime",
+			jtotalreadtime);
+		json_object_object_add(jobj, "TotalWriteTime",
+			jtotalwritetime);
+		json_object_object_add(jobj, "TotalReadBlockCount",
+			jtotalreadblockcount);
+		json_object_object_add(jobj, "TotalWriteBlockCount",
+			jtotalwriteblockcount);
 
 		istgt_uctl_snprintf(uctl, "%s  %s\n",
-		    uctl->cmd, json_object_to_json_string(jobj));
+			uctl->cmd, json_object_to_json_string(jobj));
 		rc = istgt_uctl_writeline(uctl);
 		if (rc != UCTL_CMD_OK) {
 			// free the pointers
@@ -3447,10 +3498,14 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 			free(size);
 			free(usedblocks);
 			free(sectorsize);
-			/*
-			 * freeing root json_object will free all the allocated
-			 * memory associated with the json_object.
-			 */
+			free(uptime);
+			free(totalreadtime);
+			free(totalwritetime);
+			free(totalreadblockcount);
+			free(totalwriteblockcount);
+			/* freeing root json_object will free all the allocated memory
+			** associated with the json_object.
+			*/
 			json_object_put(jobj);
 			return (rc);
 		}
@@ -3462,6 +3517,11 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 		free(size);
 		free(usedblocks);
 		free(sectorsize);
+		free(uptime);
+		free(totalreadtime);
+		free(totalwritetime);
+		free(totalreadblockcount);
+		free(totalwriteblockcount);
 		json_object_put(jobj);
 	}
 	MTX_UNLOCK(&specq_mtx);

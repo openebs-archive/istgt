@@ -429,6 +429,7 @@ typedef struct istgt_lu_cmd_t {
 	uint8_t	   release_aborted;
 #ifdef REPLICATION
 	uint32_t   luworkerindx;
+	struct timespec start_rw_time;
 #endif
 } ISTGT_LU_CMD;
 typedef ISTGT_LU_CMD *ISTGT_LU_CMD_Ptr;
@@ -781,6 +782,10 @@ typedef struct istgt_lu_disk_t {
 	uint64_t reads;
 	uint64_t readbytes;
 	uint64_t writebytes;
+	uint64_t totalreadtime;
+	uint64_t totalwritetime;
+	uint64_t totalreadblockcount;
+	uint64_t totalwriteblockcount;
 #endif
 	/* modify lun */
 	int dofake;
