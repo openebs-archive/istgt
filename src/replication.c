@@ -540,8 +540,10 @@ trigger_rebuild(spec_t *spec)
 	non_zero_inflight_replica_found = 0;
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
 		if (replica->replica_inflight_write_io_cnt != 0 ||
-		    replica->replica_inflight_sync_io_cnt != 0)
+		    replica->replica_inflight_sync_io_cnt != 0) {
 			non_zero_inflight_replica_found = 1;
+			break;
+		}
 	}
 
 #ifdef	DEBUG
