@@ -1370,7 +1370,7 @@ istgt_lu_set_local_settings(ISTGT_Ptr istgt, CF_SECTION *sp, ISTGT_LU_Ptr lu)
 extern int g_num_luworkers;
 
 static int 
-sp_validate(ISTGT_Ptr istgt, ISTGT_LU_Ptr lu, CF_SECTION *sp)
+sp_validate(ISTGT_Ptr istgt, CF_SECTION *sp)
 {
 	const char *val; 
 	if (sp->num >= MAX_LOGICAL_UNIT) {
@@ -2198,7 +2198,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	nbs = 0;
 #endif
 
-	ret = sp_validate(istgt, lu, sp);
+	ret = sp_validate(istgt, sp);
 	if(ret == -1)
 		return (-1);
 	val = istgt_get_val(sp, "TargetName");
