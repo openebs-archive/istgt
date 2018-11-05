@@ -116,15 +116,15 @@ run_and_verify_iostats() {
 		[[ $? -ne 0 ]] && echo "mount for $device_name" && exit 1
 
 		sudo dd if=/dev/urandom of=/mnt/store/file1 bs=4k count=10000 oflag=direct
-		sudo istgtcontrol iostats
-		var1="$(sudo istgtcontrol iostats | grep -oP "(?<=TotalWriteBytes\": \")[^ ]+" | cut -d '"' -f 1)"
+		istgtcontrol iostats
+		var1="$(istgtcontrol iostats | grep -oP "(?<=TotalWriteBytes\": \")[^ ]+" | cut -d '"' -f 1)"
 		if [ $var1 -eq 0 ]; then
 			echo "iostats command failed" && exit 1
 		fi
 
 		sudo dd if=/dev/urandom of=/mnt/store/file1 bs=4k count=10000 oflag=direct
-		sudo istgtcontrol iostats
-		var2="$(sudo istgtcontrol iostats | grep -oP "(?<=TotalWriteBytes\": \")[^ ]+" | cut -d '"' -f 1)"
+		istgtcontrol iostats
+		var2="$(istgtcontrol iostats | grep -oP "(?<=TotalWriteBytes\": \")[^ ]+" | cut -d '"' -f 1)"
 		if [ $var2 -eq 0 ]; then
 			echo "iostats command failed" && exit 1
 		fi
@@ -199,7 +199,7 @@ setup_test_env() {
 	logout_of_volume
 	sudo killall -9 istgt
 	sudo killall -9 replication_test
-
+	touch $INTEGRATION_TEST_LOGFILE
 	start_istgt 5G
 }
 
@@ -519,6 +519,136 @@ run_lu_rf_test ()
 	stop_istgt
 }
 
+run_rebuild_time_test_in_single_replica()
+{
+	local replica1_port="6161"
+	local replica1_ip="127.0.0.1"
+	local replica1_vdev="/tmp/test_vol1"
+	local ret=0
+
+	echo "run rebuild time test in single replica"
+	REPLICATION_FACTOR=1
+	CONSISTENCY_FACTOR=1
+	setup_test_env
+
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev &
+	replica1_pid=$!
+	sleep 2
+
+	while [ 1 ]; do
+		# We have started istgt with 20 second replica timeout
+		# and rf=cf=1. so, it will take around 2 minutes for the
+		# replica to become healthy. So on safe side, we will
+		# check replica status after 130 seconds.
+		cmd="$ISTGTCONTROL -q REPLICA | jq '.\"Replica status\"[0].\"vol1\"[0].\"connected since(in seconds)\"'"
+		rt=$(eval $cmd)
+		echo "replica start time $rt"
+		if [ $rt -gt 130 ]; then
+			cmd="$ISTGTCONTROL -q REPLICA | jq '.\"Replica status\"[0].\"vol1\"[0].\"status\"'"
+			rstatus=$(eval $cmd)
+			echo "replica status $rstatus"
+			if [ ${rstatus} != "\"HEALTHY\"" ]; then
+				echo "replication factor(1) test failed"
+				exit 1
+			else
+				break
+			fi
+		fi
+		sleep 10
+	done
+	kill -9 $replica1_pid
+	stop_istgt
+	rm -rf ${replica1_vdev::-1}*
+}
+
+run_rebuild_time_test_in_multiple_replicas()
+{
+	local replica1_port="6161"
+	local replica2_port="6162"
+	local replica3_port="6163"
+	local replica4_port="6164"
+	local replica1_ip="127.0.0.1"
+	local replica2_ip="127.0.0.1"
+	local replica3_ip="127.0.0.1"
+	local replica4_ip="127.0.0.1"
+	local replica1_vdev="/tmp/test_vol1"
+	local ret=0
+	local rt=0
+	local done_test=0
+
+	echo "run rebuild time test in multiple replica, param1: $1"
+	REPLICATION_FACTOR=3
+	CONSISTENCY_FACTOR=2
+	setup_test_env
+
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev &
+	replica1_pid=$!
+	sleep 2
+
+	# As long as we are not running any IOs we can use the same vdev file
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V $replica1_vdev  &
+	replica2_pid=$!
+	sleep 2
+
+	# As long as we are not running any IOs we can use the same vdev file
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V $replica1_vdev &
+	replica3_pid=$!
+	sleep 3
+
+	done_test=0
+	while [ 1 ]; do
+		# We have started istgt with 20 second replica timeout
+		# and rf=cf=1. so, it will take around 2 minutes for the
+		# replica to become healthy. So on safe side, we will
+		# check replica status after 130 seconds.
+		for (( i = 0; i < 3; i++ )) do
+			cmd="$ISTGTCONTROL -q REPLICA | jq '.\"Replica status\"[0].\"vol1\"["$i"].\"connected since(in seconds)\"'"
+			rt=$(eval $cmd)
+			echo "replica start time $rt"
+			if [ $1 -eq 0 ]; then
+				if [ $rt -gt 130 ]; then
+					cmd="$ISTGTCONTROL -q REPLICA | jq '.\"Replica status\"[0].\"vol1\"["$i"].\"status\"'"
+					rstatus=$(eval $cmd)
+					echo "replica status $rstatus"
+					if [ ${rstatus} == "\"HEALTHY\"" ]; then
+						done_test=1
+						break
+					fi
+				fi
+			else
+				if [ $rt -le 140 ]; then
+					cmd="$ISTGTCONTROL -q REPLICA | jq '.\"Replica status\"[0].\"vol1\"["$i"].\"status\"'"
+					rstatus=$(eval $cmd)
+					echo "replica status $rstatus"
+					if [ ${rstatus} == "\"HEALTHY\"" ]; then
+						echo "replication factor(3) test failed"
+						exit 1
+					fi
+				else
+					done_test=1
+					break
+				fi
+			fi
+		done
+		if [ $1 -eq 0 ]; then
+			if [ $rt -gt 130 ]; then
+				echo "replica start time $rt done_test: $done_test"
+				if [ $done_test -eq 0 ]; then
+					echo "replication factor(2) test failed"
+					exit 1
+				fi
+			fi
+		fi
+		if [ $done_test -eq 1 ]; then
+			break
+		fi
+		sleep 10
+	done
+	kill -9 $replica1_pid $replica2_pid $replica3_pid
+	stop_istgt
+	rm -rf ${replica1_vdev::-1}*
+}
+
 run_replication_factor_test()
 {
 	local replica1_port="6161"
@@ -532,34 +662,13 @@ run_replication_factor_test()
 	local replica1_vdev="/tmp/test_vol1"
 	local ret=0
 
-	REPLICATION_FACTOR=1
-	CONSISTENCY_FACTOR=1
-	setup_test_env
-	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev &
-	replica1_pid=$!
-	sleep 2
+	run_rebuild_time_test_in_single_replica
+	run_rebuild_time_test_in_multiple_replicas 0
 
-	while [ 1 ]; do
-		# We have started istgt with 20 second replica timeout
-		# and rf=cf=1. so, it will take around 2 minutes for the
-		# replica to become healthy. So on safe side, we will
-		# check replica status after 130 seconds.
-		rt=`$ISTGTCONTROL -q REPLICA | awk -F 'in seconds)":' '{print $2}' | tr -d '}]}]}'`
-		if [ $rt -gt 130 ]; then
-			rstatus=`$ISTGTCONTROL -q REPLICA | awk -F '"status":' '{print $2}' |awk -F ',' '{print $1}' | tr -d '"'`
-			if [ ${rstatus} != "HEALTHY" ]; then
-				echo "replication factor(1) test failed"
-				exit 1
-			else
-				break
-			fi
-		fi
-		sleep 10
-	done
-	kill -9 $replica1_pid
-	stop_istgt
-	rm -rf ${replica1_vdev::-1}*
+	export non_zero_inflight_replica_cnt=1
+	run_rebuild_time_test_in_multiple_replicas 1
 
+	export non_zero_inflight_replica_cnt=0
 	sleep 1
 	REPLICATION_FACTOR=3
 	CONSISTENCY_FACTOR=2
