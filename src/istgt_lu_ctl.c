@@ -3345,7 +3345,8 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 	 */
 	char *writes, *reads, *totalreadbytes, *totalwritebytes, *size,
 	*usedblocks, *sectorsize, *uptime, *totalreadtime, *totalwritetime,
-	*totalreadblockcount, *totalwriteblockcount;
+	*totalreadblockcount, *totalwriteblockcount, *replicacount,
+        *revisioncount;
 	ISTGT_LU_DISK *spec;
 	MTX_LOCK(&specq_mtx);
 	TAILQ_FOREACH(spec, &spec_q, spec_next) {
@@ -3417,6 +3418,14 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 		uptime = malloc(length + 1);
 		snprintf(uptime, length + 1, "%"PRIu64, time_diff);
 
+		length = snprintf(NULL, 0, "%d", spec->healthy_rcount);
+		replicacount = malloc(length + 1);
+		snprintf(replicacount, length + 1, "%d", spec->healthy_rcount);
+
+		length = snprintf(NULL, 0, "%"PRIu64, spec->io_seq);
+		revisioncount = malloc(length + 1);
+		snprintf(revisioncount, length + 1, "%"PRIu64, spec->io_seq);
+
 		json_object *jreads = json_object_new_string(reads);	/* instantiate child object */
 		json_object *jwrites = json_object_new_string(writes);
 		json_object *jtotalreadbytes =
@@ -3436,6 +3445,10 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 							totalreadblockcount);
 		json_object *jtotalwriteblockcount = json_object_new_string(
 							totalwriteblockcount);
+		json_object *jreplicacount = json_object_new_string(
+							replicacount);
+		json_object *jrevisioncount = json_object_new_string(
+							revisioncount);
 
 		json_object_object_add(jobj, "WriteIOPS",
 			jwrites);	/* add values to object field */
@@ -3448,7 +3461,7 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 		json_object_object_add(jobj, "UsedLogicalBlocks",
 			jusedlogicalblocks);
 		json_object_object_add(jobj, "SectorSize", jsectorsize);
-		json_object_object_add(jobj, "Uptime", juptime);
+		json_object_object_add(jobj, "UpTime", juptime);
 		json_object_object_add(jobj, "TotalReadTime",
 			jtotalreadtime);
 		json_object_object_add(jobj, "TotalWriteTime",
@@ -3457,6 +3470,10 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 			jtotalreadblockcount);
 		json_object_object_add(jobj, "TotalWriteBlockCount",
 			jtotalwriteblockcount);
+		json_object_object_add(jobj, "ReplicaCounter",
+			jreplicacount);
+		json_object_object_add(jobj, "RevisionCounter",
+			jrevisioncount);
 
 		istgt_uctl_snprintf(uctl, "%s  %s\n",
 			uctl->cmd, json_object_to_json_string(jobj));
@@ -3475,7 +3492,9 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 			free(totalwritetime);
 			free(totalreadblockcount);
 			free(totalwriteblockcount);
-			/* freeing root json_object will free all the allocated memory
+			free(replicacount);
+			free(revisioncount);
+                        /* freeing root json_object will free all the allocated memory
 			** associated with the json_object.
 			*/
 			json_object_put(jobj);
@@ -3494,6 +3513,8 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 		free(totalwritetime);
 		free(totalreadblockcount);
 		free(totalwriteblockcount);
+		free(replicacount);
+		free(revisioncount);
 		json_object_put(jobj);
 	}
 	MTX_UNLOCK(&specq_mtx);
