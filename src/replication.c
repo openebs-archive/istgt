@@ -1450,23 +1450,23 @@ get_replica_stats_json(replica_t *replica, struct json_object **jobj)
 
 	j_stats = json_object_new_object();
 	json_object_object_add(j_stats, "replica",
-	    json_object_new_int64(replica->zvol_guid));
+	    json_object_new_uint64(replica->zvol_guid));
 
 	json_object_object_add(j_stats, "status",
 	    json_object_new_string((replica->state == ZVOL_STATUS_HEALTHY) ?
 	    "HEALTHY" : "DEGRADED"));
 
 	json_object_object_add(j_stats, "checkpointed_io_seq",
-	    json_object_new_int64(replica->initial_checkpointed_io_seq));
+	    json_object_new_uint64(replica->initial_checkpointed_io_seq));
 
 	json_object_object_add(j_stats, "inflight_read",
-	    json_object_new_int64(replica->replica_inflight_read_io_cnt));
+	    json_object_new_uint64(replica->replica_inflight_read_io_cnt));
 
 	json_object_object_add(j_stats, "inflight_write",
-	    json_object_new_int64(replica->replica_inflight_write_io_cnt));
+	    json_object_new_uint64(replica->replica_inflight_write_io_cnt));
 
 	json_object_object_add(j_stats, "inflight_sync",
-	    json_object_new_int64(replica->replica_inflight_sync_io_cnt));
+	    json_object_new_uint64(replica->replica_inflight_sync_io_cnt));
 
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	json_object_object_add(j_stats, "connected since(in seconds)",
@@ -3072,15 +3072,15 @@ istgt_lu_mempool_stats(char **resp)
 		TAILQ_FOREACH(r, &spec->rq, r_next) {
 			j_replica = json_object_new_object();
 			json_object_object_add(j_replica, "replica",
-			    json_object_new_int64(r->zvol_guid));
+			    json_object_new_uint64(r->zvol_guid));
 			json_object_object_add(j_replica, "in-flight read",
-			    json_object_new_int64(
+			    json_object_new_uint64(
 			    r->replica_inflight_read_io_cnt));
 			json_object_object_add(j_replica, "in-flight write",
-			    json_object_new_int64(
+			    json_object_new_uint64(
 			    r->replica_inflight_write_io_cnt));
 			json_object_object_add(j_replica, "in-flight sync",
-			    json_object_new_int64(
+			    json_object_new_uint64(
 			    r->replica_inflight_sync_io_cnt));
 			json_object_object_add(j_replica, "in-flight command",
 			    json_object_new_int64(
