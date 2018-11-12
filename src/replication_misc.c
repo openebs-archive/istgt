@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <json-c/json_object.h>
+
 #include "replication.h"
 #include "replication_misc.h"
 
@@ -309,4 +311,20 @@ set_socket_keepalive(int sfd)
 
 out:
 	return (ret);
+}
+
+json_object *
+json_object_new_uint64(uint64_t value)
+{
+	/* 18446744073709551615 */
+	char num[21];
+	int r;
+	json_object *jobj;
+
+	r = snprintf(num, sizeof(num), "%" PRIu64, value);
+	if (r < 0 || (size_t)r >= sizeof(num))
+		return NULL;
+
+	jobj = json_object_new_string(num);
+	return jobj;
 }
