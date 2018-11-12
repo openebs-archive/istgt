@@ -3339,6 +3339,7 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 	uint64_t time_diff;
 	/* instantiate json_object from json-c library. */
 	struct json_object *jobj;
+	replica_t *replica;
 	ISTGT_LU_DISK *spec;
 
 	MTX_LOCK(&specq_mtx);
@@ -3379,12 +3380,31 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 		json_object_object_add(jobj, "TotalWriteBlockCount",
 		    json_object_new_uint64(spec->totalwriteblockcount));
 		json_object_object_add(jobj, "ReplicaCounter",
-		    json_object_new_int(spec->healthy_rcount));
+		    json_object_new_int(spec->healthy_rcount +
+			spec->degraded_rcount));
 		json_object_object_add(jobj, "RevisionCounter",
 		    json_object_new_uint64(spec->io_seq));
+		json_object_object_add(jobj, "Status",
+		    json_object_new_string(((spec->ready == 1) ?
+			"RW" : "RO")));
+
+		json_object *jobj_arr = json_object_new_array();
+		TAILQ_FOREACH(replica, &spec->rq, r_next) {
+		    MTX_LOCK(&replica->r_mtx);
+		    json_object *jobjarr = json_object_new_object();
+		    json_object_object_add(jobjarr, "Address",
+			json_object_new_string(replica->ip));
+		    json_object_object_add(jobjarr, "Mode",
+			json_object_new_string(((replica->state ==
+			    ZVOL_STATUS_HEALTHY) ? "HEALTHY" : "DEGRADED")));
+		    MTX_UNLOCK(&replica->r_mtx);
+		    json_object_array_add(jobj_arr, jobjarr);
+		}
+
+		json_object_object_add(jobj, "Replicas", jobj_arr);
 
 		istgt_uctl_snprintf(uctl, "%s  %s\n",
-			uctl->cmd, json_object_to_json_string(jobj));
+		    uctl->cmd, json_object_to_json_string(jobj));
 		rc = istgt_uctl_writeline(uctl);
 
 		/* freeing root json_object will free all the allocated memory
