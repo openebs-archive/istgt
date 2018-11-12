@@ -361,7 +361,7 @@ enqueue_prepare_for_rebuild(spec_t *spec, replica_t *replica,
  */
 static int 
 send_prepare_for_rebuild_or_trigger_rebuild(spec_t *spec,
-    replica_t *target_replica,
+    replica_t *dw_replica,
     replica_t *healthy_replica)
 {
 	int ret = 0;
@@ -374,9 +374,10 @@ send_prepare_for_rebuild_or_trigger_rebuild(spec_t *spec,
 
 	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 
-	spec->target_replica = target_replica;
-	spec->rebuild_in_progress = true;
-	ASSERT(spec->target_replica);
+	spec->rebuild_info.dw_replica = dw_replica;
+	spec->rebuild_info.healthy_replica = healthy_replica;
+	spec->rebuild_info.rebuild_in_progress = true;
+	ASSERT(spec->rebuild_info.dw_replica);
 
 	replica_cnt = count_of_replicas_helping_rebuild(spec, healthy_replica);
 	assert(replica_cnt || (spec->replication_factor ==  1));
@@ -394,10 +395,12 @@ send_prepare_for_rebuild_or_trigger_rebuild(spec_t *spec,
 		memset(mgmt_data, 0, sizeof (*mgmt_data));
 		snprintf(mgmt_data->dw_volname, data_len, "%s",
 		    spec->volname);
-		ret = start_rebuild(mgmt_data, spec->target_replica, sizeof (*mgmt_data));
+		ret = start_rebuild(mgmt_data,
+		    spec->rebuild_info.dw_replica, sizeof (*mgmt_data));
 		if (ret == -1) {
-			spec->target_replica = NULL;
-			spec->rebuild_in_progress = false;
+			spec->rebuild_info.dw_replica = NULL;
+			spec->rebuild_info.healthy_replica = NULL;
+			spec->rebuild_info.rebuild_in_progress = false;
 		}
 		return ret;
 	}
@@ -420,7 +423,7 @@ send_prepare_for_rebuild_or_trigger_rebuild(spec_t *spec,
 
 	// Case 2
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
-		if (replica == target_replica)
+		if (replica == dw_replica)
 			continue;
 		
 		if (replica_cnt == 0)
@@ -438,9 +441,10 @@ exit:
 	if (ret == -1) {
 		if (rcomm_mgmt->cmds_failed == rcomm_mgmt->cmds_sent) {
 			free_rcommon_mgmt_cmd(rcomm_mgmt);
-			spec->target_replica = NULL;
-			spec->rebuild_in_progress = false;
-		} 
+			spec->rebuild_info.dw_replica = NULL;
+			spec->rebuild_info.healthy_replica = NULL;
+			spec->rebuild_info.rebuild_in_progress = false;
+		}
 	}
 	assert(((ret == -1) && replica_cnt) || (ret == replica_cnt));
 	
@@ -502,7 +506,7 @@ trigger_rebuild(spec_t *spec)
 	uint64_t max = 0;
 	struct timespec now, diff;
 	replica_t *replica = NULL;
-	replica_t *target_replica = NULL;
+	replica_t *dw_replica = NULL;
 	replica_t *healthy_replica = NULL;
 	int non_zero_inflight_replica_found = 0;
 
@@ -514,7 +518,7 @@ trigger_rebuild(spec_t *spec)
 		return;
 	}
 
-	if (spec->rebuild_in_progress == true) {
+	if (spec->rebuild_info.rebuild_in_progress == true) {
 		assert(spec->ready == true);
 		REPLICA_NOTICELOG("Rebuild is already in progress "
 		    "on volume(%s)\n", spec->volname);
@@ -578,11 +582,11 @@ trigger_rebuild(spec_t *spec)
 
 		if (max <= replica->initial_checkpointed_io_seq) {
 			max = replica->initial_checkpointed_io_seq;
-			target_replica = replica;
+			dw_replica = replica;
 		}
 	}
 
-	if (target_replica == NULL)
+	if (dw_replica == NULL)
 		return;
 
 	REPLICA_LOG("Healthy count(%d) degraded count(%d) consistency factor(%d)"
@@ -591,14 +595,14 @@ trigger_rebuild(spec_t *spec)
 	    spec->replication_factor);
 
 	ret = send_prepare_for_rebuild_or_trigger_rebuild(spec,
-	    target_replica, healthy_replica);
+	    dw_replica, healthy_replica);
 	if (ret == 0) {
 		REPLICA_LOG("%s rebuild will be attempted on replica(%lu) "
 		    "state:%d\n", (healthy_replica ? "Normal" : "Mesh"),
-		    target_replica->zvol_guid, target_replica->state);
+		    dw_replica->zvol_guid, dw_replica->state);
 	} else {
 		REPLICA_ERRLOG("Failed to trigger rebuild on replica(%lu)\n",
-		    target_replica->zvol_guid);
+		    dw_replica->zvol_guid);
 	}
 }
 
@@ -1172,8 +1176,26 @@ static void
 handle_snap_create_resp(replica_t *replica, mgmt_cmd_t *mgmt_cmd)
 {
 	zvol_io_hdr_t *hdr = replica->mgmt_io_resp_hdr;
+	replica_t *hr = NULL, *dr = NULL;
 	rcommon_mgmt_cmd_t *rcomm_mgmt = mgmt_cmd->rcomm_mgmt;
 	bool delete = false;
+	if (hdr->status != ZVOL_OP_STATUS_OK) {
+		/*
+		 * If replica that is healthy and in rebuild process
+		 * responds failure for SNAP_CREATE, dw replica that is
+		 * involved in rebuild process need to be disconnected.
+		 * After reconnection, dwreplica will get this snap
+		 * if snap create was successful.
+		 * Healthy replica will disconnect by itself, and, gets
+		 * the snap after reconnecting as part of its rebuild.
+		 */
+		MTX_LOCK(&replica->spec->rq_mtx);
+		hr = replica->spec->rebuild_info.healthy_replica;
+		dr = replica->spec->rebuild_info.dw_replica;
+		if (replica == hr)
+			inform_mgmt_conn(dr);
+		MTX_UNLOCK(&replica->spec->rq_mtx);
+	}
 	MTX_LOCK(&rcomm_mgmt->mtx);
 	if (hdr->status != ZVOL_OP_STATUS_OK)
 		rcomm_mgmt->cmds_failed++;
@@ -1237,11 +1259,24 @@ disconnect_nonresponding_replica(replica_t *replica, uint64_t io_seq,
     zvol_op_code_t opcode)
 {
 	mgmt_cmd_t *mgmt_cmd;
+	replica_t *hr = NULL, *dr = NULL;
 
 	MTX_LOCK(&replica->r_mtx);
 	TAILQ_FOREACH(mgmt_cmd, &replica->mgmt_cmd_queue, mgmt_cmd_next) {
 		if (mgmt_cmd->io_hdr->io_seq == io_seq &&
 		    mgmt_cmd->io_hdr->opcode == opcode) {
+
+			/*
+			 * If replica that is healthy and in rebuild process
+			 * doesn't respond for SNAP_CREATE, dw replica that is
+			 * involved in rebuild process need to be disconnected.
+			 * After reconnection, both of them will get this snap
+			 * if it is successful
+			 */
+			hr = replica->spec->rebuild_info.healthy_replica;
+			dr = replica->spec->rebuild_info.dw_replica;
+			if (replica == hr)
+				inform_mgmt_conn(dr);
 			inform_mgmt_conn(replica);
 			break;
 		}
@@ -1418,14 +1453,13 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	}
 	MTX_UNLOCK(&rcomm_mgmt->mtx);
 
-	spec->quiesce = 0;
 	if (r == false) {
 		TAILQ_FOREACH(replica, &spec->rq, r_next)
 			send_replica_snapshot(spec, replica, io_seq, snapname, ZVOL_OPCODE_SNAP_DESTROY, NULL);
 	} else {
 		/*
 		 * disconnect the replica from which we have
-		 * not received the response yet. As a part the
+		 * not received the response yet. As a part of the
 		 * reconnecting, it will start the rebuild process
 		 * and resync the snapshot.
 		 * Snapshot failure will be handled by zrepl.
@@ -1434,6 +1468,7 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 			disconnect_nonresponding_replica(replica, io_seq,
 			    ZVOL_OPCODE_SNAP_CREATE);
 	}
+	spec->quiesce = 0;
 	MTX_UNLOCK(&spec->rq_mtx);
 	if (r == false)
 		REPLICA_ERRLOG("snap create ioseq: %lu resp: %d\n", io_seq, r);
@@ -1629,8 +1664,9 @@ handle_start_rebuild_resp(spec_t *spec, zvol_io_hdr_t *hdr)
 		return;
 
 	MTX_LOCK(&spec->rq_mtx);
-	spec->target_replica = NULL;
-	spec->rebuild_in_progress = false;
+	spec->rebuild_info.dw_replica = NULL;
+	spec->rebuild_info.healthy_replica = NULL;
+	spec->rebuild_info.rebuild_in_progress = false;
 	MTX_UNLOCK(&spec->rq_mtx);
 }
 
@@ -1656,22 +1692,26 @@ handle_prepare_for_rebuild_resp(spec_t *spec, zvol_io_hdr_t *hdr,
 
 	if (rcomm_mgmt->cmds_sent == rcomm_mgmt->cmds_succeeded) {
 		MTX_LOCK(&spec->rq_mtx);
-		if (spec->target_replica) {
-			ret = start_rebuild(buf, spec->target_replica, rcomm_mgmt->buf_size);
+		replica_t *dw_replica = spec->rebuild_info.dw_replica;
+		if (dw_replica) {
+			ret = start_rebuild(buf, dw_replica,
+			    rcomm_mgmt->buf_size);
 			rcomm_mgmt->buf = NULL;
 			if (ret == 0) {
 				REPLICA_LOG("Rebuild triggered on Replica(%lu) "
-				    "state:%d\n", spec->target_replica->zvol_guid,
-				    spec->target_replica->state);
+				    "state:%d\n", dw_replica->zvol_guid,
+				    dw_replica->state);
 			} else {
-				REPLICA_LOG("Unable to trigger rebuild on Replica(%lu)"
-				    " state:%d\n", spec->target_replica->zvol_guid,
-				    spec->target_replica->state);
-				spec->target_replica = NULL;
-				spec->rebuild_in_progress = false;
+				REPLICA_LOG("Unable to start rebuild on Replica(%lu)"
+				    " state:%d\n", dw_replica->zvol_guid,
+				    dw_replica->state);
+				spec->rebuild_info.dw_replica = NULL;
+				spec->rebuild_info.healthy_replica = NULL;
+				spec->rebuild_info.rebuild_in_progress = false;
 			}
 		} else {
-			ASSERT(spec->rebuild_in_progress == false);
+			ASSERT(spec->rebuild_info.rebuild_in_progress == false);
+			ASSERT(spec->rebuild_info.healthy_replica == NULL);
 		}
 		MTX_UNLOCK(&spec->rq_mtx);
 		free_rcommon_mgmt_cmd(rcomm_mgmt);
@@ -1681,12 +1721,14 @@ handle_prepare_for_rebuild_resp(spec_t *spec, zvol_io_hdr_t *hdr,
 		free_rcommon_mgmt_cmd(rcomm_mgmt);
 		mgmt_cmd->rcomm_mgmt = NULL;
 		MTX_LOCK(&spec->rq_mtx);
-		if (spec->target_replica)
-			REPLICA_LOG("Unable to trigger rebuild on Replica(%lu) "
-			    "state:%d\n", spec->target_replica->zvol_guid,
-			    spec->target_replica->state);
-		spec->target_replica = NULL;
-		spec->rebuild_in_progress = false;
+		if (spec->rebuild_info.dw_replica)
+			REPLICA_LOG("Unable to prepare rebuild for Replica(%lu) "
+			    "state:%d\n",
+			    spec->rebuild_info.dw_replica->zvol_guid,
+			    spec->rebuild_info.dw_replica->state);
+		spec->rebuild_info.dw_replica = NULL;
+		spec->rebuild_info.healthy_replica = NULL;
+		spec->rebuild_info.rebuild_in_progress = false;
 		MTX_UNLOCK(&spec->rq_mtx);
 	}
 }
@@ -1740,22 +1782,24 @@ update_replica_status(spec_t *spec, replica_t *replica)
 			/* master_replica became healthy*/
 			spec->degraded_rcount--;
 			spec->healthy_rcount++;
-			assert(spec->target_replica == replica);
-			spec->target_replica = NULL;
-			spec->rebuild_in_progress = false;
+			assert(spec->rebuild_info.dw_replica == replica);
+			spec->rebuild_info.dw_replica = NULL;
+			spec->rebuild_info.healthy_replica = NULL;
+			spec->rebuild_info.rebuild_in_progress = false;
 			REPLICA_ERRLOG("Replica(%lu) marked healthy,"
 		    	    " seting master_replica to NULL\n",
 			    replica->zvol_guid);
 		}
 	} else if ((repl_status->state == ZVOL_STATUS_DEGRADED) &&
 	    (repl_status->rebuild_status == ZVOL_REBUILDING_FAILED) &&
-	    (replica == spec->target_replica)) {
+	    (replica == spec->rebuild_info.dw_replica)) {
 		/*
 		 * If last rebuild failed on master_replica
 		 * then trigger another one
 		 */
-		spec->rebuild_in_progress = false;
-		spec->target_replica = NULL;
+		spec->rebuild_info.rebuild_in_progress = false;
+		spec->rebuild_info.dw_replica = NULL;
+		spec->rebuild_info.healthy_replica = NULL;
 	}
 
 	/*Trigger rebuild if possible */
@@ -2722,12 +2766,13 @@ handle_mgmt_conn_error(replica_t *r, int sfd, struct epoll_event *events, int ev
 	}
 
 	MTX_LOCK(&r->spec->rq_mtx);
-	if (r->spec->target_replica == r) {
+	if (r->spec->rebuild_info.dw_replica == r) {
 		REPLICA_ERRLOG("Replica(%lu) was under rebuild,"
 		    " seting master_replica to NULL\n",
 		    r->zvol_guid);
-		r->spec->target_replica = NULL;
-		r->spec->rebuild_in_progress = false;
+		r->spec->rebuild_info.dw_replica = NULL;
+		r->spec->rebuild_info.healthy_replica = NULL;
+		r->spec->rebuild_info.rebuild_in_progress = false;
 	}
 
 	TAILQ_FOREACH(kr, &r->spec->identified_replica, next) {
@@ -3021,9 +3066,10 @@ initialize_volume(spec_t *spec, int replication_factor, int consistency_factor)
 	spec->consistency_factor = consistency_factor;
 	spec->healthy_rcount = 0;
 	spec->degraded_rcount = 0;
-	spec->rebuild_in_progress = false;
+	spec->rebuild_info.rebuild_in_progress = false;
 	spec->ready = false;
-	spec->target_replica = NULL;
+	spec->rebuild_info.dw_replica = NULL;
+	spec->rebuild_info.healthy_replica = NULL;
 
 	rc = pthread_mutex_init(&spec->rcommonq_mtx, NULL);
 	if (rc != 0) {
