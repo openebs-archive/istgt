@@ -3389,6 +3389,7 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 			"RW" : "RO")));
 
 		json_object *jobj_arr = json_object_new_array();
+		MTX_LOCK(&spec->rq_mtx);
 		TAILQ_FOREACH(replica, &spec->rq, r_next) {
 		    MTX_LOCK(&replica->r_mtx);
 		    json_object *jobjarr = json_object_new_object();
@@ -3400,6 +3401,7 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 		    MTX_UNLOCK(&replica->r_mtx);
 		    json_object_array_add(jobj_arr, jobjarr);
 		}
+		MTX_UNLOCK(&spec->rq_mtx);
 
 		json_object_object_add(jobj, "Replicas", jobj_arr);
 
