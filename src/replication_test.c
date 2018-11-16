@@ -241,6 +241,7 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 	mgmt_ack_t *mgmt_ack_data = NULL;
 	int ret = -1;
 	zvol_op_stat_t stats;
+	struct zvol_snapshot_list *snap_details = NULL;
 
 	/* Init mgmt_ack_hdr */
 	build_mgmt_ack_hdr;
@@ -285,6 +286,16 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 		iovec[1].iov_base = &stats;
 		iovec[1].iov_len = sizeof (zvol_op_stat_t);
 		iovec_count = 2;
+	}  else if (opcode == ZVOL_OPCODE_SNAP_LIST) {
+		const char *dummy = "{\"snapshot\":[{\"name\":\"snap0\",\"properties\":{\"logicalreferenced\":6144,\"compressratio\":100,\"used\":0}}]}";
+		snap_details = malloc(strlen(dummy) + sizeof (*snap_details));
+		snap_details->data_len = strlen(dummy);
+		memcpy(snap_details->data, dummy, snap_details->data_len);
+		snap_details->zvol_guid = replica_port;
+		iovec[1].iov_base = snap_details;
+		iovec[1].iov_len = sizeof (*snap_details) + strlen(dummy);
+		mgmt_ack_hdr->len = sizeof (*snap_details) + strlen(dummy);
+		iovec_count = 2;
 	} else {
 		build_mgmt_ack_data;
 
@@ -324,6 +335,9 @@ out:
 
 	if (mgmt_ack_data)
 		free(mgmt_ack_data);
+
+	if (snap_details)
+		free(snap_details);
 
 	return ret;
 }

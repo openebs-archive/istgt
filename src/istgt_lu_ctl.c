@@ -652,6 +652,54 @@ istgt_uctl_cmd_replica_stats(UCTL_Ptr uctl)
 	}
 	return (UCTL_CMD_OK);
 }
+
+static int
+istgt_uctl_cmd_snaplist(UCTL_Ptr uctl)
+{
+	ISTGT_LU_Ptr lu = NULL;
+	ISTGT_LU_DISK *spec = NULL;
+	const char *delim = ARGS_DELIM;
+	int rc = 0, ret = UCTL_CMD_ERR, wait_time;
+	char *arg;
+	char *resp;
+	arg = uctl->arg;
+	const char *volname;
+
+	CHECK_ARG_AND_GOTO_ERROR;
+	volname = strsepq(&arg, delim);
+
+	CHECK_ARG_AND_GOTO_ERROR;
+	wait_time = atoi(strsepq(&arg, delim));
+
+	lu = istgt_lu_find_target_by_volname(uctl->istgt, volname);
+
+	if (lu == NULL) {
+		istgt_uctl_snprintf(uctl, "ERR no target\n");
+		goto error_return;
+	}
+	spec = lu->lun[0].spec;
+	resp = istgt_lu_fetch_snaplist(spec, wait_time);
+	if (resp) {
+		istgt_uctl_snprintf(uctl, "%s %s\n", uctl->cmd, resp);
+		ret = UCTL_CMD_OK;
+		free(resp);
+	}
+	else
+		istgt_uctl_snprintf(uctl, "ERR failed %s\n", uctl->cmd);
+
+error_return:
+	rc = istgt_uctl_writeline(uctl);
+	if (rc != UCTL_CMD_OK) {
+		return rc;
+	}
+
+	istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
+	rc = istgt_uctl_writeline(uctl);
+	if (rc != UCTL_CMD_OK) {
+		return rc;
+	}
+	return UCTL_CMD_OK;
+}
 #endif
 
 static int
@@ -3672,6 +3720,7 @@ static ISTGT_UCTL_CMD_TABLE istgt_uctl_cmd_table[] =
 	{ "SNAPCREATE", istgt_uctl_cmd_snap},
 	{ "SNAPDESTROY", istgt_uctl_cmd_snap},
 	{ "REPLICA", istgt_uctl_cmd_replica_stats},
+	{ "SNAPLIST", istgt_uctl_cmd_snaplist},
 #endif
 	{ NULL, NULL },
 };

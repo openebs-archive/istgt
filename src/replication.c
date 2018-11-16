@@ -13,7 +13,7 @@
 #include <istgt_proto.h>
 #include <sys/prctl.h>
 #include <sys/eventfd.h>
-#include <json-c/json_object.h>
+#include <json-c/json.h>
 #include "zrepl_prot.h"
 #include "replication.h"
 #include "istgt_integration.h"
@@ -220,6 +220,18 @@ do {									\
 	}								\
 }
 
+#define	DESTROY_SNAPSHOT_RESP_LIST(_rcomm_mgmt)				\
+do {									\
+	int _idx;							\
+	struct zvol_snapshot_list **_snap_list = 			\
+	    (struct zvol_snapshot_list **)rcomm_mgmt->buf;		\
+	for (_idx = 0; _idx < _rcomm_mgmt->cmds_sent;			\
+	    _idx++) {							\
+		if (_snap_list[_idx])					\
+			free(_snap_list[_idx]);				\
+	}								\
+} while (0)
+
 static rcommon_mgmt_cmd_t *
 allocate_rcommon_mgmt_cmd(uint64_t buf_size)
 {
@@ -303,6 +315,16 @@ check_header_sanity(zvol_io_hdr_t *resp_hdr)
 				return -1;
 			}
 			break;
+
+		case ZVOL_OPCODE_SNAP_LIST:
+			if(resp_hdr->len == 0) {
+				REPLICA_ERRLOG("hdr->len length(%lu) is zero,"
+				    " should be non-zero..\n",
+				    resp_hdr->len);
+				return -1;
+			}
+			break;
+
 		default:
 			assert(!"Please handle this opcode\n");
 			break;
@@ -1285,6 +1307,173 @@ disconnect_nonresponding_replica(replica_t *replica, uint64_t io_seq,
 	MTX_UNLOCK(&replica->r_mtx);
 }
 
+static void
+handle_snap_list_response(replica_t *replica, void *resp_data, mgmt_cmd_t *mgmt_cmd)
+{
+	zvol_io_hdr_t *hdr = replica->mgmt_io_resp_hdr;
+	struct zvol_snapshot_list *snap_details = (struct zvol_snapshot_list *)resp_data;
+	rcommon_mgmt_cmd_t *rcomm_mgmt = mgmt_cmd->rcomm_mgmt;
+	bool delete = false, assigned;
+	struct zvol_snapshot_list **snap_resp_array = (struct zvol_snapshot_list **)rcomm_mgmt->buf;
+	uint64_t i = 0;
+
+	MTX_LOCK(&rcomm_mgmt->mtx);
+	if (hdr->status != ZVOL_OP_STATUS_OK)
+		rcomm_mgmt->cmds_failed++;
+	else
+		rcomm_mgmt->cmds_succeeded++;
+
+	if ((rcomm_mgmt->caller_gone == 1) &&
+	    (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_failed + rcomm_mgmt->cmds_succeeded)))
+		delete = true;
+
+	for (i = 0, assigned = false; i < rcomm_mgmt->buf_size; i += sizeof (*snap_resp_array)) {
+		if (snap_resp_array[i] == NULL) {
+			snap_resp_array[i] = (struct zvol_snapshot_list *)snap_details;
+			assigned = true;
+			break;
+		}
+	}
+
+	ASSERT(assigned);
+
+	MTX_UNLOCK(&rcomm_mgmt->mtx);
+
+	if (delete == true) {
+		DESTROY_SNAPSHOT_RESP_LIST(rcomm_mgmt);
+		free_rcommon_mgmt_cmd(rcomm_mgmt);
+	}
+}
+
+static void
+process_snaplist_response(char **resp, void *buf, int rcount)
+{
+	struct zvol_snapshot_list **snap_resp_array = (struct zvol_snapshot_list **)buf;
+	int i = 0;
+	uint64_t total_len;
+	char *msg = NULL;
+	const char *json_string = NULL;
+	struct json_object *jobj, *jarray, *resp_obj, *snap_obj;
+
+	jarray = json_object_new_array();
+
+	for (i = 0; i < rcount; i += 1) {
+		if (snap_resp_array[i]) {
+			resp_obj = snap_obj = NULL;
+			jobj = json_object_new_object();
+
+			json_object_object_add(jobj, "replica", json_object_new_uint64(snap_resp_array[i]->zvol_guid));
+
+			resp_obj = json_tokener_parse(snap_resp_array[i]->data);
+			(void) json_object_object_get_ex(resp_obj,
+			    "snapshot", &snap_obj);
+			json_object_object_add(jobj, "snapshot", snap_obj);
+
+			json_object_array_add(jarray, jobj);
+		}
+	}
+	jobj = json_object_new_object();
+	json_object_object_add(jobj, "snapshot list", jarray);
+
+	json_string = json_object_to_json_string_ext(jobj, JSON_C_TO_STRING_PLAIN);
+	total_len = strlen(json_string) + 1;
+	msg = malloc(total_len);
+	memset(msg, 0, total_len);
+	strncpy(msg, json_string, total_len);
+	json_object_put(jobj);
+	*resp = msg;
+}
+
+char *
+istgt_lu_fetch_snaplist(spec_t *spec, int wait_time)
+{
+	replica_t *replica;
+	int free_rcomm_mgmt = 0;
+	struct timespec last, now, diff;
+	rcommon_mgmt_cmd_t *rcomm_mgmt;
+	mgmt_cmd_t *mgmt_cmd;
+	size_t data_len;
+	char *response = NULL;
+	int num_replica = 0;
+	zvol_io_hdr_t *mgmt_io_hdr = NULL;
+	uint64_t num;
+
+	clock_gettime(CLOCK_MONOTONIC, &last);
+
+	MTX_LOCK(&spec->rq_mtx);
+	num_replica = spec->healthy_rcount + spec->degraded_rcount;
+	rcomm_mgmt = allocate_rcommon_mgmt_cmd(sizeof (struct zvol_snapshot_list *) * num_replica);
+	free_rcomm_mgmt = 0;
+
+	TAILQ_FOREACH(replica, &spec->rq, r_next) {
+		mgmt_cmd = malloc(sizeof(mgmt_cmd_t));
+		memset(mgmt_cmd, 0, sizeof (mgmt_cmd_t));
+		data_len = strlen(spec->volname) + 2;
+
+		BUILD_REPLICA_MGMT_HDR(mgmt_io_hdr, ZVOL_OPCODE_SNAP_LIST, data_len);
+
+		mgmt_cmd->data = (char *)malloc(data_len);
+		snprintf(mgmt_cmd->data, data_len, "%s", spec->volname);
+
+		mgmt_cmd->rcomm_mgmt = rcomm_mgmt;
+		mgmt_cmd->io_hdr = mgmt_io_hdr;
+		mgmt_cmd->mgmt_cmd_state = WRITE_IO_SEND_HDR;
+
+		MTX_LOCK(&replica->r_mtx);
+		TAILQ_INSERT_TAIL(&replica->mgmt_cmd_queue, mgmt_cmd, mgmt_cmd_next);
+		MTX_UNLOCK(&replica->r_mtx);
+
+		rcomm_mgmt->cmds_sent++;
+
+		num = 1;
+		if (write(replica->mgmt_eventfd1, &num, sizeof (num)) != sizeof (num)) {
+			REPLICA_ERRLOG("Failed to inform to mgmt_eventfd for "
+			    "replica(%lu)\n", replica->zvol_guid);
+			rcomm_mgmt->caller_gone = 1;
+			goto done;
+		}
+	}
+
+	timesdiff(CLOCK_MONOTONIC, last, now, diff);
+	MTX_LOCK(&rcomm_mgmt->mtx);
+
+	if (rcomm_mgmt->cmds_sent != num_replica) {
+		rcomm_mgmt->caller_gone = 1;
+		MTX_UNLOCK(&rcomm_mgmt->mtx);
+		REPLICA_ERRLOG("Failed to send cmd to all replica... sent to %d replica.. connected replica(%d).. \n",
+		    rcomm_mgmt->cmds_sent, num_replica);
+		goto done;
+	}
+
+	while (diff.tv_sec < wait_time) {
+		if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed))
+			break;
+		MTX_UNLOCK(&rcomm_mgmt->mtx);
+		MTX_UNLOCK(&spec->rq_mtx);
+		sleep(1);
+		MTX_LOCK(&spec->rq_mtx);
+		MTX_LOCK(&rcomm_mgmt->mtx);
+		timesdiff(CLOCK_MONOTONIC, last, now, diff);
+	}
+
+	rcomm_mgmt->caller_gone = 1;
+	if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed)) {
+		free_rcomm_mgmt = 1;
+		if ((rcomm_mgmt->cmds_succeeded == spec->replication_factor) && (rcomm_mgmt->cmds_failed == 0)) {
+			process_snaplist_response(&response, rcomm_mgmt->buf, num_replica);
+		}
+	}
+	MTX_UNLOCK(&rcomm_mgmt->mtx);
+
+done:
+	MTX_UNLOCK(&spec->rq_mtx);
+	if (free_rcomm_mgmt == 1) {
+		DESTROY_SNAPSHOT_RESP_LIST(rcomm_mgmt);
+		free_rcommon_mgmt_cmd(rcomm_mgmt);
+	}
+	return response;
+}
+
 /*
 static bool
 any_ongoing_snapshot_command(spec_t *spec)
@@ -2162,6 +2351,11 @@ read_io_resp_hdr:
 					break;
 
 				case ZVOL_OPCODE_SNAP_DESTROY:
+					break;
+
+				case ZVOL_OPCODE_SNAP_LIST:
+					assert(fd != replica->iofd);
+					handle_snap_list_response(replica, *resp_data, mgmt_cmd);
 					break;
 
 				default:

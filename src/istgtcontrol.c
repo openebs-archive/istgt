@@ -977,6 +977,48 @@ exec_replica(UCTL_Ptr uctl)
 	}
 	return (UCTL_CMD_OK);
 }
+
+static int
+exec_snaplist(UCTL_Ptr uctl)
+{
+	const char *delim = ARGS_DELIM;
+	char *arg;
+	char *result;
+	int rc = 0, wait_time;
+	char *volname = uctl->setargv[0];
+
+	if (uctl->setargcnt == 2)
+		wait_time = atoi(uctl->setargv[1]);
+	else
+		wait_time = 30;
+
+	uctl_snprintf(uctl, "%s \"%s\" \"%d\"\n", uctl->cmd, volname, wait_time);
+	rc = uctl_writeline(uctl);
+	if (rc != UCTL_CMD_OK) {
+		return rc;
+	}
+
+	/* receive result */
+	while (1) {
+		rc = uctl_readline(uctl);
+		if (rc != UCTL_CMD_OK) {
+			return rc;
+		}
+		arg = trim_string(uctl->recvbuf);
+		result = strsepq(&arg, delim);
+		strupr(result);
+		if (strcmp(result, uctl->cmd) != 0)
+			break;
+		fprintf(stdout, "%s\n", arg);
+	}
+	if (strcmp(result, "OK") != 0) {
+		if (is_err_req_auth(uctl, arg))
+			return UCTL_CMD_REQAUTH;
+		fprintf(stderr, "ERROR %s\n", arg);
+		return UCTL_CMD_ERR;
+	}
+	return UCTL_CMD_OK;
+}
 #endif
 
 static int
@@ -1233,6 +1275,7 @@ static EXEC_TABLE exec_table[] =
 	{"SNAPCREATE", exec_snap, 2, 0},
 	{"SNAPDESTROY", exec_snap, 2, 0},
 	{"REPLICA", exec_replica, 0, 0},
+	{"SNAPLIST", exec_snaplist, 1, 0},
 #endif
 	{ NULL,	NULL,	0,	0 },
 };
@@ -1714,10 +1757,13 @@ usage(void)
 	printf(" modify     Modify all the lun devices to Fake/Normal\n");
 	printf(" status     get the status of all or specified lun device \n");
 	printf(" info       show connections of target\n");
-	printf(" iostats    displays iostats of volume\n");
 	printf(" maxtime    list the IOs which took maximum time to process\n");
 #ifdef	REPLICATION
+	printf(" iostats    displays iostats of volume\n");
+	printf(" snapcreate create snapshot on replica\n");
+	printf(" snapdestroy destroy snapshot on replica\n");
 	printf(" replica    list replica and its stats\n");
+	printf(" snaplist   get list of snapshots created on replica\n");
 	printf(" mempool    get mempool details\n");
 #endif
 	printf(" set        set values for variables:\n");
@@ -1993,8 +2039,9 @@ main(int argc, char *argv[])
 	}
 
 	if ((strcmp(cmd, "SNAPCREATE") == 0) ||
-	(strcmp(cmd, "SNAPDESTROY") == 0) ||
-	    (strcmp(cmd, "REPLICA") == 0)) {
+	    (strcmp(cmd, "SNAPDESTROY") == 0) ||
+	    (strcmp(cmd, "REPLICA") == 0) ||
+	    (strcmp(cmd, "SNAPLIST") == 0)) {
 		uctl->setargv = argv;
 		uctl->setargcnt = argc;
 	}

@@ -94,6 +94,7 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int, int);
 int istgt_lu_destroy_snapshot(spec_t *spec, char *snapname);
 void istgt_lu_mempool_stats(char **resp);
 void istgt_lu_replica_stats(char *volname, char **resp);
+char *istgt_lu_fetch_snaplist(spec_t *spec, int);
 #endif
 int istgt_lu_add_nexus(ISTGT_LU_Ptr lu, char *initiator_port);
 int istgt_lu_remove_nexus(ISTGT_LU_Ptr lu, char *initiator_port);
