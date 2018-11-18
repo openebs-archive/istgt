@@ -1522,6 +1522,30 @@ get_cv_status(spec_t *spec, int replica_cnt, int healthy_replica_cnt)
 	return 3;
 }
 
+static const char *
+status_to_str(int status)
+{
+	const char *str;
+	switch (status) {
+		case 1:
+			str = "offline";
+			break;
+		case 2:
+			str = "disabled_feats";
+			break;
+		case 3:
+			str = "degraded";
+			break;
+		case 4:
+			str = "healthy";
+			break;
+		default:
+			str = "unknown";
+			break;
+	}
+	return str;
+}
+
 void
 istgt_lu_replica_stats(char *volname, char **resp)
 {
@@ -1559,7 +1583,7 @@ istgt_lu_replica_stats(char *volname, char **resp)
 				status = get_cv_status(spec, replica_cnt, healthy_replica_cnt);
 				MTX_UNLOCK(&spec->rq_mtx);
 				json_object_object_add(j_spec, "status",
-				    json_object_new_int64(status));
+				    json_object_new_string(status_to_str(status)));
 				json_object_object_add(j_spec,
 				    "Replica status", j_replica);
 				json_object_array_add(j_all_spec, j_spec);
