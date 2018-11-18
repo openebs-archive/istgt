@@ -1510,57 +1510,94 @@ get_replica_stats_json(replica_t *replica, struct json_object **jobj)
 	*jobj = j_stats;
 }
 
+static int
+get_cv_status(spec_t *spec, int replica_cnt, int healthy_replica_cnt)
+{
+	if (replica_cnt < spec->consistency_factor)
+		return 1;
+	if (healthy_replica_cnt < spec->consistency_factor)
+		return 2;
+	if (healthy_replica_cnt == spec->replication_factor)
+		return 4;
+	return 3;
+}
+
 void
 istgt_lu_replica_stats(char *volname, char **resp)
 {
 	replica_t *replica;
 	spec_t *spec = NULL;
-	struct json_object *j_stats, *j_replica, *j_spec, *j_obj;
+	struct json_object *j_all_spec, *j_replica, *j_spec, *j_obj;
 	const char *json_string = NULL;
 	uint64_t resp_len = 0;
+	int replica_cnt = 0, healthy_replica_cnt = 0, status;
 
-	j_stats = json_object_new_array();
+	j_all_spec = json_object_new_array();
 
 	MTX_LOCK(&specq_mtx);
 
 	TAILQ_FOREACH(spec, &spec_q, spec_next) {
+		MTX_LOCK(&spec->rq_mtx);
 		if (volname) {
 			if(!strncmp(spec->volname, volname, strlen(volname))) {
 				j_spec = json_object_new_object();
 				j_replica = json_object_new_array();
 
+				replica_cnt = 0;
+				healthy_replica_cnt = 0;
 				TAILQ_FOREACH(replica, &spec->rq, r_next) {
 					MTX_LOCK(&replica->r_mtx);
 					get_replica_stats_json(replica, &j_obj);
 					MTX_UNLOCK(&replica->r_mtx);
-
+					replica_cnt++;
+	    				if (replica->state == ZVOL_STATUS_HEALTHY)
+						healthy_replica_cnt++;
 					json_object_array_add(j_replica, j_obj);
 				}
 				json_object_object_add(j_spec,
-				    spec->volname, j_replica);
-				json_object_array_add(j_stats, j_spec);
+				    "name", json_object_new_string(spec->volname));
+				status = get_cv_status(spec, replica_cnt, healthy_replica_cnt);
+				MTX_UNLOCK(&spec->rq_mtx);
+				json_object_object_add(j_spec, "status",
+				    json_object_new_int64(status));
+				json_object_object_add(j_spec,
+				    "Replica status", j_replica);
+				json_object_array_add(j_all_spec, j_spec);
 				break;
 			}
+			MTX_UNLOCK(&spec->rq_mtx);
 		} else {
 			j_spec = json_object_new_object();
 			j_replica = json_object_new_array();
 
+			replica_cnt = 0;
+			healthy_replica_cnt = 0;
 			TAILQ_FOREACH(replica, &spec->rq, r_next) {
 				MTX_LOCK(&replica->r_mtx);
 				get_replica_stats_json(replica, &j_obj);
 				MTX_UNLOCK(&replica->r_mtx);
-
+				replica_cnt++;
+	    			if (replica->state == ZVOL_STATUS_HEALTHY)
+					healthy_replica_cnt++;
 				json_object_array_add(j_replica, j_obj);
 			}
-			json_object_object_add(j_spec, spec->volname, j_replica);
-			json_object_array_add(j_stats, j_spec);
+
+			json_object_object_add(j_spec,
+			    "name", json_object_new_string(spec->volname));
+			status = get_cv_status(spec, replica_cnt, healthy_replica_cnt);
+			MTX_UNLOCK(&spec->rq_mtx);
+			json_object_object_add(j_spec, "status",
+			    json_object_new_int64(status));
+			json_object_object_add(j_spec,
+			    "Replica status", j_replica);
+			json_object_array_add(j_all_spec, j_spec);
 		}
 	}
 
 	MTX_UNLOCK(&specq_mtx);
 
 	j_obj = json_object_new_object();
-	json_object_object_add(j_obj, "Replica status", j_stats);
+	json_object_object_add(j_obj, "Volume status", j_all_spec);
 	json_string = json_object_to_json_string_ext(j_obj,
 	    JSON_C_TO_STRING_PLAIN);
 	resp_len = strlen(json_string) + 1;

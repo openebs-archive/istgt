@@ -531,26 +531,48 @@ run_rebuild_time_test_in_single_replica()
 	CONSISTENCY_FACTOR=1
 	setup_test_env
 
+	cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"Volume status\"[0].status'"
+	rt=$(eval $cmd)
+	if [ $rt -ne 1 ]; then
+		$ISTGTCONTROL -q REPLICA vol1
+		echo "volume status is supposed to be 1"
+		exit 1
+	fi
+
 	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev &
 	replica1_pid=$!
 	sleep 2
+
+	rt=$(eval $cmd)
+	if [ $rt -ne 2 ]; then
+		$ISTGTCONTROL -q REPLICA vol1
+		echo "volume status is supposed to be 2"
+		exit 1
+	fi
 
 	while [ 1 ]; do
 		# We have started istgt with 20 second replica timeout
 		# and rf=cf=1. so, it will take around 2 minutes for the
 		# replica to become healthy. So on safe side, we will
 		# check replica status after 130 seconds.
-		cmd="$ISTGTCONTROL -q REPLICA | jq '.\"Replica status\"[0].\"vol1\"[0].\"connected since(in seconds)\"'"
+		cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"Volume status\"[0].\"Replica status\"[0].\"connected since(in seconds)\"'"
 		rt=$(eval $cmd)
 		echo "replica start time $rt"
 		if [ $rt -gt 130 ]; then
-			cmd="$ISTGTCONTROL -q REPLICA | jq '.\"Replica status\"[0].\"vol1\"[0].\"status\"'"
+			cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"Volume status\"[0].\"Replica status\"[0].status'"
 			rstatus=$(eval $cmd)
 			echo "replica status $rstatus"
 			if [ ${rstatus} != "\"HEALTHY\"" ]; then
 				echo "replication factor(1) test failed"
 				exit 1
 			else
+				cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"Volume status\"[0].status'"
+				rt=$(eval $cmd)
+				if [ $rt -ne 4 ]; then
+					$ISTGTCONTROL -q REPLICA vol1
+					echo "volume status is supposed to be 4"
+					exit 1
+				fi
 				break
 			fi
 		fi
@@ -573,6 +595,7 @@ run_rebuild_time_test_in_multiple_replicas()
 	local replica4_ip="127.0.0.1"
 	local replica1_vdev="/tmp/test_vol1"
 	local ret=0
+	local cnt=0
 	local rt=0
 	local done_test=0
 
@@ -581,43 +604,79 @@ run_rebuild_time_test_in_multiple_replicas()
 	CONSISTENCY_FACTOR=2
 	setup_test_env
 
+	cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"Volume status\"[0].status'"
+	rt=$(eval $cmd)
+	if [ $rt -ne 1 ]; then
+		$ISTGTCONTROL -q REPLICA vol1
+		echo "volume status is supposed to be 1"
+		exit 1
+	fi
+
 	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev &
 	replica1_pid=$!
 	sleep 2
+
+	rt=$(eval $cmd)
+	if [ $rt -ne 1 ]; then
+		$ISTGTCONTROL -q REPLICA vol1
+		echo "volume status is supposed to be 1"
+		exit 1
+	fi
 
 	# As long as we are not running any IOs we can use the same vdev file
 	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V $replica1_vdev  &
 	replica2_pid=$!
 	sleep 2
 
+	rt=$(eval $cmd)
+	if [ $rt -ne 2 ]; then
+		$ISTGTCONTROL -q REPLICA vol1
+		echo "volume status is supposed to be 2"
+		exit 1
+	fi
+
 	# As long as we are not running any IOs we can use the same vdev file
 	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V $replica1_vdev &
 	replica3_pid=$!
 	sleep 3
 
+	rt=$(eval $cmd)
+	if [ $rt -ne 2 ]; then
+		$ISTGTCONTROL -q REPLICA vol1
+		echo "volume status is supposed to be 2"
+		exit 1
+	fi
+
 	done_test=0
 	while [ 1 ]; do
 		# We have started istgt with 20 second replica timeout
-		# and rf=cf=1. so, it will take around 2 minutes for the
+		# and rf=2, cf=3. so, it will take around 2 minutes for the
 		# replica to become healthy. So on safe side, we will
 		# check replica status after 130 seconds.
 		for (( i = 0; i < 3; i++ )) do
-			cmd="$ISTGTCONTROL -q REPLICA | jq '.\"Replica status\"[0].\"vol1\"["$i"].\"connected since(in seconds)\"'"
+			cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"Volume status\"[0].\"Replica status\"["$i"].\"connected since(in seconds)\"'"
 			rt=$(eval $cmd)
 			echo "replica start time $rt"
 			if [ $1 -eq 0 ]; then
 				if [ $rt -gt 130 ]; then
-					cmd="$ISTGTCONTROL -q REPLICA | jq '.\"Replica status\"[0].\"vol1\"["$i"].\"status\"'"
+					cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"Volume status\"[0].\"Replica status\"["$i"].status'"
 					rstatus=$(eval $cmd)
 					echo "replica status $rstatus"
 					if [ ${rstatus} == "\"HEALTHY\"" ]; then
+						cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"Volume status\"[0].status'"
+						rstatus=$(eval $cmd)
+						if [ $rstatus -ne 2 ]; then
+							$ISTGTCONTROL -q REPLICA vol1
+							echo "volume status is supposed to be 2"
+							exit 1
+						fi
 						done_test=1
 						break
 					fi
 				fi
 			else
 				if [ $rt -le 140 ]; then
-					cmd="$ISTGTCONTROL -q REPLICA | jq '.\"Replica status\"[0].\"vol1\"["$i"].\"status\"'"
+					cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"Volume status\"[0].\"Replica status\"["$i"].status'"
 					rstatus=$(eval $cmd)
 					echo "replica status $rstatus"
 					if [ ${rstatus} == "\"HEALTHY\"" ]; then
@@ -644,6 +703,27 @@ run_rebuild_time_test_in_multiple_replicas()
 		fi
 		sleep 10
 	done
+	while [ 1 ]; do
+		cnt=0
+		for (( i = 0; i < 3; i++ )) do
+			cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"Volume status\"[0].\"Replica status\"["$i"].status'"
+			rt=$(eval $cmd)
+			if [ ${rt} == "\"HEALTHY\"" ]; then
+				cnt=`expr $cnt + 1`
+			fi
+		done
+		if [ ${cnt} == 2 ]; then
+			cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"Volume status\"[0].status'"
+			rstatus=$(eval $cmd)
+			if [ $rstatus -ne 3 ]; then
+				$ISTGTCONTROL -q REPLICA vol1
+				echo "volume status is supposed to be 3"
+				exit 1
+			fi
+			break
+		fi
+	done
+
 	kill -9 $replica1_pid $replica2_pid $replica3_pid
 	stop_istgt
 	rm -rf ${replica1_vdev::-1}*
