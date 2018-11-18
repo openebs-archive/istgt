@@ -533,7 +533,7 @@ run_rebuild_time_test_in_single_replica()
 
 	cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"Volume status\"[0].status'"
 	rt=$(eval $cmd)
-	if [ ${rt} != "\"offline\"" ]; then
+	if [ ${rt} != "\"Offline\"" ]; then
 		$ISTGTCONTROL -q REPLICA vol1
 		echo "volume status is supposed to be 1"
 		exit 1
@@ -544,7 +544,7 @@ run_rebuild_time_test_in_single_replica()
 	sleep 2
 
 	rt=$(eval $cmd)
-	if [ ${rt} != "\"disabled_feats\"" ]; then
+	if [ ${rt} != "\"DisabledFeatures\"" ]; then
 		$ISTGTCONTROL -q REPLICA vol1
 		echo "volume status is supposed to be 2"
 		exit 1
@@ -568,7 +568,7 @@ run_rebuild_time_test_in_single_replica()
 			else
 				cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"Volume status\"[0].status'"
 				rt=$(eval $cmd)
-				if [ ${rt} != "\"healthy\"" ]; then
+				if [ ${rt} != "\"Healthy\"" ]; then
 					$ISTGTCONTROL -q REPLICA vol1
 					echo "volume status is supposed to be 4"
 					exit 1
@@ -606,7 +606,7 @@ run_rebuild_time_test_in_multiple_replicas()
 
 	cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"Volume status\"[0].status'"
 	rt=$(eval $cmd)
-	if [ ${rt} != "\"offline\"" ]; then
+	if [ ${rt} != "\"Offline\"" ]; then
 		$ISTGTCONTROL -q REPLICA vol1
 		echo "volume status is supposed to be 1"
 		exit 1
@@ -617,7 +617,7 @@ run_rebuild_time_test_in_multiple_replicas()
 	sleep 2
 
 	rt=$(eval $cmd)
-	if [ ${rt} != "\"offline\"" ]; then
+	if [ ${rt} != "\"Offline\"" ]; then
 		$ISTGTCONTROL -q REPLICA vol1
 		echo "volume status is supposed to be 1"
 		exit 1
@@ -629,7 +629,7 @@ run_rebuild_time_test_in_multiple_replicas()
 	sleep 2
 
 	rt=$(eval $cmd)
-	if [ ${rt} != "\"disabled_feats\"" ]; then
+	if [ ${rt} != "\"DisabledFeatures\"" ]; then
 		$ISTGTCONTROL -q REPLICA vol1
 		echo "volume status is supposed to be 2"
 		exit 1
@@ -641,7 +641,7 @@ run_rebuild_time_test_in_multiple_replicas()
 	sleep 3
 
 	rt=$(eval $cmd)
-	if [ ${rt} != "\"disabled_feats\"" ]; then
+	if [ ${rt} != "\"DisabledFeatures\"" ]; then
 		$ISTGTCONTROL -q REPLICA vol1
 		echo "volume status is supposed to be 2"
 		exit 1
@@ -665,7 +665,7 @@ run_rebuild_time_test_in_multiple_replicas()
 					if [ ${rstatus} == "\"HEALTHY\"" ]; then
 						cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"Volume status\"[0].status'"
 						rstatus=$(eval $cmd)
-						if [ ${rstatus} != "\"disabled_feats\"" ]; then
+						if [ ${rstatus} != "\"DisabledFeatures\"" ]; then
 							$ISTGTCONTROL -q REPLICA vol1
 							echo "volume status is supposed to be 2"
 							exit 1
@@ -715,7 +715,7 @@ run_rebuild_time_test_in_multiple_replicas()
 		if [ ${cnt} == 2 ]; then
 			cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"Volume status\"[0].status'"
 			rstatus=$(eval $cmd)
-			if [ ${rstatus} != "\"degraded\"" ]; then
+			if [ ${rstatus} != "\"DegradedPerformance\"" ]; then
 				$ISTGTCONTROL -q REPLICA vol1
 				echo "volume status is supposed to be 3"
 				exit 1

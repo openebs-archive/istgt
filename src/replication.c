@@ -1528,19 +1528,19 @@ status_to_str(int status)
 	const char *str;
 	switch (status) {
 		case 1:
-			str = "offline";
+			str = "Offline";
 			break;
 		case 2:
-			str = "disabled_feats";
+			str = "DisabledFeatures";
 			break;
 		case 3:
-			str = "degraded";
+			str = "DegradedPerformance";
 			break;
 		case 4:
-			str = "healthy";
+			str = "Healthy";
 			break;
 		default:
-			str = "unknown";
+			str = "Unknown";
 			break;
 	}
 	return str;
@@ -1611,7 +1611,7 @@ istgt_lu_replica_stats(char *volname, char **resp)
 			status = get_cv_status(spec, replica_cnt, healthy_replica_cnt);
 			MTX_UNLOCK(&spec->rq_mtx);
 			json_object_object_add(j_spec, "status",
-			    json_object_new_int64(status));
+			    json_object_new_string(status_to_str(status)));
 			json_object_object_add(j_spec,
 			    "Replica status", j_replica);
 			json_object_array_add(j_all_spec, j_spec);
