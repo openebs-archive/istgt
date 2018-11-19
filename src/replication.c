@@ -1510,7 +1510,7 @@ get_replica_stats_json(replica_t *replica, struct json_object **jobj)
 	*jobj = j_stats;
 }
 
-static const char *
+const char *
 get_cv_status(spec_t *spec, int replica_cnt, int healthy_replica_cnt)
 {
 	if(spec->ready == false)

@@ -182,6 +182,7 @@ int64_t perform_read_write_on_fd(int fd, uint8_t *data, uint64_t len,
 int initialize_volume(spec_t *spec, int, int);
 void destroy_volume(spec_t *spec);
 void inform_mgmt_conn(replica_t *r);
+extern const char * get_cv_status(spec_t *spec, int replica_cnt, int healthy_replica_cnt);
 
 /* Replica default timeout is 200 seconds */
 #define	REPLICA_DEFAULT_TIMEOUT	200
