@@ -187,6 +187,14 @@ extern const char * get_cv_status(spec_t *spec, int replica_cnt, int healthy_rep
 /* Replica default timeout is 200 seconds */
 #define	REPLICA_DEFAULT_TIMEOUT	200
 
+// Volume status
+#define VOL_STATUS_OFFLINE "Offline"
+#define VOL_STATUS_DEGRADED "Degraded"
+#define VOL_STATUS_HEALTHY "Healthy"
+// Replica status
+#define REPLICA_STATUS_DEGRADED "Degraded"
+#define REPLICA_STATUS_HEALTHY "Healthy"
+
 #define	DECREMENT_INFLIGHT_REPLICA_IO_CNT(_r, _opcode)			\
 	do {								\
 		switch (_opcode) {					\

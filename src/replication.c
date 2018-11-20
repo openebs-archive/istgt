@@ -1489,7 +1489,7 @@ get_replica_stats_json(replica_t *replica, struct json_object **jobj)
 
 	json_object_object_add(j_stats, "status",
 	    json_object_new_string((replica->state == ZVOL_STATUS_HEALTHY) ?
-	    "HEALTHY" : "DEGRADED"));
+	    REPLICA_STATUS_HEALTHY : REPLICA_STATUS_DEGRADED));
 
 	json_object_object_add(j_stats, "checkpointedIOSeq",
 	    json_object_new_uint64(replica->initial_checkpointed_io_seq));
@@ -1513,11 +1513,11 @@ get_replica_stats_json(replica_t *replica, struct json_object **jobj)
 const char *
 get_cv_status(spec_t *spec, int replica_cnt, int healthy_replica_cnt)
 {
-	if(spec->ready == false)
-		return ("Offline");
+	if (spec->ready == false)
+		return VOL_STATUS_OFFLINE;
 	if (healthy_replica_cnt >= spec->consistency_factor)
-		return ("Healthy");
-	return ("Degraded");
+		return VOL_STATUS_HEALTHY;
+	return VOL_STATUS_DEGRADED;
 }
 
 void
