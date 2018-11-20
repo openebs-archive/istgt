@@ -1482,6 +1482,7 @@ get_replica_stats_json(replica_t *replica, struct json_object **jobj)
 {
 	struct json_object *j_stats;
 	struct timespec now;
+	char upTime[10];
 
 	j_stats = json_object_new_object();
 	json_object_object_add(j_stats, "replicaId",
@@ -1504,8 +1505,9 @@ get_replica_stats_json(replica_t *replica, struct json_object **jobj)
 	    json_object_new_uint64(replica->replica_inflight_sync_io_cnt));
 
 	clock_gettime(CLOCK_MONOTONIC, &now);
+	sprintf(upTime, "%lds", now.tv_sec - replica->create_time.tv_sec);
 	json_object_object_add(j_stats, "upTime",
-	    json_object_new_int64(now.tv_sec - replica->create_time.tv_sec));
+	    json_object_new_string(upTime));
 
 	*jobj = j_stats;
 }
