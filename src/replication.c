@@ -1510,40 +1510,14 @@ get_replica_stats_json(replica_t *replica, struct json_object **jobj)
 	*jobj = j_stats;
 }
 
-static int
+static const char *
 get_cv_status(spec_t *spec, int replica_cnt, int healthy_replica_cnt)
 {
-	if (replica_cnt < spec->consistency_factor)
-		return 1;
-	if (healthy_replica_cnt < spec->consistency_factor)
-		return 2;
-	if (healthy_replica_cnt == spec->replication_factor)
-		return 4;
-	return 3;
-}
-
-static const char *
-status_to_str(int status)
-{
-	const char *str;
-	switch (status) {
-		case 1:
-			str = "Offline";
-			break;
-		case 2:
-			str = "DisabledFeatures";
-			break;
-		case 3:
-			str = "DegradedPerformance";
-			break;
-		case 4:
-			str = "Healthy";
-			break;
-		default:
-			str = "Unknown";
-			break;
-	}
-	return str;
+	if(spec->ready == false)
+		return ("Offline");
+	if (healthy_replica_cnt >= spec->consistency_factor)
+		return ("Healthy");
+	return ("Degraded");
 }
 
 void
@@ -1554,7 +1528,8 @@ istgt_lu_replica_stats(char *volname, char **resp)
 	struct json_object *j_all_spec, *j_replica, *j_spec, *j_obj;
 	const char *json_string = NULL;
 	uint64_t resp_len = 0;
-	int replica_cnt = 0, healthy_replica_cnt = 0, status;
+	int replica_cnt = 0, healthy_replica_cnt = 0;
+	const char *status;
 
 	j_all_spec = json_object_new_array();
 
@@ -1583,7 +1558,7 @@ istgt_lu_replica_stats(char *volname, char **resp)
 				status = get_cv_status(spec, replica_cnt, healthy_replica_cnt);
 				MTX_UNLOCK(&spec->rq_mtx);
 				json_object_object_add(j_spec, "status",
-				    json_object_new_string(status_to_str(status)));
+				    json_object_new_string(status));
 				json_object_object_add(j_spec,
 				    "replicaStatus", j_replica);
 				json_object_array_add(j_all_spec, j_spec);
@@ -1611,7 +1586,7 @@ istgt_lu_replica_stats(char *volname, char **resp)
 			status = get_cv_status(spec, replica_cnt, healthy_replica_cnt);
 			MTX_UNLOCK(&spec->rq_mtx);
 			json_object_object_add(j_spec, "status",
-			    json_object_new_string(status_to_str(status)));
+			    json_object_new_string(status));
 			json_object_object_add(j_spec,
 			    "replicaStatus", j_replica);
 			json_object_array_add(j_all_spec, j_spec);
