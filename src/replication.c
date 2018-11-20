@@ -1482,7 +1482,7 @@ get_replica_stats_json(replica_t *replica, struct json_object **jobj)
 {
 	struct json_object *j_stats;
 	struct timespec now;
-	char upTime[10];
+	char upTime[23];
 
 	j_stats = json_object_new_object();
 	json_object_object_add(j_stats, "replicaId",
