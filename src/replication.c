@@ -1484,27 +1484,27 @@ get_replica_stats_json(replica_t *replica, struct json_object **jobj)
 	struct timespec now;
 
 	j_stats = json_object_new_object();
-	json_object_object_add(j_stats, "replica",
+	json_object_object_add(j_stats, "replicaId",
 	    json_object_new_uint64(replica->zvol_guid));
 
 	json_object_object_add(j_stats, "status",
 	    json_object_new_string((replica->state == ZVOL_STATUS_HEALTHY) ?
 	    "HEALTHY" : "DEGRADED"));
 
-	json_object_object_add(j_stats, "checkpointed_io_seq",
+	json_object_object_add(j_stats, "checkpointedIOSeq",
 	    json_object_new_uint64(replica->initial_checkpointed_io_seq));
 
-	json_object_object_add(j_stats, "inflight_read",
+	json_object_object_add(j_stats, "inflightRead",
 	    json_object_new_uint64(replica->replica_inflight_read_io_cnt));
 
-	json_object_object_add(j_stats, "inflight_write",
+	json_object_object_add(j_stats, "inflightWrite",
 	    json_object_new_uint64(replica->replica_inflight_write_io_cnt));
 
-	json_object_object_add(j_stats, "inflight_sync",
+	json_object_object_add(j_stats, "inflightSync",
 	    json_object_new_uint64(replica->replica_inflight_sync_io_cnt));
 
 	clock_gettime(CLOCK_MONOTONIC, &now);
-	json_object_object_add(j_stats, "connected since(in seconds)",
+	json_object_object_add(j_stats, "upTime",
 	    json_object_new_int64(now.tv_sec - replica->create_time.tv_sec));
 
 	*jobj = j_stats;
@@ -1585,7 +1585,7 @@ istgt_lu_replica_stats(char *volname, char **resp)
 				json_object_object_add(j_spec, "status",
 				    json_object_new_string(status_to_str(status)));
 				json_object_object_add(j_spec,
-				    "Replica status", j_replica);
+				    "replicaStatus", j_replica);
 				json_object_array_add(j_all_spec, j_spec);
 				break;
 			}
@@ -1613,7 +1613,7 @@ istgt_lu_replica_stats(char *volname, char **resp)
 			json_object_object_add(j_spec, "status",
 			    json_object_new_string(status_to_str(status)));
 			json_object_object_add(j_spec,
-			    "Replica status", j_replica);
+			    "replicaStatus", j_replica);
 			json_object_array_add(j_all_spec, j_spec);
 		}
 	}
@@ -1621,7 +1621,7 @@ istgt_lu_replica_stats(char *volname, char **resp)
 	MTX_UNLOCK(&specq_mtx);
 
 	j_obj = json_object_new_object();
-	json_object_object_add(j_obj, "Volume status", j_all_spec);
+	json_object_object_add(j_obj, "volumeStatus", j_all_spec);
 	json_string = json_object_to_json_string_ext(j_obj,
 	    JSON_C_TO_STRING_PLAIN);
 	resp_len = strlen(json_string) + 1;
@@ -3178,7 +3178,7 @@ istgt_lu_mempool_stats(char **resp)
 	TAILQ_FOREACH(spec, &spec_q, spec_next) {
 		TAILQ_FOREACH(r, &spec->rq, r_next) {
 			j_replica = json_object_new_object();
-			json_object_object_add(j_replica, "replica",
+			json_object_object_add(j_replica, "replicaId",
 			    json_object_new_uint64(r->zvol_guid));
 			json_object_object_add(j_replica, "in-flight read",
 			    json_object_new_uint64(

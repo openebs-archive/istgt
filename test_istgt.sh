@@ -531,7 +531,7 @@ run_rebuild_time_test_in_single_replica()
 	CONSISTENCY_FACTOR=1
 	setup_test_env
 
-	cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"Volume status\"[0].status'"
+	cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].status'"
 	rt=$(eval $cmd)
 	if [ ${rt} != "\"Offline\"" ]; then
 		$ISTGTCONTROL -q REPLICA vol1
@@ -555,18 +555,18 @@ run_rebuild_time_test_in_single_replica()
 		# and rf=cf=1. so, it will take around 2 minutes for the
 		# replica to become healthy. So on safe side, we will
 		# check replica status after 130 seconds.
-		cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"Volume status\"[0].\"Replica status\"[0].\"connected since(in seconds)\"'"
+		cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[0].\"upTime\"'"
 		rt=$(eval $cmd)
 		echo "replica start time $rt"
 		if [ $rt -gt 130 ]; then
-			cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"Volume status\"[0].\"Replica status\"[0].status'"
+			cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[0].status'"
 			rstatus=$(eval $cmd)
 			echo "replica status $rstatus"
 			if [ ${rstatus} != "\"HEALTHY\"" ]; then
 				echo "replication factor(1) test failed"
 				exit 1
 			else
-				cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"Volume status\"[0].status'"
+				cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].status'"
 				rt=$(eval $cmd)
 				if [ ${rt} != "\"Healthy\"" ]; then
 					$ISTGTCONTROL -q REPLICA vol1
@@ -604,7 +604,7 @@ run_rebuild_time_test_in_multiple_replicas()
 	CONSISTENCY_FACTOR=2
 	setup_test_env
 
-	cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"Volume status\"[0].status'"
+	cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].status'"
 	rt=$(eval $cmd)
 	if [ ${rt} != "\"Offline\"" ]; then
 		$ISTGTCONTROL -q REPLICA vol1
@@ -654,16 +654,16 @@ run_rebuild_time_test_in_multiple_replicas()
 		# replica to become healthy. So on safe side, we will
 		# check replica status after 130 seconds.
 		for (( i = 0; i < 3; i++ )) do
-			cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"Volume status\"[0].\"Replica status\"["$i"].\"connected since(in seconds)\"'"
+			cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"["$i"].\"upTime\"'"
 			rt=$(eval $cmd)
 			echo "replica start time $rt"
 			if [ $1 -eq 0 ]; then
 				if [ $rt -gt 130 ]; then
-					cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"Volume status\"[0].\"Replica status\"["$i"].status'"
+					cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"["$i"].status'"
 					rstatus=$(eval $cmd)
 					echo "replica status $rstatus"
 					if [ ${rstatus} == "\"HEALTHY\"" ]; then
-						cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"Volume status\"[0].status'"
+						cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].status'"
 						rstatus=$(eval $cmd)
 						if [ ${rstatus} != "\"DisabledFeatures\"" ]; then
 							$ISTGTCONTROL -q REPLICA vol1
@@ -676,7 +676,7 @@ run_rebuild_time_test_in_multiple_replicas()
 				fi
 			else
 				if [ $rt -le 140 ]; then
-					cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"Volume status\"[0].\"Replica status\"["$i"].status'"
+					cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"["$i"].status'"
 					rstatus=$(eval $cmd)
 					echo "replica status $rstatus"
 					if [ ${rstatus} == "\"HEALTHY\"" ]; then
@@ -706,14 +706,14 @@ run_rebuild_time_test_in_multiple_replicas()
 	while [ 1 ]; do
 		cnt=0
 		for (( i = 0; i < 3; i++ )) do
-			cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"Volume status\"[0].\"Replica status\"["$i"].status'"
+			cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"["$i"].status'"
 			rt=$(eval $cmd)
 			if [ ${rt} == "\"HEALTHY\"" ]; then
 				cnt=`expr $cnt + 1`
 			fi
 		done
 		if [ ${cnt} == 2 ]; then
-			cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"Volume status\"[0].status'"
+			cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].status'"
 			rstatus=$(eval $cmd)
 			if [ ${rstatus} != "\"DegradedPerformance\"" ]; then
 				$ISTGTCONTROL -q REPLICA vol1
