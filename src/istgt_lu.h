@@ -849,8 +849,11 @@ typedef struct istgt_lu_disk_t {
 	int healthy_rcount;
 	int degraded_rcount;
 	bool ready;
-	bool rebuild_in_progress;
-	struct replica_s *target_replica;
+	struct {
+		struct replica_s *dw_replica;
+		void *healthy_replica;
+		bool rebuild_in_progress;
+	} rebuild_info;
 
 	/*Common for both the above queues,
 	Since same cmd is part of both the queues*/
