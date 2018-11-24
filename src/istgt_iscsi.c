@@ -1749,6 +1749,7 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 {
 	char buf[MAX_TMPBUF];
 	ISTGT_LU_Ptr lu = NULL;
+	ISTGT_LU_DISK *spec = NULL;
 	ISCSI_PARAM *params = NULL;
 	ISCSI_PDU rsp_pdu;
 	uint8_t *rsp;
@@ -1772,6 +1773,7 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 	int rc;
 
 	/* Login is proceeding OK */
+	/* https://www.iana.org/assignments/iscsi-parameters/iscsi-parameters.xhtml#iscsi-parameters-9 */
 	StatusClass = 0x00;
 	StatusDetail = 0x00;
 
@@ -1912,6 +1914,15 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 				/* Not found */
 				StatusClass = 0x02;
 				StatusDetail = 0x03;
+				goto response;
+			}
+			spec = (ISTGT_LU_DISK *)(lu->lun[0].spec);
+			if(!spec->ready) {
+				MTX_UNLOCK(&conn->istgt->mutex);
+				ISTGT_ERRLOG("login failed, target not ready\n");
+				/* Not Ready */
+				StatusClass = 0x03;
+				StatusDetail = 0x01;
 				goto response;
 			}
 			rc = istgt_lu_access(conn, lu, conn->initiator_name,
