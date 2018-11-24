@@ -1918,7 +1918,7 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 #ifdef REPLICATION
 			ISTGT_LU_DISK *spec = NULL;
 			spec = (ISTGT_LU_DISK *)(lu->lun[0].spec);
-			if(!spec->ready) {
+			if(spec == NULL || !spec->ready) {
 				MTX_UNLOCK(&conn->istgt->mutex);
 				ISTGT_ERRLOG("login failed, target not ready\n");
 				/* Not Ready */
