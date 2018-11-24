@@ -768,6 +768,10 @@ initialize_error:
 		 */
 		clock_gettime(CLOCK_MONOTONIC, &now);
 		timesdiff(CLOCK_MONOTONIC, last_time, now, diff_time);
+		polling_timeout = (replica_timeout / 4) * 1000;
+		if (epoll_timeout > polling_timeout)
+			epoll_timeout = polling_timeout;
+
 		if (((diff_time.tv_sec * 1000) +
 		    (diff_time.tv_nsec / 1000000)) > epoll_timeout) {
 			epoll_timeout = polling_timeout;

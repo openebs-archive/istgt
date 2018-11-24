@@ -2795,7 +2795,6 @@ void *timerfn(void
 	ISTGT_LU_CMD_Ptr lu_cmd;
 	int ms;
 	struct timespec now, diff, last_check;
-	int check_interval = (replica_timeout / 4) * 1000;
 	clock_gettime(clockid, &last_check);
 #endif
 
@@ -2813,6 +2812,14 @@ void *timerfn(void
 			istgt_queue_enqueue(&closedconns, conn);
 
 #ifdef	REPLICATION
+		const char *s_replica_timeout = getenv("replicaTimeout");
+		unsigned int rep_timeout = 0;
+		if (s_replica_timeout != NULL)
+			rep_timeout = (unsigned int)strtol(s_replica_timeout, NULL, 10);
+		if (rep_timeout > 30)
+			replica_timeout = rep_timeout;
+		int check_interval = (replica_timeout / 4) * 1000;
+
 		clock_gettime(clockid, &now);
 		timesdiff(clockid, last_check, now, diff);
 		ms = diff.tv_sec * 1000;
@@ -2869,7 +2876,7 @@ void *timerfn(void
 		}
 #endif
 
-		sleep(60);
+		sleep(10);
 	}
 	return ((void *)NULL);
 }
