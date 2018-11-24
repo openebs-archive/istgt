@@ -2814,7 +2814,7 @@ void *timerfn(void
 
 #ifdef	REPLICATION
 		const char *s_extra_wait_time = getenv("extraWait");
-		int extra_wait = 0;
+		int extra_wait = -1;
 		if (s_extra_wait_time != NULL)
 			extra_wait = (int)strtol(s_extra_wait_time,
 			    NULL, 10);
