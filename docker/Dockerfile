@@ -2,7 +2,7 @@
 # This Dockerfile builds cstor istgt container running istgt from istgt base image
 #
 
-FROM ubuntu:14.04
+FROM openebs/cstor-ubuntu:xenial-20181005
 RUN apt-get update; exit 0
 RUN apt-get -y install rsyslog
 RUN apt-get -y install net-tools iputils-ping

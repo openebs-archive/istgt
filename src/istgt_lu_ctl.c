@@ -3333,7 +3333,7 @@ _verb_istat ISCSIstat_rslt[ISCSI_ARYSZ] = { {0, 0, 0} };
 static int
 istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 {
-	int rc;
+	int rc, replica_cnt;
 	uint64_t usedlogicalblocks;
 	struct timespec now;
 	uint64_t time_diff;
@@ -3379,14 +3379,15 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 		    json_object_new_uint64(spec->totalreadblockcount));
 		json_object_object_add(jobj, "TotalWriteBlockCount",
 		    json_object_new_uint64(spec->totalwriteblockcount));
+
+                replica_cnt = spec->healthy_rcount + spec->degraded_rcount;
 		json_object_object_add(jobj, "ReplicaCounter",
-		    json_object_new_int(spec->healthy_rcount +
-			spec->degraded_rcount));
+		    json_object_new_int(replica_cnt));
 		json_object_object_add(jobj, "RevisionCounter",
 		    json_object_new_uint64(spec->io_seq));
 		json_object_object_add(jobj, "Status",
-		    json_object_new_string(((spec->ready == 1) ?
-			"RW" : "RO")));
+		    json_object_new_string(get_cv_status(spec, replica_cnt,
+                        spec->healthy_rcount)));
 
 		json_object *jobj_arr = json_object_new_array();
 		MTX_LOCK(&spec->rq_mtx);

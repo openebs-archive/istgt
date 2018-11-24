@@ -562,7 +562,7 @@ run_rebuild_time_test_in_single_replica()
 			cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[0].status'"
 			rstatus=$(eval $cmd)
 			echo "replica status $rstatus"
-			if [ ${rstatus} != "\"HEALTHY\"" ]; then
+			if [ ${rstatus} != "\"Healthy\"" ]; then
 				echo "replication factor(1) test failed"
 				exit 1
 			else
@@ -662,7 +662,7 @@ run_rebuild_time_test_in_multiple_replicas()
 					cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"["$i"].status'"
 					rstatus=$(eval $cmd)
 					echo "replica status $rstatus"
-					if [ ${rstatus} == "\"HEALTHY\"" ]; then
+					if [ ${rstatus} == "\"Healthy\"" ]; then
 						cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].status'"
 						rstatus=$(eval $cmd)
 						if [ ${rstatus} != "\"Degraded\"" ]; then
@@ -679,7 +679,7 @@ run_rebuild_time_test_in_multiple_replicas()
 					cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"["$i"].status'"
 					rstatus=$(eval $cmd)
 					echo "replica status $rstatus"
-					if [ ${rstatus} == "\"HEALTHY\"" ]; then
+					if [ ${rstatus} == "\"Healthy\"" ]; then
 						echo "replication factor(3) test failed"
 						exit 1
 					fi
@@ -708,7 +708,7 @@ run_rebuild_time_test_in_multiple_replicas()
 		for (( i = 0; i < 3; i++ )) do
 			cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"["$i"].status'"
 			rt=$(eval $cmd)
-			if [ ${rt} == "\"HEALTHY\"" ]; then
+			if [ ${rt} == "\"Healthy\"" ]; then
 				cnt=`expr $cnt + 1`
 			fi
 		done
