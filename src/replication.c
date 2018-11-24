@@ -24,6 +24,7 @@
 #include "istgt_scsi.h"
 #include "assert.h"
 
+int extraWait = 5;
 extern int replica_timeout;
 cstor_conn_ops_t cstor_ops = {
 	.conn_listen = replication_listen,
@@ -2689,7 +2690,7 @@ retry_read:
 					    (RECEIVED_OK|RECEIVED_ERR))
 						count++;
 				}
-				if ((now.tv_sec - extra_wait.tv_sec) < 5) {
+				if ((now.tv_sec - extra_wait.tv_sec) < extraWait) {
 					if (count != rcomm_cmd->copies_sent)
 						goto wait_for_other_responses;
 				}
