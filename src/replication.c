@@ -24,6 +24,7 @@
 #include "istgt_scsi.h"
 #include "assert.h"
 
+int extraWait = 5;
 extern int replica_timeout;
 cstor_conn_ops_t cstor_ops = {
 	.conn_listen = replication_listen,
@@ -2560,11 +2561,13 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	rcmd_t *rcmd = NULL;
 	int iovcnt = cmd->iobufindx + 1;
 	bool replica_choosen = false;
-	struct timespec abstime, now;
+	struct timespec abstime, now, extra_wait;
 	int nsec, err_num = 0;
 	int skip_count = 0;
 	uint64_t num_read_ios = 0;
 	uint64_t inflight_read_ios = 0;
+	int count =0 ;
+	bool success_resp = false;
 
 	(void) cmd_read;
 	CHECK_IO_TYPE(cmd, cmd_read, cmd_write, cmd_sync);
@@ -2655,23 +2658,44 @@ retry_read:
 
 	MTX_UNLOCK(&spec->rq_mtx);
 
+	extra_wait.tv_sec = extra_wait.tv_nsec = 0;
 	// now wait for command to complete
 	while (1) {
 		// check for status of rcomm_cmd
 		rc = check_for_command_completion(spec, rcomm_cmd, cmd);
 		if (rc) {
+			success_resp = false;
 			if (rc == 1) {
 				rc = cmd->data_len = rcomm_cmd->data_len;
+				success_resp = true;
 			} else if (rcomm_cmd->opcode == ZVOL_OPCODE_READ &&
 			    rcomm_cmd->copies_sent == 1) {
 				rcomm_cmd->copies_sent = 0;
-				memset(rcomm_cmd->resp_list, 0, sizeof (rcomm_cmd->resp_list));
+				memset(rcomm_cmd->resp_list, 0,
+				    sizeof (rcomm_cmd->resp_list));
 				MTX_LOCK(&spec->rq_mtx);
-				TAILQ_REMOVE(&spec->rcommon_waitq, rcomm_cmd, wait_cmd_next);
+				TAILQ_REMOVE(&spec->rcommon_waitq, rcomm_cmd,
+				    wait_cmd_next);
 				goto retry_read;
 			}
-			rcomm_cmd->state = CMD_EXECUTION_DONE;
 
+			count = 0;
+			if (success_resp == true) {
+				if (extra_wait.tv_sec == 0)
+					clock_gettime(CLOCK_REALTIME,
+					    &extra_wait);
+				clock_gettime(CLOCK_REALTIME, &now);
+				for (i = 0; i < rcomm_cmd->copies_sent; i++) {
+					if (rcomm_cmd->resp_list[i].status &
+					    (RECEIVED_OK|RECEIVED_ERR))
+						count++;
+				}
+				if ((now.tv_sec - extra_wait.tv_sec) < extraWait) {
+					if (count != rcomm_cmd->copies_sent)
+						goto wait_for_other_responses;
+				}
+			}
+			rcomm_cmd->state = CMD_EXECUTION_DONE;
 #ifdef	DEBUG
 			/*
 			 * NOTE: This is for debugging purpose only
@@ -2690,6 +2714,7 @@ retry_read:
 			break;
 		}
 
+wait_for_other_responses:
 		/* wait for 500 ms(500000000 ns) */
 		clock_gettime(CLOCK_REALTIME, &now);
 		nsec = 1000000000 - now.tv_nsec;

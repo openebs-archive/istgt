@@ -95,6 +95,7 @@
 ISTGT g_istgt;
 #ifdef	REPLICATION
 extern int replica_timeout;
+extern int extraWait;
 extern rte_smempool_t rcmd_mempool;
 extern rte_smempool_t rcommon_cmd_mempool;
 #endif
@@ -2812,13 +2813,30 @@ void *timerfn(void
 			istgt_queue_enqueue(&closedconns, conn);
 
 #ifdef	REPLICATION
+		const char *s_extra_wait_time = getenv("extraWait");
+		int extra_wait = -1;
+		if (s_extra_wait_time != NULL)
+			extra_wait = (int)strtol(s_extra_wait_time,
+			    NULL, 10);
+		if ((extra_wait >= 0) && (extra_wait != extraWait)) {
+			ISTGT_NOTICELOG("changing extraWait time from %d to "
+			    "%d\n", extraWait, extra_wait);
+			extraWait = extra_wait;
+		}
+
 		const char *s_replica_timeout = getenv("replicaTimeout");
-		unsigned int rep_timeout = 0;
+		int rep_timeout = 0;
 		if (s_replica_timeout != NULL)
-			rep_timeout = (unsigned int)strtol(s_replica_timeout, NULL, 10);
-		if (rep_timeout > 30)
+			rep_timeout = (int)strtol(s_replica_timeout,
+			    NULL, 10);
+		if ((rep_timeout > 30) && (rep_timeout != replica_timeout)) {
+			ISTGT_NOTICELOG("changing replica timeout "
+			    "from %d to %d", replica_timeout,
+			    rep_timeout);
 			replica_timeout = rep_timeout;
+		}
 		int check_interval = (replica_timeout / 4) * 1000;
+
 
 		clock_gettime(clockid, &now);
 		timesdiff(clockid, last_check, now, diff);
