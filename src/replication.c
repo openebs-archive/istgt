@@ -491,6 +491,70 @@ start_rebuild(void *buf, replica_t *replica, uint64_t data_len)
 	return ret;
 }
 
+/*
+ * Compare time..
+ * results: (T1 > T2) ? T1 : T2
+ */
+static int
+compare_time(struct timespec t1, struct timespec t2)
+{
+	if (t1.tv_sec > t2.tv_sec)
+		return 1;
+
+	if ((t1.tv_sec == t2.tv_sec) &&
+	    (t1.tv_nsec > t2.tv_nsec))
+		return 1;
+	return 0;
+}
+
+static int
+check_for_old_ios(spec_t *spec, replica_t *replica, struct timespec last)
+{
+	struct timespec diff1, diff2 = { 0 }, now;
+	int ret = 0;
+	replica_t *r;
+	rcmd_t *cmd;
+
+	ASSERT(MTX_LOCKED(&spec->rq_mtx));
+
+	TAILQ_FOREACH(r, &spec->rq, r_next) {
+		if ((replica && r == replica) || (!replica)) {
+			cmd = TAILQ_FIRST(&r->readyq);
+			if (cmd != NULL) {
+				timesdiff(CLOCK_MONOTONIC, cmd->queued_time,
+				    now, diff1);
+				if (compare_time(diff1, diff2))
+					diff2 = diff1;
+			}
+
+			cmd = TAILQ_FIRST(&r->waitq);
+			if (cmd != NULL) {
+				timesdiff(CLOCK_MONOTONIC, cmd->queued_time,
+				    now, diff1);
+				if (compare_time(diff1, diff2))
+					diff2 = diff1;
+			}
+
+			cmd = TAILQ_FIRST(&r->blockedq);
+			if (cmd != NULL) {
+				timesdiff(CLOCK_MONOTONIC, cmd->queued_time,
+				    now, diff1);
+				if (compare_time(diff1, diff2))
+					diff2 = diff1;
+			}
+
+			timesdiff(CLOCK_MONOTONIC, last, now, diff1);
+			if (compare_time(diff2, diff1))
+				ret = 1;
+
+			if (replica)
+				break;
+
+		}
+	}
+	return ret;
+}
+
 /* Rebuild can be of two type:-
  * 1. Rebuilding a replica from healthy replica
  * 2. Rebuilding a replica from all other replica(Mesh rebuild)
@@ -505,11 +569,9 @@ trigger_rebuild(spec_t *spec)
 {
 	int ret = 0;
 	uint64_t max = 0;
-	struct timespec now, diff;
 	replica_t *replica = NULL;
 	replica_t *dw_replica = NULL;
 	replica_t *healthy_replica = NULL;
-	int non_zero_inflight_replica_found = 0;
 
 	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 
@@ -532,53 +594,12 @@ trigger_rebuild(spec_t *spec)
 		return;
 	}
 
-	clock_gettime(CLOCK_MONOTONIC, &now);
-
-	/*
-	 * istgt starts rebuild on a replica after 2*timeout of its start time.
-	 * This is done to make sure that if any pending IOs on helping replicas
-	 * are already available at degraded replica before rebuild is started.
-
-	 * optimization is that rebuild will be started on a replica if all the
-	 * connected replicas are not having any pending IOs with them.
-	 */
-	non_zero_inflight_replica_found = 0;
-	TAILQ_FOREACH(replica, &spec->rq, r_next) {
-		if (replica->replica_inflight_write_io_cnt != 0 ||
-		    replica->replica_inflight_sync_io_cnt != 0) {
-			non_zero_inflight_replica_found = 1;
-			break;
-		}
-	}
-
-#ifdef	DEBUG
-	const char* non_zero_inflight_replica_str =
-	    getenv("non_zero_inflight_replica_cnt");
-	unsigned int non_zero_inflight_replica_cnt = 0;
-
-	if (non_zero_inflight_replica_str != NULL)
-		non_zero_inflight_replica_cnt =
-		    (unsigned int)strtol(non_zero_inflight_replica_str, NULL, 10);
-	if (non_zero_inflight_replica_cnt == 1)
-		non_zero_inflight_replica_found = 1;
-#endif
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
 		/* Find healthy replica */
 		if (replica->state == ZVOL_STATUS_HEALTHY) {
 			if (healthy_replica == NULL)
 				healthy_replica = replica;
 			continue;
-		}
-
-		timesdiff(CLOCK_MONOTONIC, replica->create_time, now, diff);
-
-		if ((spec->replication_factor != 1) &&
-		    (diff.tv_sec <= (2 * replica_timeout))) {
-			if (non_zero_inflight_replica_found == 1) {
-				REPLICA_LOG("Replica:%p added very recently, "
-				    "skipping rebuild.\n", replica);
-				continue;
-			}
 		}
 
 		if (max <= replica->initial_checkpointed_io_seq) {
@@ -590,8 +611,18 @@ trigger_rebuild(spec_t *spec)
 	if (dw_replica == NULL)
 		return;
 
-	REPLICA_LOG("Healthy count(%d) degraded count(%d) consistency factor(%d)"
-	    " replication factor(%d)\n", spec->healthy_rcount,
+	/*
+	 * Check if healthy replica or all replica have any inflight IOs
+	 * queued before dw_replica opened data connection.
+	 */
+	if (check_for_old_ios(spec, healthy_replica, dw_replica->create_time)) {
+		REPLICA_LOG("There are still some inflight IOs... "
+		    "queuing rebuild\n");
+		return;
+	}
+
+	REPLICA_LOG("Healthy count(%d) degraded count(%d) consistency "
+	    "factor(%d) replication factor(%d)\n", spec->healthy_rcount,
 	    spec->degraded_rcount, spec->consistency_factor,
 	    spec->replication_factor);
 
