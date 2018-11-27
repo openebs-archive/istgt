@@ -96,7 +96,8 @@ int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 	}								\
 }
 
-#define	CHECK_REPLICA_TIMEOUT(_head, _diff, _ret, _exit_label, etimeout)\
+#define	CHECK_REPLICA_TIMEOUT(_head, _diff, _ret, _exit_label, etimeout,\
+    _ms_delay)\
 	do {								\
 		struct timespec nw;					\
 		rcmd_t *pending_cmd;					\
@@ -121,13 +122,14 @@ int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 					    " hasn't responded in last "\
 					    "%d seconds\n",		\
 					    r->zvol_guid, ms / 1000);	\
-				}					\
-				if (ms > (wait_count * polling_timeout))\
 					wait_count =			\
 					    (ms / polling_timeout) + 1;	\
+				}					\
 				ms = (replica_timeout * 1000) - ms;	\
 				if (ms < etimeout)			\
 					etimeout = ms;			\
+				if (ms > _ms_delay)			\
+					_ms_delay = ms;			\
 			}						\
 		}							\
 	} while (0)
@@ -616,7 +618,7 @@ replica_thread(void *arg)
 	replica_t *r = (replica_t *)arg;
 	int polling_timeout = (replica_timeout / 4) * 1000;
 	int epoll_timeout = polling_timeout;
-	int wait_count = 1;
+	int wait_count = 1, max_delay_ms = 0;
 	pthread_t self = pthread_self();
 
 	snprintf(tinfo, sizeof tinfo, "r#%d.%lu", (int)(((uint64_t *)self)[0]), r->zvol_guid);
@@ -772,15 +774,16 @@ initialize_error:
 		if (epoll_timeout > polling_timeout)
 			epoll_timeout = polling_timeout;
 
+		max_delay_ms = 0;
 		if (((diff_time.tv_sec * 1000) +
 		    (diff_time.tv_nsec / 1000000)) > epoll_timeout) {
 			epoll_timeout = polling_timeout;
 			CHECK_REPLICA_TIMEOUT(&r->readyq, diff_time, ret, exit,
-			    epoll_timeout);
+			    epoll_timeout, max_delay_ms);
 			CHECK_REPLICA_TIMEOUT(&r->waitq, diff_time, ret, exit,
-			    epoll_timeout);
+			    epoll_timeout, max_delay_ms);
 			CHECK_REPLICA_TIMEOUT(&r->blockedq, diff_time, ret,
-			    exit, epoll_timeout);
+			    exit, epoll_timeout, max_delay_ms);
 
 			/*
 			 * In CHECK_REPLICA_TIMEOUT macro, we are logging
@@ -790,6 +793,8 @@ initialize_error:
 			 */
 			if (epoll_timeout < replica_timeout)
 				wait_count = 1;
+
+			r->last_io_delay = max_delay_ms;
 			clock_gettime(CLOCK_MONOTONIC, &last_time);
 		}
 	}

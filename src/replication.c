@@ -24,7 +24,7 @@
 #include "istgt_scsi.h"
 #include "assert.h"
 
-int extraWait = 5;
+uint32_t extraWait = 5;
 extern int replica_timeout;
 cstor_conn_ops_t cstor_ops = {
 	.conn_listen = replication_listen,
@@ -2568,6 +2568,7 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	uint64_t inflight_read_ios = 0;
 	int count =0 ;
 	bool success_resp = false;
+	uint64_t ms_delay;
 
 	(void) cmd_read;
 	CHECK_IO_TYPE(cmd, cmd_read, cmd_write, cmd_sync);
@@ -2690,7 +2691,10 @@ retry_read:
 					    (RECEIVED_OK|RECEIVED_ERR))
 						count++;
 				}
-				if ((now.tv_sec - extra_wait.tv_sec) < extraWait) {
+				ms_delay = (now.tv_sec - extra_wait.tv_sec) * 1000;
+				ms_delay += now.tv_nsec/1000000 + (1000000000 - extra_wait.tv_nsec)/1000000;
+
+				if (ms_delay < extraWait) {
 					if (count != rcomm_cmd->copies_sent)
 						goto wait_for_other_responses;
 				}
@@ -2709,7 +2713,6 @@ retry_read:
 			TAILQ_REMOVE(&spec->rcommon_waitq, rcomm_cmd, wait_cmd_next);
 			UPDATE_INFLIGHT_SPEC_IO_CNT(spec, cmd, -1);
 			MTX_UNLOCK(&spec->rq_mtx);
-
 			put_to_mempool(&spec->rcommon_deadlist, rcomm_cmd);
 			break;
 		}

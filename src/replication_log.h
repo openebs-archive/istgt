@@ -1,6 +1,7 @@
 #ifndef	REPLICATION_LOG_H
 #define	REPLICATION_LOG_H
 
+#include <stdio.h>
 #include <sys/time.h>
 #include <time.h>
 

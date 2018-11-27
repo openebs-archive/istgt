@@ -95,7 +95,7 @@
 ISTGT g_istgt;
 #ifdef	REPLICATION
 extern int replica_timeout;
-extern int extraWait;
+extern uint32_t extraWait;
 extern rte_smempool_t rcmd_mempool;
 extern rte_smempool_t rcommon_cmd_mempool;
 #endif
@@ -2784,6 +2784,43 @@ extern int detectDoubleFree;
 // int enable_xcopy = 0;
 int enable_oldBL = 0;
 
+#ifdef	REPLICATION
+static void
+update_extra_wait_time(uint32_t extra_wait)
+{
+	spec_t *spec;
+	replica_t *r;
+	uint32_t ms = 0;
+	int delay_per = 0;
+	uint32_t io_wait_time = 0;
+
+	MTX_LOCK(&specq_mtx);
+
+	TAILQ_FOREACH(spec, &spec_q, spec_next) {
+		MTX_LOCK(&spec->rq_mtx);
+		TAILQ_FOREACH(r, &spec->rq, r_next) {
+			if (ms < r->last_io_delay)
+				ms = r->last_io_delay;
+
+		}
+		MTX_UNLOCK(&spec->rq_mtx);
+	}
+
+	MTX_UNLOCK(&specq_mtx);
+
+	delay_per = ((ms * 100)/(replica_timeout * 1000));
+	io_wait_time = (delay_per * (extra_wait* 1000)) / 100;
+
+	if (extraWait != io_wait_time) {
+		ISTGT_NOTICELOG("changing extraWait time from %d to "
+		    "%d\n", extraWait, io_wait_time);
+		extraWait = io_wait_time;
+	}
+
+	return;
+}
+#endif
+
 void *timerfn(void
 	*ptr __attribute__((__unused__)))
 {
@@ -2795,6 +2832,7 @@ void *timerfn(void
 	ISTGT_LU_TASK_Ptr lu_task;
 	ISTGT_LU_CMD_Ptr lu_cmd;
 	int ms;
+	int extraWait_time = extraWait;
 	struct timespec now, diff, last_check;
 	clock_gettime(clockid, &last_check);
 #endif
@@ -2818,11 +2856,12 @@ void *timerfn(void
 		if (s_extra_wait_time != NULL)
 			extra_wait = (int)strtol(s_extra_wait_time,
 			    NULL, 10);
-		if ((extra_wait >= 0) && (extra_wait != extraWait)) {
+		if ((extra_wait >= 0) && (extra_wait != extraWait_time)) {
 			ISTGT_NOTICELOG("changing extraWait time from %d to "
-			    "%d\n", extraWait, extra_wait);
-			extraWait = extra_wait;
+			    "%d\n", extraWait_time, extra_wait);
+			extraWait_time = extra_wait;
 		}
+		update_extra_wait_time((uint32_t)extraWait_time);
 
 		const char *s_replica_timeout = getenv("replicaTimeout");
 		int rep_timeout = 0;

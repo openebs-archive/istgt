@@ -95,6 +95,7 @@ typedef struct replica_s {
 
 	/* header recieved on data connection */
 	zvol_io_hdr_t *io_resp_hdr;
+	uint32_t last_io_delay;
 	/* state of command on data connection */
 	int io_state;
 	/* amount of IO data read in current IO state for data connection */
