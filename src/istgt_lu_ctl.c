@@ -78,7 +78,6 @@ typedef struct istgt_uctl_t {
 	ISTGT_Ptr istgt;
 	PORTAL portal;
 	int sock;
-	pthread_t thread;
 
 	int family;
 	char caddr[MAX_ADDRBUF];
@@ -3779,7 +3778,7 @@ uctlworker(void *arg)
 	rc = istgt_uctl_writeline(uctl);
 	if (rc != UCTL_CMD_OK) {
 		ISTGT_ERRLOG("uctl_writeline() failed\n");
-		return (NULL);
+		goto error;
 	}
 
 	while (1) {
@@ -3815,6 +3814,7 @@ uctlworker(void *arg)
 
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "exiting ctlworker\n");
 
+error:
 	close(uctl->sock);
 	uctl->sock = -1;
 	istgt_free_uctl(uctl);
@@ -3845,6 +3845,7 @@ istgt_create_uctl(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock,
 	UCTL_Ptr uctl;
 	int rc;
 	int i;
+	pthread_t thread;
 
 	uctl = xmalloc(sizeof (*uctl));
 	memset(uctl, 0, sizeof (*uctl));
@@ -3966,25 +3967,26 @@ istgt_create_uctl(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock,
 
 	/* create new thread */
 #ifdef ISTGT_STACKSIZE
-	rc = pthread_create(&uctl->thread, &istgt->attr, &uctlworker,
+	rc = pthread_create(&thread, &istgt->attr, &uctlworker,
 	    (void *)uctl);
 #else
-	rc = pthread_create(&uctl->thread, NULL, &uctlworker, (void *)uctl);
+	rc = pthread_create(&thread, NULL, &uctlworker, (void *)uctl);
 #endif
 	if (rc != 0) {
 		ISTGT_ERRLOG("pthread_create() failed\n");
-	error_return:
+error_return:
+		xfree(uctl->mediadirectory);
 		xfree(uctl->portal.label);
 		xfree(uctl->portal.host);
 		xfree(uctl->portal.port);
 		xfree(uctl);
 		return (-1);
 	}
-	rc = pthread_detach(uctl->thread);
+	rc = pthread_detach(thread);
 	if (rc != 0) {
 		ISTGT_ERRLOG("pthread_detach() failed\n");
-		goto error_return;
 	}
+
 	return (0);
 }
 
