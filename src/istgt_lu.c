@@ -76,10 +76,6 @@
 
 #define	MAX_MASKBUF 128
 
-#ifdef	REPLICATION
-extern struct timespec io_queue_time[ISTGT_MAX_NUM_LUWORKERS];
-#endif
-
 static int
 istgt_lu_allow_ipv6(const char *netmask, const char *addr)
 {
@@ -4510,7 +4506,6 @@ luworker(void *arg)
 			tdiff(second2, third, r);
 #ifdef REPLICATION
 			lu_task->lu_cmd.luworkerindx = tind;
-			clock_gettime(CLOCK_MONOTONIC, &io_queue_time[tind]);
 #endif
 			lu_task->lu_cmd.flags |= ISTGT_WORKER_PICKED;
 			rc = istgt_lu_disk_queue_start(lu, lu_num, tind);
@@ -4519,9 +4514,6 @@ luworker(void *arg)
 						lu->num, rc == -2 ? "aborted" : "failed", rc);
 			}
 
-#ifdef	REPLICATION
-			io_queue_time[tind].tv_sec = io_queue_time[tind].tv_nsec = 0;
-#endif
 			clock_gettime(clockid, &now1);
 			id = 12;
 			tdiff(third, now1, r);

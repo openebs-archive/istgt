@@ -24,7 +24,7 @@
 #include "istgt_scsi.h"
 #include "assert.h"
 
-int io_max_wait_time = 5;
+int io_max_wait_time = 60;
 struct timespec io_queue_time[ISTGT_MAX_NUM_LUWORKERS];
 extern int replica_timeout;
 cstor_conn_ops_t cstor_ops = {
@@ -494,41 +494,37 @@ start_rebuild(void *buf, replica_t *replica, uint64_t data_len)
 
 /*
  * Compare time..
- * results: (T1 > T2) ? T1 : T2
+ * results: (T1 > T2) ? TRUE: FALSE
  */
-static int
+static bool
 compare_time(struct timespec t1, struct timespec t2)
 {
 	if (t1.tv_sec > t2.tv_sec)
-		return 1;
+		return TRUE;
 
 	if ((t1.tv_sec == t2.tv_sec) &&
 	    (t1.tv_nsec > t2.tv_nsec))
-		return 1;
-	return 0;
+		return TRUE;
+	return FALSE;
 }
 
 static int
 check_for_old_ios(spec_t *spec, struct timespec last)
 {
-	struct timespec diff1, diff2 = { 0 }, now, io_time;
+	struct timespec io_time;
 	int ret = 0;
 	int i = 0;
-
-	clock_gettime(CLOCK_MONOTONIC, &now);
 
 	for (i = 0; i < spec->luworkers; i++) {
 		io_time = io_queue_time[i];
 		if (!(io_time.tv_sec == 0 && io_time.tv_nsec == 0)) {
-			time_diff(io_time, now, diff1);
-			if (compare_time(diff1, diff2))
-				diff2 = diff1;
+			if (!compare_time(io_time, last)) {
+				ret = 1;
+				break;
+			}
 		}
 	}
 
-	time_diff(last, now, diff1);
-	if (compare_time(diff2, diff1))
-		ret = 1;
 	return ret;
 }
 
@@ -587,6 +583,19 @@ trigger_rebuild(spec_t *spec)
 
 	if (dw_replica == NULL)
 		return;
+
+#ifdef DEBUG
+	const char* non_zero_inflight_replica_str =
+	    getenv("non_zero_inflight_replica_cnt");
+	unsigned int non_zero_inflight_replica_cnt = 0;
+	io_queue_time[0].tv_sec = 0;
+
+	if (non_zero_inflight_replica_str != NULL)
+		non_zero_inflight_replica_cnt =
+	            (unsigned int)strtol(non_zero_inflight_replica_str, NULL, 10);
+	if (non_zero_inflight_replica_cnt == 1)
+		io_queue_time[0].tv_sec = dw_replica->create_time.tv_sec - 1;
+#endif
 
 	/*
 	 * Check if healthy replica or all replica have any inflight IOs
@@ -2600,6 +2609,9 @@ again:
 
 	ASSERT(spec->io_seq);
 	build_rcomm_cmd(rcomm_cmd, cmd, offset, nbytes);
+
+	clock_gettime(CLOCK_MONOTONIC, &io_queue_time[cmd->luworkerindx]);
+
 retry_read:
 	replica_choosen = false;
 	skip_count = 0;
@@ -2671,6 +2683,28 @@ retry_read:
 
 	// now wait for command to complete
 	while (1) {
+		timesdiff(CLOCK_MONOTONIC, queued_time, now, diff);
+		count = 0;
+		for (i = 0; i < rcomm_cmd->copies_sent; i++) {
+			if (rcomm_cmd->resp_list[i].status &
+			    (RECEIVED_OK|RECEIVED_ERR|REPLICATE_TIMED_OUT))
+				count++;
+			else if (diff.tv_sec >= io_max_wait_time) {
+				ASSERT(rcomm_cmd->resp_list[i].replica);
+				rcomm_cmd->resp_list[i].status |=
+				    REPLICATE_TIMED_OUT;
+
+				MTX_LOCK(&rcomm_cmd->resp_list[i].replica->r_mtx);
+				inform_mgmt_conn(rcomm_cmd->resp_list[i].replica);
+				MTX_UNLOCK(&rcomm_cmd->resp_list[i].replica->r_mtx);
+
+				count++;
+			}
+		}
+
+		if (count != rcomm_cmd->copies_sent)
+			goto wait_for_other_responses;
+
 		// check for status of rcomm_cmd
 		rc = check_for_command_completion(spec, rcomm_cmd, cmd);
 		if (rc) {
@@ -2689,27 +2723,6 @@ retry_read:
 				goto retry_read;
 			}
 
-
-			timesdiff(CLOCK_MONOTONIC, queued_time, now, diff);
-			count = 0;
-			if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) {
-				for (i = 0; i < rcomm_cmd->copies_sent; i++) {
-					if (rcomm_cmd->resp_list[i].status &
-					    (RECEIVED_OK|RECEIVED_ERR))
-						count++;
-					else if (diff.tv_sec >= io_max_wait_time) {
-						ASSERT(rcomm_cmd->resp_list[i].replica);
-
-						MTX_LOCK(&rcomm_cmd->resp_list[i].replica->r_mtx);
-						inform_mgmt_conn(rcomm_cmd->resp_list[i].replica);
-						MTX_UNLOCK(&rcomm_cmd->resp_list[i].replica->r_mtx);
-
-						count++;
-					}
-				}
-				if (count != rcomm_cmd->copies_sent)
-					goto wait_for_other_responses;
-			}
 			rcomm_cmd->state = CMD_EXECUTION_DONE;
 #ifdef	DEBUG
 			/*
@@ -2747,6 +2760,9 @@ wait_for_other_responses:
 		err_num = errno;
 		MTX_UNLOCK(rcomm_cmd->mutex);
 	}
+
+	io_queue_time[cmd->luworkerindx].tv_sec =
+	    io_queue_time[cmd->luworkerindx].tv_nsec = 0;
 
 	return rc;
 }

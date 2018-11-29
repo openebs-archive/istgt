@@ -50,8 +50,9 @@ typedef enum rcomm_cmd_state_s {
 typedef enum rcmd_state_s {
 	RECEIVED_OK = 1 << 0,
 	RECEIVED_ERR = 1 << 1,
-	SENT_TO_HEALTHY = 1 << 2,
-	SENT_TO_DEGRADED = 1 << 3,
+	REPLICATE_TIMED_OUT = 1 << 2,
+	SENT_TO_HEALTHY = 1 << 3,
+	SENT_TO_DEGRADED = 1 << 4,
 } rcmd_state_t;
 
 typedef struct resp_data {
