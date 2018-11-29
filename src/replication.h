@@ -60,6 +60,7 @@ typedef struct resp_data {
 } resp_data_t;
 
 struct replica_rcomm_resp {
+	struct replica_s *replica;
 	zvol_io_hdr_t io_resp_hdr;
 	uint8_t *data_ptr;
 	rcmd_state_t status;

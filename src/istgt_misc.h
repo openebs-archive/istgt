@@ -209,6 +209,9 @@ void poolinit(void);
 void poolfini(void);
 int poolprint(char *inbuf, int len);
 
+/*
+ * Calculate time difference
+ */
 #define timesdiff(_clockid, _st, _now, _re)				\
 {									\
 	clock_gettime(_clockid, &_now);					\
@@ -221,4 +224,17 @@ int poolprint(char *inbuf, int len);
 	}								\
 }
 
+/*
+ * Calculate difference with fixed values
+ */
+#define time_diff(_st, _end, _re)					\
+{									\
+	if ((_end.tv_nsec - _st.tv_nsec)<0) {				\
+		_re.tv_sec  = _end.tv_sec - _st.tv_sec - 1;		\
+		_re.tv_nsec = 1000000000 + _end.tv_nsec - _st.tv_nsec;	\
+	} else {							\
+		_re.tv_sec  = _end.tv_sec - _st.tv_sec;			\
+		_re.tv_nsec = _end.tv_nsec - _st.tv_nsec;		\
+	}								\
+}
 #endif /* ISTGT_MISC_H */

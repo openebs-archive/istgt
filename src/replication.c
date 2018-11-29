@@ -24,7 +24,8 @@
 #include "istgt_scsi.h"
 #include "assert.h"
 
-int extraWait = 5;
+int io_max_wait_time = 5;
+struct timespec io_queue_time[ISTGT_MAX_NUM_LUWORKERS];
 extern int replica_timeout;
 cstor_conn_ops_t cstor_ops = {
 	.conn_listen = replication_listen,
@@ -491,6 +492,46 @@ start_rebuild(void *buf, replica_t *replica, uint64_t data_len)
 	return ret;
 }
 
+/*
+ * Compare time..
+ * results: (T1 > T2) ? T1 : T2
+ */
+static int
+compare_time(struct timespec t1, struct timespec t2)
+{
+	if (t1.tv_sec > t2.tv_sec)
+		return 1;
+
+	if ((t1.tv_sec == t2.tv_sec) &&
+	    (t1.tv_nsec > t2.tv_nsec))
+		return 1;
+	return 0;
+}
+
+static int
+check_for_old_ios(spec_t *spec, struct timespec last)
+{
+	struct timespec diff1, diff2 = { 0 }, now, io_time;
+	int ret = 0;
+	int i = 0;
+
+	clock_gettime(CLOCK_MONOTONIC, &now);
+
+	for (i = 0; i < spec->luworkers; i++) {
+		io_time = io_queue_time[i];
+		if (!(io_time.tv_sec == 0 && io_time.tv_nsec == 0)) {
+			time_diff(io_time, now, diff1);
+			if (compare_time(diff1, diff2))
+				diff2 = diff1;
+		}
+	}
+
+	time_diff(last, now, diff1);
+	if (compare_time(diff2, diff1))
+		ret = 1;
+	return ret;
+}
+
 /* Rebuild can be of two type:-
  * 1. Rebuilding a replica from healthy replica
  * 2. Rebuilding a replica from all other replica(Mesh rebuild)
@@ -505,11 +546,9 @@ trigger_rebuild(spec_t *spec)
 {
 	int ret = 0;
 	uint64_t max = 0;
-	struct timespec now, diff;
 	replica_t *replica = NULL;
 	replica_t *dw_replica = NULL;
 	replica_t *healthy_replica = NULL;
-	int non_zero_inflight_replica_found = 0;
 
 	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 
@@ -532,53 +571,12 @@ trigger_rebuild(spec_t *spec)
 		return;
 	}
 
-	clock_gettime(CLOCK_MONOTONIC, &now);
-
-	/*
-	 * istgt starts rebuild on a replica after 2*timeout of its start time.
-	 * This is done to make sure that if any pending IOs on helping replicas
-	 * are already available at degraded replica before rebuild is started.
-
-	 * optimization is that rebuild will be started on a replica if all the
-	 * connected replicas are not having any pending IOs with them.
-	 */
-	non_zero_inflight_replica_found = 0;
-	TAILQ_FOREACH(replica, &spec->rq, r_next) {
-		if (replica->replica_inflight_write_io_cnt != 0 ||
-		    replica->replica_inflight_sync_io_cnt != 0) {
-			non_zero_inflight_replica_found = 1;
-			break;
-		}
-	}
-
-#ifdef	DEBUG
-	const char* non_zero_inflight_replica_str =
-	    getenv("non_zero_inflight_replica_cnt");
-	unsigned int non_zero_inflight_replica_cnt = 0;
-
-	if (non_zero_inflight_replica_str != NULL)
-		non_zero_inflight_replica_cnt =
-		    (unsigned int)strtol(non_zero_inflight_replica_str, NULL, 10);
-	if (non_zero_inflight_replica_cnt == 1)
-		non_zero_inflight_replica_found = 1;
-#endif
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
 		/* Find healthy replica */
 		if (replica->state == ZVOL_STATUS_HEALTHY) {
 			if (healthy_replica == NULL)
 				healthy_replica = replica;
 			continue;
-		}
-
-		timesdiff(CLOCK_MONOTONIC, replica->create_time, now, diff);
-
-		if ((spec->replication_factor != 1) &&
-		    (diff.tv_sec <= (2 * replica_timeout))) {
-			if (non_zero_inflight_replica_found == 1) {
-				REPLICA_LOG("Replica:%p added very recently, "
-				    "skipping rebuild.\n", replica);
-				continue;
-			}
 		}
 
 		if (max <= replica->initial_checkpointed_io_seq) {
@@ -589,6 +587,16 @@ trigger_rebuild(spec_t *spec)
 
 	if (dw_replica == NULL)
 		return;
+
+	/*
+	 * Check if healthy replica or all replica have any inflight IOs
+	 * queued before dw_replica opened data connection.
+	 */
+	if (check_for_old_ios(spec, dw_replica->create_time)) {
+		REPLICA_LOG("There are still some inflight IOs... "
+		    "queuing rebuild\n");
+		return;
+	}
 
 	REPLICA_LOG("Healthy count(%d) degraded count(%d) consistency factor(%d)"
 	    " replication factor(%d)\n", spec->healthy_rcount,
@@ -2387,6 +2395,7 @@ respond_with_error_for_all_outstanding_mgmt_ios(replica_t *r)
 		rcmd->data_len = rcomm_cmd->data_len;			\
 		rcmd->io_seq = rcomm_cmd->io_seq;			\
 		rcmd->idx = rcomm_cmd->copies_sent - 1;			\
+		rcomm_cmd->resp_list[rcmd->idx].replica = replica;	\
 		rcomm_cmd->resp_list[rcmd->idx].status |= 		\
 		    (replica->state == ZVOL_STATUS_HEALTHY) ? 		\
 		    SENT_TO_HEALTHY : SENT_TO_DEGRADED;			\
@@ -2561,7 +2570,7 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	rcmd_t *rcmd = NULL;
 	int iovcnt = cmd->iobufindx + 1;
 	bool replica_choosen = false;
-	struct timespec abstime, now, extra_wait;
+	struct timespec abstime, now, queued_time, diff;
 	int nsec, err_num = 0;
 	int skip_count = 0;
 	uint64_t num_read_ios = 0;
@@ -2658,7 +2667,8 @@ retry_read:
 
 	MTX_UNLOCK(&spec->rq_mtx);
 
-	extra_wait.tv_sec = extra_wait.tv_nsec = 0;
+	clock_gettime(CLOCK_MONOTONIC, &queued_time);
+
 	// now wait for command to complete
 	while (1) {
 		// check for status of rcomm_cmd
@@ -2679,21 +2689,26 @@ retry_read:
 				goto retry_read;
 			}
 
+
+			timesdiff(CLOCK_MONOTONIC, queued_time, now, diff);
 			count = 0;
-			if (success_resp == true) {
-				if (extra_wait.tv_sec == 0)
-					clock_gettime(CLOCK_REALTIME,
-					    &extra_wait);
-				clock_gettime(CLOCK_REALTIME, &now);
+			if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) {
 				for (i = 0; i < rcomm_cmd->copies_sent; i++) {
 					if (rcomm_cmd->resp_list[i].status &
 					    (RECEIVED_OK|RECEIVED_ERR))
 						count++;
+					else if (diff.tv_sec >= io_max_wait_time) {
+						ASSERT(rcomm_cmd->resp_list[i].replica);
+
+						MTX_LOCK(&rcomm_cmd->resp_list[i].replica->r_mtx);
+						inform_mgmt_conn(rcomm_cmd->resp_list[i].replica);
+						MTX_UNLOCK(&rcomm_cmd->resp_list[i].replica->r_mtx);
+
+						count++;
+					}
 				}
-				if ((now.tv_sec - extra_wait.tv_sec) < extraWait) {
-					if (count != rcomm_cmd->copies_sent)
-						goto wait_for_other_responses;
-				}
+				if (count != rcomm_cmd->copies_sent)
+					goto wait_for_other_responses;
 			}
 			rcomm_cmd->state = CMD_EXECUTION_DONE;
 #ifdef	DEBUG
@@ -3268,6 +3283,29 @@ cleanup_deadlist(void *arg)
 		sleep(1);	//add predefined time here
 	}
 	return (NULL);
+}
+
+/*
+ * Update maximum IO wait time
+ */
+void
+istgt_set_max_io_wait_time(int new_io_wait_time)
+{
+	if (new_io_wait_time != -1) {
+		io_max_wait_time = new_io_wait_time;
+		REPLICA_NOTICELOG("Max IO wait time updated to %d seconds\n",
+		    io_max_wait_time);
+	}
+	return;
+}
+
+/*
+ * Get maximum IO wait time
+ */
+int
+istgt_get_max_io_wait_time()
+{
+	return io_max_wait_time;
 }
 
 /*

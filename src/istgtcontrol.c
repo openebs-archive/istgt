@@ -977,6 +977,56 @@ exec_replica(UCTL_Ptr uctl)
 	}
 	return (UCTL_CMD_OK);
 }
+
+static int
+exec_max_io_wait(UCTL_Ptr uctl)
+{
+	const char *delim = ARGS_DELIM;
+	char *arg;
+	int rc = 0;
+	char *s_io_wait_time;
+	char *result;
+
+	if (uctl->setargcnt >= 1)
+		s_io_wait_time = uctl->setargv[0];
+	else
+		s_io_wait_time = NULL;
+
+	if (s_io_wait_time)
+		uctl_snprintf(uctl, "%s \"%s\" \n", uctl->cmd, s_io_wait_time);
+	else
+		uctl_snprintf(uctl, "%s\n", uctl->cmd);
+
+	rc = uctl_writeline(uctl);
+	if (rc != UCTL_CMD_OK) {
+		return (rc);
+	}
+
+	/* receive result */
+	while (1) {
+		rc = uctl_readline(uctl);
+		if (rc != UCTL_CMD_OK) {
+			return (rc);
+		}
+		arg = trim_string(uctl->recvbuf);
+		result = strsepq(&arg, delim);
+		strupr(result);
+		if (strcmp(result, uctl->cmd) != 0)
+			break;
+		if (uctl->iqn != NULL) {
+			printf("%s\n", arg);
+		} else {
+			printf("%s\n", arg);
+		}
+	}
+	if (strcmp(result, "OK") != 0) {
+		if (is_err_req_auth(uctl, arg))
+			return (UCTL_CMD_REQAUTH);
+		fprintf(stderr, "ERROR %s\n", arg);
+		return (UCTL_CMD_ERR);
+	}
+	return (UCTL_CMD_OK);
+}
 #endif
 
 static int
@@ -1233,6 +1283,7 @@ static EXEC_TABLE exec_table[] =
 	{"SNAPCREATE", exec_snap, 2, 0},
 	{"SNAPDESTROY", exec_snap, 2, 0},
 	{"REPLICA", exec_replica, 0, 0},
+	{"MAXIOWAIT", exec_max_io_wait, 0, 0},
 #endif
 	{ NULL,	NULL,	0,	0 },
 };
@@ -1719,6 +1770,7 @@ usage(void)
 #ifdef	REPLICATION
 	printf(" replica    list replica and its stats\n");
 	printf(" mempool    get mempool details\n");
+	printf(" maxiowait  get/set wait time for IO completion in seconds\n");
 #endif
 	printf(" set        set values for variables:\n");
 	printf("            Syntax: istgtcontrol -t <iqn(ALL to set globally)> \
@@ -1994,7 +2046,8 @@ main(int argc, char *argv[])
 
 	if ((strcmp(cmd, "SNAPCREATE") == 0) ||
 	(strcmp(cmd, "SNAPDESTROY") == 0) ||
-	    (strcmp(cmd, "REPLICA") == 0)) {
+	    (strcmp(cmd, "REPLICA") == 0) ||
+	    (strcmp(cmd, "MAXIOWAIT") == 0)) {
 		uctl->setargv = argv;
 		uctl->setargcnt = argc;
 	}
