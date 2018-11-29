@@ -675,7 +675,7 @@ run_rebuild_time_test_in_multiple_replicas()
 					fi
 				fi
 			else
-				if [ $rt -le 140 ]; then
+				if [ $rt -le 120 ]; then
 					cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"["$i"].status'"
 					rstatus=$(eval $cmd)
 					echo "replica status $rstatus"
