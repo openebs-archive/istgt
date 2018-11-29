@@ -3864,7 +3864,7 @@ istgt_create_uctl(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock,
 	uctl->portal.port = xstrdup(portal->port);
 	uctl->portal.tag = portal->tag;
 	uctl->portal.sock = -1;
-	uctl->sock = *sock;
+	uctl->sock = sock;
 
 	uctl->timeout = TIMEOUT_RW;
 	uctl->auth.chap_phase = ISTGT_CHAP_PHASE_WAIT_A;
@@ -3887,7 +3887,7 @@ istgt_create_uctl(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock,
 	switch (sa->sa_family) {
 	case AF_INET6:
 		uctl->family = AF_INET6;
-		rc = istgt_getaddr(*sock, uctl->saddr, sizeof (uctl->saddr),
+		rc = istgt_getaddr(sock, uctl->saddr, sizeof (uctl->saddr),
 		    uctl->caddr, sizeof (uctl->caddr), &uctl->iaddr,
 		    (uint16_t *)&uctl->iport);
 		if (rc < 0) {
@@ -3897,7 +3897,7 @@ istgt_create_uctl(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock,
 		break;
 	case AF_INET:
 		uctl->family = AF_INET;
-		rc = istgt_getaddr(*sock, uctl->saddr, sizeof (uctl->saddr),
+		rc = istgt_getaddr(sock, uctl->saddr, sizeof (uctl->saddr),
 		    uctl->caddr, sizeof (uctl->caddr), &uctl->iaddr,
 		    (uint16_t *)&uctl->iport);
 		if (rc < 0) {
