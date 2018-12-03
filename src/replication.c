@@ -24,7 +24,7 @@
 #include "istgt_scsi.h"
 #include "assert.h"
 
-int io_max_wait_time = 60;
+uint64_t io_max_wait_time = 60;
 struct timespec io_queue_time[ISTGT_MAX_NUM_LUWORKERS];
 extern int replica_timeout;
 cstor_conn_ops_t cstor_ops = {
@@ -515,9 +515,21 @@ check_for_old_ios(spec_t *spec, struct timespec last)
 	int ret = 0;
 	int i = 0;
 
+	/*
+	 * IOs are being served to replication module through replicate
+	 * API. Replicate API logs the time for each IOs in io_queue_time array.
+	 * - When IOs served to replication module, timestamp for that IOs
+	 *   will get updated.
+	 * - When execution of that IOs completes, timestamp
+	 *   for that IOs will be set to 0.
+	 */
+
 	for (i = 0; i < spec->luworkers; i++) {
 		io_time = io_queue_time[i];
-		if (!(io_time.tv_sec == 0 && io_time.tv_nsec == 0)) {
+		if (!(io_time.tv_sec == 0 && io_time.tv_nsec == 0)) {\
+			/*
+			 * Check if IO is older than `last` time
+			 */
 			if (!compare_time(io_time, last)) {
 				ret = 1;
 				break;
@@ -2689,7 +2701,7 @@ retry_read:
 			if (rcomm_cmd->resp_list[i].status &
 			    (RECEIVED_OK|RECEIVED_ERR|REPLICATE_TIMED_OUT))
 				count++;
-			else if (diff.tv_sec >= io_max_wait_time) {
+			else if (diff.tv_sec >= (time_t)io_max_wait_time) {
 				ASSERT(rcomm_cmd->resp_list[i].replica);
 				rcomm_cmd->resp_list[i].status |=
 				    REPLICATE_TIMED_OUT;
@@ -3305,12 +3317,12 @@ cleanup_deadlist(void *arg)
  * Update maximum IO wait time
  */
 void
-istgt_set_max_io_wait_time(int new_io_wait_time)
+istgt_set_max_io_wait_time(uint64_t new_io_wait_time)
 {
-	if (new_io_wait_time != -1) {
+	if (new_io_wait_time != io_max_wait_time) {
+		REPLICA_NOTICELOG("Max IO wait time updated to %lu seconds"
+		    " from %lu seconds \n", new_io_wait_time, io_max_wait_time);
 		io_max_wait_time = new_io_wait_time;
-		REPLICA_NOTICELOG("Max IO wait time updated to %d seconds\n",
-		    io_max_wait_time);
 	}
 	return;
 }
@@ -3318,7 +3330,7 @@ istgt_set_max_io_wait_time(int new_io_wait_time)
 /*
  * Get maximum IO wait time
  */
-int
+uint64_t
 istgt_get_max_io_wait_time()
 {
 	return io_max_wait_time;

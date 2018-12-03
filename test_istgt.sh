@@ -16,8 +16,15 @@ CONTROLLER_IP="127.0.0.1"
 CONTROLLER_PORT="6060"
 REPLICATION_FACTOR=3
 CONSISTTENCY_FACTOR=2
+IOPING="ioping"
 
 CURDIR=$PWD
+
+which $IOPING >> /dev/null
+if [ $? -ne 0 ]; then
+	echo "$IOPING is not installed.. exiting.."
+	exit 1
+fi
 
 on_exit() {
 	cd $CURDIR
@@ -795,12 +802,107 @@ run_replication_factor_test()
 	fi
 }
 
+run_io_timeout_test()
+{
+	local replica1_port="6161"
+	local replica2_port="6162"
+	local replica3_port="6163"
+	local replica1_ip="127.0.0.1"
+	local replica2_ip="127.0.0.1"
+	local replica3_ip="127.0.0.1"
+	local replica1_vdev="/tmp/test_vol1"
+	local injected_latency=10
+
+	REPLICATION_FACTOR=3
+	CONSISTENCY_FACTOR=2
+
+	setup_test_env
+
+	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev &
+	replica1_pid=$!
+	sleep 2	#Replica will take some time to make successful connection to target
+
+	# As long as we are not running any IOs we can use the same vdev file
+	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V $replica1_vdev  &
+	replica2_pid=$!
+	sleep 2
+
+	# As long as we are not running any IOs we can use the same vdev file
+	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V $replica1_vdev &
+	replica3_pid=$!
+	sleep 2
+
+	login_to_volume "$CONTROLLER_IP:3260"
+	get_scsi_disk
+	if [ "$device_name"!="" ]; then
+		# Test to verify impact of replica's delay on volume latency
+		kill -9 $replica1_pid
+		sleep 2
+
+		$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev -t $injected_latency &
+		replica1_pid=$!
+		sleep 2 #Replica will take some time to make successful connection to target
+
+		iopinglog=`mktemp`
+		$IOPING -c 1 -B -WWW /dev/$device_name > $iopinglog
+		if [ $? -ne 0 ]; then
+			exit 1
+		fi
+		latency=`awk -F ' '  '{print $6}' $iopinglog`
+		# ioping gives latency in usec for raw output
+		latency=$(( $latency / 1000000 ))
+		echo "got latency $latency"
+		cat $iopinglog
+		if [ $latency -lt $injected_latency ]; then
+			echo "Injected latency is $injected_latency seconds, but got $latency usec latency"
+			exit 1
+		fi
+
+		# Test to verify disconnection of replica if delay from replica is more than maxiowait
+		$ISTGTCONTROL maxiowait 5
+		$IOPING  -c 1 -B -WWW /dev/$device_name > $iopinglog
+		wait $replica1_pid
+		if [ $? -eq 0 ]; then
+			echo "IO timeout test failed"
+			exit 1
+		fi
+
+		$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev -t $injected_latency &
+		replica1_pid=$!
+		sleep 2
+
+		kill -9 $replica2_pid
+		$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V $replica1_vdev  -t $injected_latency &
+		replica2_pid=$!
+		sleep 2
+
+		kill -9 $replica3_pid
+		$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V $replica1_vdev -t $injected_latency&
+		replica3_pid=$!
+		sleep 2
+
+		# Test to verify volume status if all replica have delay more than maxiowait
+		$IOPING  -c 1 -B -WWW /dev/$device_name > $iopinglog
+		if [ $? -eq 0 ]; then
+			echo "IO timeout test failed"
+			exit 1
+		fi
+	else
+		exit 1
+	fi
+
+	kill -9 $replica1_pid $replica2_pid $replica3_pid
+	stop_istgt
+	rm -rf ${replica1_vdev::-1}*
+}
+
 run_lu_rf_test
 run_data_integrity_test
 run_mempool_test
 run_istgt_integration
 run_read_consistency_test
 run_replication_factor_test
+run_io_timeout_test
 tail -20 $LOGFILE
 
 exit 0

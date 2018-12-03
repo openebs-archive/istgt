@@ -658,18 +658,24 @@ istgt_uctl_cmd_max_io_wait(UCTL_Ptr uctl)
 	const char *delim = ARGS_DELIM;
 	int rc = 0;
 	char *arg;
-	int max_wait_time, new_wait_time = -1;
+	uint64_t max_wait_time, new_wait_time;
 	char *s_io_wait_time = NULL;
 	arg = uctl->arg;
 
 	if (arg) {
 		s_io_wait_time = strsepq(&arg, delim);
-		new_wait_time = (int) strtol(s_io_wait_time, NULL, 10);
+		new_wait_time = strtoull(s_io_wait_time, NULL, 10);
+		if (errno) {
+			istgt_uctl_snprintf(uctl, "ERR error code:%d\n", errno);
+			(void) istgt_uctl_writeline(uctl);
+			return (UCTL_CMD_ERR);
+		}
+
 		istgt_set_max_io_wait_time(new_wait_time);
 	}
 
 	max_wait_time = istgt_get_max_io_wait_time();
-	istgt_uctl_snprintf(uctl, "%s  %d\n", uctl->cmd, max_wait_time);
+	istgt_uctl_snprintf(uctl, "%s  %lu\n", uctl->cmd, max_wait_time);
 	rc = istgt_uctl_writeline(uctl);
 	if (rc != UCTL_CMD_OK) {
 		return (rc);

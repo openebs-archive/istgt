@@ -48,10 +48,19 @@ typedef enum rcomm_cmd_state_s {
 } rcomm_cmd_state_t;
 
 typedef enum rcmd_state_s {
+	/*  Received successful response from replica */
 	RECEIVED_OK = 1 << 0,
+
+	/* Received error from replica */
 	RECEIVED_ERR = 1 << 1,
+
+	/* Didn't received a response within io_max_wait_time seconds for rcmd*/
 	REPLICATE_TIMED_OUT = 1 << 2,
+
+	/* command sent to healthy replica */
 	SENT_TO_HEALTHY = 1 << 3,
+
+	/* command sent to degraded replica */
 	SENT_TO_DEGRADED = 1 << 4,
 } rcmd_state_t;
 
