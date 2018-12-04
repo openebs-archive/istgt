@@ -222,6 +222,18 @@ do {									\
 	}								\
 }
 
+#define	CHECK_FOR_REPLICA_PRESENCE(_repl, _spec, _res)			\
+do {									\
+	replica_t *t_r;							\
+	_res = FALSE;							\
+	TAILQ_FOREACH(t_r, &_spec->rq, r_next) {			\
+		if (t_r == _repl) {					\
+			_res = TRUE;					\
+			break;						\
+		}							\
+	}								\
+} while (0)
+
 static rcommon_mgmt_cmd_t *
 allocate_rcommon_mgmt_cmd(uint64_t buf_size)
 {
@@ -610,8 +622,8 @@ trigger_rebuild(spec_t *spec)
 #endif
 
 	/*
-	 * Check if healthy replica or all replica have any inflight IOs
-	 * queued before dw_replica opened data connection.
+	 * check if any inflight IOs queued before dw_replica opened
+	 * data connection
 	 */
 	if (check_for_old_ios(spec, dw_replica->create_time)) {
 		REPLICA_LOG("There are still some inflight IOs... "
@@ -2586,7 +2598,7 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 {
 	int rc = -1, i;
 	bool cmd_write = false, cmd_read = false, cmd_sync = false;
-	replica_t *replica, *last_replica = NULL;
+	replica_t *replica, *last_replica = NULL, *resp_replica= NULL;
 	rcommon_cmd_t *rcomm_cmd;
 	rcmd_t *rcmd = NULL;
 	int iovcnt = cmd->iobufindx + 1;
@@ -2596,8 +2608,8 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	int skip_count = 0;
 	uint64_t num_read_ios = 0;
 	uint64_t inflight_read_ios = 0;
-	int count =0 ;
-	bool success_resp = false;
+	int count = 0 ;
+	bool replica_exists;
 
 	(void) cmd_read;
 	CHECK_IO_TYPE(cmd, cmd_read, cmd_write, cmd_sync);
@@ -2698,17 +2710,31 @@ retry_read:
 		timesdiff(CLOCK_MONOTONIC, queued_time, now, diff);
 		count = 0;
 		for (i = 0; i < rcomm_cmd->copies_sent; i++) {
+			resp_replica = rcomm_cmd->resp_list[i].replica;
 			if (rcomm_cmd->resp_list[i].status &
 			    (RECEIVED_OK|RECEIVED_ERR|REPLICATE_TIMED_OUT))
 				count++;
 			else if (diff.tv_sec >= (time_t)io_max_wait_time) {
-				ASSERT(rcomm_cmd->resp_list[i].replica);
+				ASSERT(resp_replica);
 				rcomm_cmd->resp_list[i].status |=
 				    REPLICATE_TIMED_OUT;
 
-				MTX_LOCK(&rcomm_cmd->resp_list[i].replica->r_mtx);
-				inform_mgmt_conn(rcomm_cmd->resp_list[i].replica);
-				MTX_UNLOCK(&rcomm_cmd->resp_list[i].replica->r_mtx);
+				MTX_LOCK(&spec->rq_mtx);
+				CHECK_FOR_REPLICA_PRESENCE(resp_replica, spec,
+				    replica_exists);
+				if (replica_exists) {
+					inform_mgmt_conn(resp_replica);
+					REPLICA_ERRLOG("Disconnecting "
+					    "replica(%lu) due to "
+					    "timeout(%ld)\n",
+					    resp_replica->zvol_guid,
+					    diff.tv_sec);
+				} else {
+					REPLICA_ERRLOG("Replica(%lu) already "
+					    "removed\n",
+					    resp_replica->zvol_guid);
+				}
+				MTX_UNLOCK(&spec->rq_mtx);
 
 				count++;
 			}
@@ -2720,10 +2746,8 @@ retry_read:
 		// check for status of rcomm_cmd
 		rc = check_for_command_completion(spec, rcomm_cmd, cmd);
 		if (rc) {
-			success_resp = false;
 			if (rc == 1) {
 				rc = cmd->data_len = rcomm_cmd->data_len;
-				success_resp = true;
 			} else if (rcomm_cmd->opcode == ZVOL_OPCODE_READ &&
 			    rcomm_cmd->copies_sent == 1) {
 				rcomm_cmd->copies_sent = 0;
