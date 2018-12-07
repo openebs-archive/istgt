@@ -976,6 +976,7 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	replica->iofd = iofd;
 	replica->ip = malloc(strlen(ack_data->ip)+1);
 	strcpy(replica->ip, ack_data->ip);
+	replica->quorum = ack_data->quorum;
 	replica->port = ack_data->port;
 	replica->state = ZVOL_STATUS_DEGRADED;
 	replica->initial_checkpointed_io_seq =
@@ -1819,6 +1820,7 @@ update_replica_status(spec_t *spec, replica_t *replica)
 			/* master_replica became healthy*/
 			spec->degraded_rcount--;
 			spec->healthy_rcount++;
+			replica->quorum = 1;
 			assert(spec->rebuild_info.dw_replica == replica);
 			spec->rebuild_info.dw_replica = NULL;
 			spec->rebuild_info.healthy_replica = NULL;

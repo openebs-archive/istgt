@@ -49,8 +49,10 @@ typedef struct replica_s {
 	int iofd;
 	/* management connection descriptor */
 	int mgmt_fd;
+	uint8_t quorum;
+	uint8_t reserved;
 	/* replica's IOs server port */
-	int port;
+	uint16_t port;
 	/* replica's IP */
 	char *ip;
 	uint64_t pool_guid;
