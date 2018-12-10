@@ -76,7 +76,6 @@
 
 #define	MAX_MASKBUF 128
 
-
 static int
 istgt_lu_allow_ipv6(const char *netmask, const char *addr)
 {

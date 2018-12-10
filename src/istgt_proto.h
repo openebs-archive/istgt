@@ -94,6 +94,8 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int, int);
 int istgt_lu_destroy_snapshot(spec_t *spec, char *snapname);
 void istgt_lu_mempool_stats(char **resp);
 void istgt_lu_replica_stats(char *volname, char **resp);
+void istgt_set_max_io_wait_time(uint64_t new_io_wait_time);
+uint64_t istgt_get_max_io_wait_time(void);
 #endif
 int istgt_lu_add_nexus(ISTGT_LU_Ptr lu, char *initiator_port);
 int istgt_lu_remove_nexus(ISTGT_LU_Ptr lu, char *initiator_port);

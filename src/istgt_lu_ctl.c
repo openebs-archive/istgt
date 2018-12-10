@@ -651,6 +651,44 @@ istgt_uctl_cmd_replica_stats(UCTL_Ptr uctl)
 	}
 	return (UCTL_CMD_OK);
 }
+
+static int
+istgt_uctl_cmd_max_io_wait(UCTL_Ptr uctl)
+{
+	const char *delim = ARGS_DELIM;
+	int rc = 0;
+	char *arg;
+	uint64_t max_wait_time, new_wait_time;
+	char *s_io_wait_time = NULL;
+	arg = uctl->arg;
+
+	if (arg) {
+		s_io_wait_time = strsepq(&arg, delim);
+		new_wait_time = strtoull(s_io_wait_time, NULL, 10);
+		if (errno) {
+			istgt_uctl_snprintf(uctl, "ERR error code:%d\n", errno);
+			(void) istgt_uctl_writeline(uctl);
+			return (UCTL_CMD_ERR);
+		}
+
+		istgt_set_max_io_wait_time(new_wait_time);
+	}
+
+	max_wait_time = istgt_get_max_io_wait_time();
+	istgt_uctl_snprintf(uctl, "%s  %lu\n", uctl->cmd, max_wait_time);
+	rc = istgt_uctl_writeline(uctl);
+	if (rc != UCTL_CMD_OK) {
+		return (rc);
+	}
+
+	istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
+	rc = istgt_uctl_writeline(uctl);
+	if (rc != UCTL_CMD_OK) {
+		return (rc);
+	}
+	return (UCTL_CMD_OK);
+}
+
 #endif
 
 static int
@@ -3672,6 +3710,7 @@ static ISTGT_UCTL_CMD_TABLE istgt_uctl_cmd_table[] =
 	{ "SNAPCREATE", istgt_uctl_cmd_snap},
 	{ "SNAPDESTROY", istgt_uctl_cmd_snap},
 	{ "REPLICA", istgt_uctl_cmd_replica_stats},
+	{ "MAXIOWAIT", istgt_uctl_cmd_max_io_wait},
 #endif
 	{ NULL, NULL },
 };
