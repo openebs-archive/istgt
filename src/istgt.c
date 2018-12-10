@@ -95,7 +95,6 @@
 ISTGT g_istgt;
 #ifdef	REPLICATION
 extern int replica_timeout;
-extern int extraWait;
 extern rte_smempool_t rcmd_mempool;
 extern rte_smempool_t rcommon_cmd_mempool;
 #endif
@@ -2813,17 +2812,6 @@ void *timerfn(void
 			istgt_queue_enqueue(&closedconns, conn);
 
 #ifdef	REPLICATION
-		const char *s_extra_wait_time = getenv("extraWait");
-		int extra_wait = -1;
-		if (s_extra_wait_time != NULL)
-			extra_wait = (int)strtol(s_extra_wait_time,
-			    NULL, 10);
-		if ((extra_wait >= 0) && (extra_wait != extraWait)) {
-			ISTGT_NOTICELOG("changing extraWait time from %d to "
-			    "%d\n", extraWait, extra_wait);
-			extraWait = extra_wait;
-		}
-
 		const char *s_replica_timeout = getenv("replicaTimeout");
 		int rep_timeout = 0;
 		if (s_replica_timeout != NULL)

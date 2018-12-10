@@ -209,6 +209,9 @@ void poolinit(void);
 void poolfini(void);
 int poolprint(char *inbuf, int len);
 
+/*
+ * Calculate time difference
+ */
 #define timesdiff(_clockid, _st, _now, _re)				\
 {									\
 	clock_gettime(_clockid, &_now);					\
@@ -220,5 +223,4 @@ int poolprint(char *inbuf, int len);
 		_re.tv_nsec = _now.tv_nsec - _st.tv_nsec;		\
 	}								\
 }
-
 #endif /* ISTGT_MISC_H */
