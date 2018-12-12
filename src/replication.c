@@ -2985,7 +2985,7 @@ handle_read_data_event(replica_t *replica)
 	return (rc);
 }
 
-int replica_poll_time = 30;
+int replica_poll_time = 10;
 
 /*
  * initializes replication

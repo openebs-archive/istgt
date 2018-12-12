@@ -558,14 +558,12 @@ run_rebuild_time_test_in_single_replica()
 	fi
 
 	while [ 1 ]; do
-		# We have started istgt with 20 second replica timeout
-		# and rf=cf=1. so, it will take around 2 minutes for the
-		# replica to become healthy. So on safe side, we will
-		# check replica status after 130 seconds.
+		# With replica poll timeout as 10, volume should become
+		# healthy in less than 40 seconds.
 		cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[0].\"upTime\"'"
 		rt=$(eval $cmd)
 		echo "replica start time $rt"
-		if [ $rt -gt 130 ]; then
+		if [ $rt -gt 40 ]; then
 			cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[0].status'"
 			rstatus=$(eval $cmd)
 			echo "replica status $rstatus"
@@ -665,7 +663,7 @@ run_rebuild_time_test_in_multiple_replicas()
 			rt=$(eval $cmd)
 			echo "replica start time $rt"
 			if [ $1 -eq 0 ]; then
-				if [ $rt -gt 130 ]; then
+				if [ $rt -gt 40 ]; then
 					cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"["$i"].status'"
 					rstatus=$(eval $cmd)
 					echo "replica status $rstatus"
@@ -682,7 +680,7 @@ run_rebuild_time_test_in_multiple_replicas()
 					fi
 				fi
 			else
-				if [ $rt -le 140 ]; then
+				if [ $rt -le 30 ]; then
 					cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"["$i"].status'"
 					rstatus=$(eval $cmd)
 					echo "replica status $rstatus"
@@ -697,7 +695,7 @@ run_rebuild_time_test_in_multiple_replicas()
 			fi
 		done
 		if [ $1 -eq 0 ]; then
-			if [ $rt -gt 130 ]; then
+			if [ $rt -gt 40 ]; then
 				echo "replica start time $rt done_test: $done_test"
 				if [ $done_test -eq 0 ]; then
 					echo "replication factor(2) test failed"
