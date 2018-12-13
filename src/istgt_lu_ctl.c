@@ -3392,7 +3392,7 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 		json_object_object_add(jobj, "TotalWriteBytes",
 		    json_object_new_uint64(spec->writebytes));
 		json_object_object_add(jobj, "TotalReadBytes",
-		    json_object_new_uint64(spec->reads));
+		    json_object_new_uint64(spec->readbytes));
 		json_object_object_add(jobj, "Size",
 		    json_object_new_uint64(spec->size));
 
