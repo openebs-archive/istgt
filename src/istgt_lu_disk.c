@@ -8861,10 +8861,10 @@ istgt_lu_disk_queue_start(ISTGT_LU_Ptr lu, int lun, int worker_id)
 						INFLIGHT_IO_CLEANUP;
 						lu_task->error = 1;
 						lu_task->lu_cmd.aborted = 1;
+						MTX_UNLOCK(&lu_task->trans_mutex);
 						MTX_LOCK(&spec->wait_lu_task_mutex);
 						spec->wait_lu_task[worker_id] = NULL;
 						MTX_UNLOCK(&spec->wait_lu_task_mutex);
-						MTX_UNLOCK(&lu_task->trans_mutex);
 
 						now = time(NULL);
 						ISTGT_ERRLOG("c#%d timeout trans_cond CmdSN=0x%x "
