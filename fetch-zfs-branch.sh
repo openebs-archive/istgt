@@ -9,6 +9,7 @@ set -e
 # For example:
 #  master -> master
 #  v0.7.x -> v0.7.x
+#  v0.8.x -> v0.8.x
 #
 # The above 1:1 mapping can't always be guaranteed when 
 # working in forked repos with branch names like:
@@ -21,6 +22,6 @@ set -e
 #
 #For the moment, we will go with making sure the correct
 # branch name is provided as part of the release process.
-ZFS_BUILD_BRANCH="zfs-0.7-release"
+ZFS_BUILD_BRANCH="v0.8.x"
 export ZFS_BUILD_BRANCH
 
