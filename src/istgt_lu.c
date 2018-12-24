@@ -3732,6 +3732,8 @@ istgt_lu_create_task(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, int lun, ISTGT_LU_D
 	}
 
 #ifdef REPLICATION
+	lu_task->lu_cmd.lu_start_time.tv_sec = 0;
+	lu_task->lu_cmd.repl_start_time.tv_sec = 0;
 	lu_task->lu_cmd.start_rw_time = lu_cmd->start_rw_time;
 #endif
 	lu_task->condwait = 0;
@@ -4506,6 +4508,7 @@ luworker(void *arg)
 			tdiff(second2, third, r);
 #ifdef REPLICATION
 			lu_task->lu_cmd.luworkerindx = tind;
+			clock_gettime(CLOCK_MONOTONIC_RAW, &lu_task->lu_cmd.lu_start_time);
 #endif
 			lu_task->lu_cmd.flags |= ISTGT_WORKER_PICKED;
 			rc = istgt_lu_disk_queue_start(lu, lu_num, tind);

@@ -2425,6 +2425,7 @@ respond_with_error_for_all_outstanding_mgmt_ios(replica_t *r)
 		    sizeof(struct zvol_io_rw_hdr));			\
 		rcmd = malloc(sizeof(*rcmd));				\
 		memset(rcmd, 0, sizeof (*rcmd));			\
+		clock_gettime(CLOCK_MONOTONIC, &rcmd->start_time);	\
 		rcmd->opcode = rcomm_cmd->opcode;			\
 		rcmd->offset = rcomm_cmd->offset;			\
 		rcmd->data_len = rcomm_cmd->data_len;			\
@@ -2637,6 +2638,7 @@ again:
 	build_rcomm_cmd(rcomm_cmd, cmd, offset, nbytes);
 
 	clock_gettime(CLOCK_MONOTONIC, &io_queue_time[cmd->luworkerindx]);
+	clock_gettime(CLOCK_MONOTONIC_RAW, &cmd->repl_start_time);
 
 retry_read:
 	replica_choosen = false;
@@ -2714,8 +2716,9 @@ retry_read:
 		for (i = 0; i < rcomm_cmd->copies_sent; i++) {
 			resp_replica = rcomm_cmd->resp_list[i].replica;
 			if (rcomm_cmd->resp_list[i].status &
-			    (RECEIVED_OK|RECEIVED_ERR|REPLICATE_TIMED_OUT))
+			    (RECEIVED_OK|RECEIVED_ERR|REPLICATE_TIMED_OUT)) {
 				count++;
+			}
 			else if (diff.tv_sec >= (time_t)io_max_wait_time) {
 				ASSERT(resp_replica);
 				rcomm_cmd->resp_list[i].status |=

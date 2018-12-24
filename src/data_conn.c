@@ -51,7 +51,7 @@ int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 	if (rcmd != NULL) {						\
 		struct timespec now;					\
 		clock_gettime(CLOCK_MONOTONIC, &now);			\
-		timesdiff(CLOCK_MONOTONIC, rcmd->queued_time, 		\
+		timesdiff(CLOCK_MONOTONIC, rcmd->start_time, 		\
 		    now, _time_diff);					\
 	}								\
 	while (rcmd != NULL) {						\
@@ -105,7 +105,7 @@ int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 		if (pending_cmd != NULL) {				\
 			clock_gettime(CLOCK_MONOTONIC, &nw);		\
 			timesdiff(CLOCK_MONOTONIC,			\
-			    pending_cmd->queued_time, nw, _diff);	\
+			    pending_cmd->start_time, nw, _diff);	\
 			if (_diff.tv_sec >= replica_timeout) {		\
 				REPLICA_ERRLOG("timeout happened for "	\
 				    "replica(%lu).. delay(%lu sec)\n", 	\
@@ -154,6 +154,8 @@ unblock_cmds(replica_t *r)
 			break;
 		TAILQ_REMOVE(&r->blockedq, cmd, next);
 		TAILQ_INSERT_TAIL(&r->readyq, cmd, next);
+
+		clock_gettime(CLOCK_MONOTONIC, &cmd->ready_time);
 		unblocked = true;
 	}
 	return unblocked;
@@ -168,18 +170,19 @@ move_to_blocked_or_ready_q(replica_t *r, rcmd_t *cmd)
 	bool cmd_blocked = false;
 	rcmd_t *pending_rcmd;
 
+	clock_gettime(CLOCK_MONOTONIC, &cmd->start_time);
 	if (!TAILQ_EMPTY(&r->blockedq)) {
-		clock_gettime(CLOCK_MONOTONIC, &cmd->queued_time);
 		TAILQ_INSERT_TAIL(&r->blockedq, cmd, next);
 		goto done;
 	}
 	CHECK_BLOCKAGE_IN_Q(&r->readyq, next);
 	CHECK_BLOCKAGE_IN_Q(&r->waitq, next);
-	clock_gettime(CLOCK_MONOTONIC, &cmd->queued_time);
 	if (cmd_blocked == true)
 		TAILQ_INSERT_TAIL(&r->blockedq, cmd, next);
-	else
+	else {
 		TAILQ_INSERT_TAIL(&r->readyq, cmd, next);
+		clock_gettime(CLOCK_MONOTONIC, &cmd->ready_time);
+	}
 done:
 	return;
 }
@@ -402,6 +405,7 @@ read_cmd(replica_t *r)
 				return -1;
 
 			r->ongoing_io = cmd;
+			clock_gettime(CLOCK_MONOTONIC, &cmd->read_time);
 
 			r->io_state = READ_IO_RESP_DATA;
 			r->io_read = 0;
@@ -514,6 +518,7 @@ handle_epoll_out_event(replica_t *r)
 		if (ret == WRITE_COMPLETED) {
 			TAILQ_REMOVE(&r->readyq, cmd, next);
 			TAILQ_INSERT_TAIL(&r->waitq, cmd, next);
+			clock_gettime(CLOCK_MONOTONIC, &cmd->write_done);
 			continue;
 		}
 		else {
@@ -524,6 +529,9 @@ handle_epoll_out_event(replica_t *r)
 	return 0;
 }
 
+#define	ADD_TIMESPEC(var, s, d)	\
+	(var) += (uint64_t)(d.tv_sec - s.tv_sec) * (uint64_t)1000000000L + d.tv_nsec - s.tv_nsec;
+
 static int
 handle_epoll_in_event(replica_t *r)
 {
@@ -532,6 +540,7 @@ handle_epoll_in_event(replica_t *r)
 	bool task_completed = false;
 	bool unblocked = false;
 	pthread_cond_t *cond_var;
+	struct timespec now;
 
 start:
 	ret = read_cmd(r);
@@ -539,9 +548,15 @@ start:
 		return -1;
 
 	if (ret == READ_COMPLETED) {
+		rcomm_cmd = r->ongoing_io->rcommq_ptr;
 		idx = r->ongoing_io->idx;
 		TAILQ_REMOVE(&r->waitq, r->ongoing_io, next);
-		rcomm_cmd = r->ongoing_io->rcommq_ptr;
+		clock_gettime(CLOCK_MONOTONIC, &now);
+
+		ADD_TIMESPEC((r->totalreadytime), (r->ongoing_io->start_time), (r->ongoing_io->ready_time));
+		ADD_TIMESPEC((r->totalwritedonetime), (r->ongoing_io->start_time), (r->ongoing_io->write_done));
+		ADD_TIMESPEC((r->totalreadtime), (r->ongoing_io->start_time), (r->ongoing_io->read_time));
+		ADD_TIMESPEC((r->totalreaddonetime), (r->ongoing_io->start_time), now);
 
 		cond_var = rcomm_cmd->cond_var;
 
@@ -558,6 +573,7 @@ start:
 		 */
 		if (rcomm_cmd->state != CMD_EXECUTION_DONE) {
 			rcomm_cmd->resp_list[idx].status |= RECEIVED_OK;
+			/* This cond_var is from luworker, and hence, safe to use */
 			pthread_cond_signal(cond_var);
 		} else
 			rcomm_cmd->resp_list[idx].status |= RECEIVED_OK;

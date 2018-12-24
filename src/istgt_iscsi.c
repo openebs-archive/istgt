@@ -5655,9 +5655,25 @@ update_cummulative_rw_time(ISTGT_LU_TASK_Ptr lu_task)
 				timesdiff(CLOCK_MONOTONIC_RAW,
 					lu_task->lu_cmd.start_rw_time,
 					endtime, diff);
-				ns = diff.tv_sec*1000000000;
+				ns = diff.tv_sec*1000000000L;
 				ns += diff.tv_nsec;
 				__sync_fetch_and_add(&spec->totalwritetime, ns);
+				if (lu_task->lu_cmd.lu_start_time.tv_sec) {
+					timesdiff(CLOCK_MONOTONIC_RAW,
+						lu_task->lu_cmd.lu_start_time,
+						endtime, diff);
+					ns = diff.tv_sec*1000000000L;
+					ns += diff.tv_nsec;
+					__sync_fetch_and_add(&spec->totalwritelutime, ns);
+				}
+				if (lu_task->lu_cmd.repl_start_time.tv_sec) {
+					timesdiff(CLOCK_MONOTONIC_RAW,
+						lu_task->lu_cmd.repl_start_time,
+						endtime, diff);
+					ns = diff.tv_sec*1000000000L;
+					ns += diff.tv_nsec;
+					__sync_fetch_and_add(&spec->totalwriterepltime, ns);
+				}
 				break;
 		case SBC_READ_6:
 		case SBC_READ_10:
@@ -5669,9 +5685,25 @@ update_cummulative_rw_time(ISTGT_LU_TASK_Ptr lu_task)
 				timesdiff(CLOCK_MONOTONIC_RAW,
 					lu_task->lu_cmd.start_rw_time,
 					endtime, diff);
-				ns = diff.tv_sec*1000000000;
+				ns = diff.tv_sec*1000000000L;
 				ns += diff.tv_nsec;
 				__sync_fetch_and_add(&spec->totalreadtime, ns);
+				if (lu_task->lu_cmd.lu_start_time.tv_sec) {
+					timesdiff(CLOCK_MONOTONIC_RAW,
+						lu_task->lu_cmd.lu_start_time,
+						endtime, diff);
+					ns = diff.tv_sec*1000000000L;
+					ns += diff.tv_nsec;
+					__sync_fetch_and_add(&spec->totalreadlutime, ns);
+				}
+				if (lu_task->lu_cmd.repl_start_time.tv_sec) {
+					timesdiff(CLOCK_MONOTONIC_RAW,
+						lu_task->lu_cmd.repl_start_time,
+						endtime, diff);
+					ns = diff.tv_sec*1000000000L;
+					ns += diff.tv_nsec;
+					__sync_fetch_and_add(&spec->totalreadrepltime, ns);
+				}
 				break;
 		}
 }
@@ -5752,7 +5784,9 @@ sender(void *arg)
 			timediff(&lu_task->lu_cmd, 'r', __LINE__);
 			if (lu_task->type == ISTGT_LU_TASK_RESPONSE) {
 #ifdef REPLICATION
-				update_cummulative_rw_time(lu_task);
+				if (lu_task->execute == 1 ||
+				    (lu_task->lu_cmd.flags & ISTGT_COMPLETED_EXEC))
+					update_cummulative_rw_time(lu_task);
 #endif
 
 				/* send DATA-IN, SCSI status */

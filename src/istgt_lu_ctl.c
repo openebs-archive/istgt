@@ -3410,8 +3410,16 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 
 		json_object_object_add(jobj, "TotalReadTime",
 		    json_object_new_uint64(spec->totalreadtime));
+		json_object_object_add(jobj, "TotalReadLUTime",
+		    json_object_new_uint64(spec->totalreadlutime));
+		json_object_object_add(jobj, "TotalReadReplTime",
+		    json_object_new_uint64(spec->totalreadrepltime));
 		json_object_object_add(jobj, "TotalWriteTime",
 		    json_object_new_uint64(spec->totalwritetime));
+		json_object_object_add(jobj, "TotalWriteLUTime",
+		    json_object_new_uint64(spec->totalwritelutime));
+		json_object_object_add(jobj, "TotalWriteReplTime",
+		    json_object_new_uint64(spec->totalwriterepltime));
 		json_object_object_add(jobj, "TotalReadBlockCount",
 		    json_object_new_uint64(spec->totalreadblockcount));
 		json_object_object_add(jobj, "TotalWriteBlockCount",
@@ -3436,6 +3444,14 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 		    json_object_object_add(jobjarr, "Mode",
 			json_object_new_string(((replica->state ==
 			    ZVOL_STATUS_HEALTHY) ? "HEALTHY" : "DEGRADED")));
+		    json_object_object_add(jobjarr, "ReadyTime",
+			json_object_new_uint64(replica->totalreadytime));
+		    json_object_object_add(jobjarr, "WriteDoneTime",
+			json_object_new_uint64(replica->totalwritedonetime));
+		    json_object_object_add(jobjarr, "ReadTime",
+			json_object_new_uint64(replica->totalreadtime));
+		    json_object_object_add(jobjarr, "ReadDoneTime",
+			json_object_new_uint64(replica->totalreaddonetime));
 		    MTX_UNLOCK(&replica->r_mtx);
 		    json_object_array_add(jobj_arr, jobjarr);
 		}

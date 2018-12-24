@@ -113,7 +113,10 @@ typedef struct rcmd_s {
 	uint64_t offset;
 	uint64_t data_len;
 	struct iovec iov[41];
-	struct timespec queued_time;
+	struct timespec start_time;
+	struct timespec ready_time;
+	struct timespec read_time;
+	struct timespec write_done;
 } rcmd_t;
 
 typedef struct replica_s replica_t;
