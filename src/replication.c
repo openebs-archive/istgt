@@ -581,13 +581,15 @@ trigger_rebuild(spec_t *spec)
 	if (spec->rebuild_info.rebuild_in_progress == true) {
 		assert(spec->ready == true);
 		REPLICA_NOTICELOG("Rebuild is already in progress "
-		    "on volume(%s)\n", spec->volname);
+		    "on volume(%s) for replica (%lu)\n", spec->volname,
+		    spec->rebuild_info.dw_replica->zvol_guid);
 		return;
 	}
 
 	if (!spec->degraded_rcount) {
-		REPLICA_NOTICELOG("No downgraded replica on volume(%s) "
-		", rebuild will not be attempted\n", spec->volname);
+		REPLICA_NOTICELOG("No downgraded replica on volume(%s),"
+		    "healthy: %d degraded: %d, rebuild will not be attempted\n",
+		    spec->volname, spec->healthy_rcount, spec->degraded_rcount);
 		return;
 	}
 
@@ -1452,7 +1454,7 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 
 	if (can_take_snapshot(spec) == false) {
 		MTX_UNLOCK(&spec->rq_mtx);
-		REPLICA_ERRLOG("volume is not healthy..\n");
+		REPLICA_ERRLOG("volume is not healthy to take snapshots..\n");
 		return false;
 	}
 
