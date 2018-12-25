@@ -50,8 +50,8 @@ int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 	rcmd = TAILQ_FIRST(head);					\
 	if (rcmd != NULL) {						\
 		struct timespec now;					\
-		clock_gettime(CLOCK_MONOTONIC, &now);			\
-		timesdiff(CLOCK_MONOTONIC, rcmd->start_time, 		\
+		clock_gettime(CLOCK_MONOTONIC_RAW, &now);			\
+		timesdiff(CLOCK_MONOTONIC_RAW, rcmd->start_time, 		\
 		    now, _time_diff);					\
 	}								\
 	while (rcmd != NULL) {						\
@@ -103,8 +103,8 @@ int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 		int ms;							\
 		pending_cmd = TAILQ_FIRST(_head);			\
 		if (pending_cmd != NULL) {				\
-			clock_gettime(CLOCK_MONOTONIC, &nw);		\
-			timesdiff(CLOCK_MONOTONIC,			\
+			clock_gettime(CLOCK_MONOTONIC_RAW, &nw);		\
+			timesdiff(CLOCK_MONOTONIC_RAW,			\
 			    pending_cmd->start_time, nw, _diff);	\
 			if (_diff.tv_sec >= replica_timeout) {		\
 				REPLICA_ERRLOG("timeout happened for "	\
@@ -155,7 +155,7 @@ unblock_cmds(replica_t *r)
 		TAILQ_REMOVE(&r->blockedq, cmd, next);
 		TAILQ_INSERT_TAIL(&r->readyq, cmd, next);
 
-		clock_gettime(CLOCK_MONOTONIC, &cmd->ready_time);
+		clock_gettime(CLOCK_MONOTONIC_RAW, &cmd->ready_time);
 		unblocked = true;
 	}
 	return unblocked;
@@ -170,7 +170,7 @@ move_to_blocked_or_ready_q(replica_t *r, rcmd_t *cmd)
 	bool cmd_blocked = false;
 	rcmd_t *pending_rcmd;
 
-	clock_gettime(CLOCK_MONOTONIC, &cmd->start_time);
+	clock_gettime(CLOCK_MONOTONIC_RAW, &cmd->start_time);
 	if (!TAILQ_EMPTY(&r->blockedq)) {
 		TAILQ_INSERT_TAIL(&r->blockedq, cmd, next);
 		goto done;
@@ -181,7 +181,7 @@ move_to_blocked_or_ready_q(replica_t *r, rcmd_t *cmd)
 		TAILQ_INSERT_TAIL(&r->blockedq, cmd, next);
 	else {
 		TAILQ_INSERT_TAIL(&r->readyq, cmd, next);
-		clock_gettime(CLOCK_MONOTONIC, &cmd->ready_time);
+		clock_gettime(CLOCK_MONOTONIC_RAW, &cmd->ready_time);
 	}
 done:
 	return;
@@ -405,7 +405,6 @@ read_cmd(replica_t *r)
 				return -1;
 
 			r->ongoing_io = cmd;
-			clock_gettime(CLOCK_MONOTONIC, &cmd->read_time);
 
 			r->io_state = READ_IO_RESP_DATA;
 			r->io_read = 0;
@@ -518,7 +517,6 @@ handle_epoll_out_event(replica_t *r)
 		if (ret == WRITE_COMPLETED) {
 			TAILQ_REMOVE(&r->readyq, cmd, next);
 			TAILQ_INSERT_TAIL(&r->waitq, cmd, next);
-			clock_gettime(CLOCK_MONOTONIC, &cmd->write_done);
 			continue;
 		}
 		else {
@@ -551,13 +549,19 @@ start:
 		rcomm_cmd = r->ongoing_io->rcommq_ptr;
 		idx = r->ongoing_io->idx;
 		TAILQ_REMOVE(&r->waitq, r->ongoing_io, next);
-		clock_gettime(CLOCK_MONOTONIC, &now);
+		clock_gettime(CLOCK_MONOTONIC_RAW, &now);
 
-		ADD_TIMESPEC((r->totalreadytime), (r->ongoing_io->start_time), (r->ongoing_io->ready_time));
-		ADD_TIMESPEC((r->totalwritedonetime), (r->ongoing_io->start_time), (r->ongoing_io->write_done));
-		ADD_TIMESPEC((r->totalreadtime), (r->ongoing_io->start_time), (r->ongoing_io->read_time));
-		ADD_TIMESPEC((r->totalreaddonetime), (r->ongoing_io->start_time), now);
-
+		if (r->ongoing_io->opcode == ZVOL_OPCODE_READ) {
+			ADD_TIMESPEC((r->totalread_reqtime),
+			    (r->ongoing_io->start_time), (r->ongoing_io->ready_time));
+			ADD_TIMESPEC((r->totalread_resptime),
+			    (r->ongoing_io->start_time), now);
+		} else if (r->ongoing_io->opcode == ZVOL_OPCODE_WRITE) {
+			ADD_TIMESPEC((r->totalwrite_reqtime),
+			    (r->ongoing_io->start_time), (r->ongoing_io->ready_time));
+			ADD_TIMESPEC((r->totalwrite_resptime),
+			    (r->ongoing_io->start_time), now);
+		}
 		cond_var = rcomm_cmd->cond_var;
 
 		rcomm_cmd->resp_list[idx].io_resp_hdr = *(r->io_resp_hdr);
@@ -715,7 +719,7 @@ initialize_error:
 	MTX_UNLOCK(&r->r_mtx);
 
 	prctl(PR_SET_NAME, "replica", 0, 0, 0);
-	clock_gettime(CLOCK_MONOTONIC, &last_time);
+	clock_gettime(CLOCK_MONOTONIC_RAW, &last_time);
 
 	while (1) {
 		nfds = epoll_wait(r_epollfd, events, MAXEVENTS, epoll_timeout);
@@ -782,8 +786,8 @@ initialize_error:
 		 * `x` is set to minimum of (replica_timeout/4) or lowest
 		 * time_diff of IOs from all replica queue.
 		 */
-		clock_gettime(CLOCK_MONOTONIC, &now);
-		timesdiff(CLOCK_MONOTONIC, last_time, now, diff_time);
+		clock_gettime(CLOCK_MONOTONIC_RAW, &now);
+		timesdiff(CLOCK_MONOTONIC_RAW, last_time, now, diff_time);
 		polling_timeout = (replica_timeout / 4) * 1000;
 		if (epoll_timeout > polling_timeout)
 			epoll_timeout = polling_timeout;
@@ -806,7 +810,7 @@ initialize_error:
 			 */
 			if (epoll_timeout < replica_timeout)
 				wait_count = 1;
-			clock_gettime(CLOCK_MONOTONIC, &last_time);
+			clock_gettime(CLOCK_MONOTONIC_RAW, &last_time);
 		}
 	}
 exit:

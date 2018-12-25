@@ -500,7 +500,7 @@ main(int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 
-	clock_gettime(CLOCK_MONOTONIC, &now);
+	clock_gettime(CLOCK_MONOTONIC_RAW, &now);
 	srandom(now.tv_sec);
 
 	data = NULL;

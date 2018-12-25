@@ -87,11 +87,11 @@ typedef struct replica_s {
 	int dont_free;
 
 	struct timespec create_time;
-	uint64_t totalreadytime;
-	uint64_t totalwritedonetime;
-	uint64_t totalreadtime;
-	uint64_t totalreaddonetime;
+	uint64_t totalread_reqtime;
+	uint64_t totalread_resptime;
 
+	uint64_t totalwrite_reqtime;
+	uint64_t totalwrite_resptime;
 	/*
 	 * Following variables should be updated with atomic operation only
 	 */

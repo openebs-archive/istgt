@@ -27,7 +27,6 @@
 
 #ifndef ISTGT_H
 #define ISTGT_H
-#define CLOCK_UPTIME_FAST       8
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif

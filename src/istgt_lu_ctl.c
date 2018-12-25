@@ -3438,20 +3438,19 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 		MTX_LOCK(&spec->rq_mtx);
 		TAILQ_FOREACH(replica, &spec->rq, r_next) {
 		    MTX_LOCK(&replica->r_mtx);
-		    json_object *jobjarr = json_object_new_object();
-		    json_object_object_add(jobjarr, "Address",
-			json_object_new_string(replica->ip));
-		    json_object_object_add(jobjarr, "Mode",
-			json_object_new_string(((replica->state ==
-			    ZVOL_STATUS_HEALTHY) ? "HEALTHY" : "DEGRADED")));
-		    json_object_object_add(jobjarr, "ReadyTime",
-			json_object_new_uint64(replica->totalreadytime));
-		    json_object_object_add(jobjarr, "WriteDoneTime",
-			json_object_new_uint64(replica->totalwritedonetime));
-		    json_object_object_add(jobjarr, "ReadTime",
-			json_object_new_uint64(replica->totalreadtime));
-		    json_object_object_add(jobjarr, "ReadDoneTime",
-			json_object_new_uint64(replica->totalreaddonetime));
+
+		    struct json_object *jobjarr = NULL;
+		    get_replica_stats_json(replica, &jobjarr);
+
+		    json_object_object_add(jobjarr, "ReadReqTime",
+			json_object_new_uint64(replica->totalread_reqtime));
+		    json_object_object_add(jobjarr, "ReadRespTime",
+			json_object_new_uint64(replica->totalread_resptime));
+
+		    json_object_object_add(jobjarr, "WriteReqTime",
+			json_object_new_uint64(replica->totalwrite_reqtime));
+		    json_object_object_add(jobjarr, "WriteRespTime",
+			json_object_new_uint64(replica->totalwrite_resptime));
 		    MTX_UNLOCK(&replica->r_mtx);
 		    json_object_array_add(jobj_arr, jobjarr);
 		}
