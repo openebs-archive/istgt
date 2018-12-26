@@ -4346,7 +4346,7 @@ luworker(void *arg)
 	{	\
 		if ((_n.tv_nsec - _s.tv_nsec) < 0) {        \
 			_r.tv_sec  = _n.tv_sec - _s.tv_sec-1;   \
-			_r.tv_nsec = 1000000000 + _n.tv_nsec - _s.tv_nsec; \
+			_r.tv_nsec = SEC_IN_NS + _n.tv_nsec - _s.tv_nsec; \
 		} else {                                    \
 			_r.tv_sec  = _n.tv_sec - _s.tv_sec;     \
 			_r.tv_nsec = _n.tv_nsec - _s.tv_nsec;   \
@@ -4354,8 +4354,8 @@ luworker(void *arg)
 		spec->avgs[id].count++;	\
 		spec->avgs[id].tot_sec += _r.tv_sec;	\
 		spec->avgs[id].tot_nsec += _r.tv_nsec;	\
-		secs = spec->avgs[id].tot_nsec/1000000000;	\
-		nsecs = spec->avgs[id].tot_nsec%1000000000;	\
+		secs = spec->avgs[id].tot_nsec/SEC_IN_NS;	\
+		nsecs = spec->avgs[id].tot_nsec%SEC_IN_NS;	\
 		spec->avgs[id].tot_sec += secs;	\
 		spec->avgs[id].tot_nsec = nsecs;	\
 	}	\
@@ -4554,7 +4554,7 @@ luscheduler(void *arg)
 	{	\
 		if ((_n.tv_nsec - _s.tv_nsec) < 0) {        \
 			_r.tv_sec  = _n.tv_sec - _s.tv_sec-1;   \
-			_r.tv_nsec = 1000000000 + _n.tv_nsec - _s.tv_nsec; \
+			_r.tv_nsec = SEC_IN_NS + _n.tv_nsec - _s.tv_nsec; \
 		} else {                                    \
 			_r.tv_sec  = _n.tv_sec - _s.tv_sec;     \
 			_r.tv_nsec = _n.tv_nsec - _s.tv_nsec;   \
@@ -4562,8 +4562,8 @@ luscheduler(void *arg)
 		spec->avgs[id].count++;	\
 		spec->avgs[id].tot_sec += _r.tv_sec;	\
 		spec->avgs[id].tot_nsec += _r.tv_nsec;	\
-		secs = spec->avgs[id].tot_nsec/1000000000;	\
-		nsecs = spec->avgs[id].tot_nsec%1000000000;	\
+		secs = spec->avgs[id].tot_nsec/SEC_IN_NS;	\
+		nsecs = spec->avgs[id].tot_nsec%SEC_IN_NS;	\
 		spec->avgs[id].tot_sec += secs;	\
 		spec->avgs[id].tot_nsec = nsecs;	\
 	}	\

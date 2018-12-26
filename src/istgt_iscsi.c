@@ -3360,7 +3360,7 @@ timediff(ISTGT_LU_CMD_Ptr p, char  ch, uint16_t line)
 	}
 	if ((_n->tv_nsec - _s->tv_nsec) < 0) {
 		_r->tv_sec  = _n->tv_sec - _s->tv_sec-1;
-		_r->tv_nsec = 1000000000 + _n->tv_nsec - _s->tv_nsec;
+		_r->tv_nsec = SEC_IN_NS + _n->tv_nsec - _s->tv_nsec;
 	} else {
 		_r->tv_sec  = _n->tv_sec - _s->tv_sec;
 		_r->tv_nsec = _n->tv_nsec - _s->tv_nsec;
@@ -5459,7 +5459,7 @@ prof_log(ISTGT_LU_CMD_Ptr p, const char *caller)
 
 	if ((_n->tv_nsec - _s->tv_nsec) < 0) {
 		_r.tv_sec  = _n->tv_sec - _s->tv_sec-1;
-		_r.tv_nsec = 1000000000 + _n->tv_nsec - _s->tv_nsec;
+		_r.tv_nsec = SEC_IN_NS + _n->tv_nsec - _s->tv_nsec;
 	} else {
 		_r.tv_sec  = _n->tv_sec - _s->tv_sec;
 		_r.tv_nsec = _n->tv_nsec - _s->tv_nsec;
@@ -5561,8 +5561,8 @@ prof_log(ISTGT_LU_CMD_Ptr p, const char *caller)
 				spec->avgs[i].count++;
 				spec->avgs[i].tot_sec += p->tdiff[i].tv_sec;
 				spec->avgs[i].tot_nsec += p->tdiff[i].tv_nsec;
-				secs = spec->avgs[i].tot_nsec/1000000000;
-				nsecs = spec->avgs[i].tot_nsec%1000000000;
+				secs = spec->avgs[i].tot_nsec/SEC_IN_NS;
+				nsecs = spec->avgs[i].tot_nsec%SEC_IN_NS;
 				spec->avgs[i].tot_sec += secs;
 				spec->avgs[i].tot_nsec = nsecs;
 			}
@@ -5570,8 +5570,8 @@ prof_log(ISTGT_LU_CMD_Ptr p, const char *caller)
 			spec->avgs[levels].count++;
 			spec->avgs[levels].tot_sec += (_r.tv_sec);
 			spec->avgs[levels].tot_nsec += (_r.tv_nsec);
-			secs = spec->avgs[levels].tot_nsec/1000000000;
-			nsecs = spec->avgs[levels].tot_nsec%1000000000;
+			secs = spec->avgs[levels].tot_nsec/SEC_IN_NS;
+			nsecs = spec->avgs[levels].tot_nsec%SEC_IN_NS;
 			spec->avgs[levels].tot_sec += secs;
 			spec->avgs[levels].tot_nsec = nsecs;
 		}
@@ -5655,14 +5655,14 @@ update_cummulative_rw_time(ISTGT_LU_TASK_Ptr lu_task)
 				timesdiff(CLOCK_MONOTONIC_RAW,
 					lu_task->lu_cmd.start_rw_time,
 					endtime, diff);
-				ns = diff.tv_sec*1000000000L;
+				ns = diff.tv_sec*SEC_IN_NS;
 				ns += diff.tv_nsec;
 				__sync_fetch_and_add(&spec->totalwritetime, ns);
 				if (lu_task->lu_cmd.lu_start_time.tv_sec) {
 					timesdiff(CLOCK_MONOTONIC_RAW,
 						lu_task->lu_cmd.lu_start_time,
 						endtime, diff);
-					ns = diff.tv_sec*1000000000L;
+					ns = diff.tv_sec*SEC_IN_NS;
 					ns += diff.tv_nsec;
 					__sync_fetch_and_add(&spec->totalwritelutime, ns);
 				}
@@ -5670,7 +5670,7 @@ update_cummulative_rw_time(ISTGT_LU_TASK_Ptr lu_task)
 					timesdiff(CLOCK_MONOTONIC_RAW,
 						lu_task->lu_cmd.repl_start_time,
 						endtime, diff);
-					ns = diff.tv_sec*1000000000L;
+					ns = diff.tv_sec*SEC_IN_NS;
 					ns += diff.tv_nsec;
 					__sync_fetch_and_add(&spec->totalwriterepltime, ns);
 				}
@@ -5685,14 +5685,14 @@ update_cummulative_rw_time(ISTGT_LU_TASK_Ptr lu_task)
 				timesdiff(CLOCK_MONOTONIC_RAW,
 					lu_task->lu_cmd.start_rw_time,
 					endtime, diff);
-				ns = diff.tv_sec*1000000000L;
+				ns = diff.tv_sec*SEC_IN_NS;
 				ns += diff.tv_nsec;
 				__sync_fetch_and_add(&spec->totalreadtime, ns);
 				if (lu_task->lu_cmd.lu_start_time.tv_sec) {
 					timesdiff(CLOCK_MONOTONIC_RAW,
 						lu_task->lu_cmd.lu_start_time,
 						endtime, diff);
-					ns = diff.tv_sec*1000000000L;
+					ns = diff.tv_sec*SEC_IN_NS;
 					ns += diff.tv_nsec;
 					__sync_fetch_and_add(&spec->totalreadlutime, ns);
 				}
@@ -5700,7 +5700,7 @@ update_cummulative_rw_time(ISTGT_LU_TASK_Ptr lu_task)
 					timesdiff(CLOCK_MONOTONIC_RAW,
 						lu_task->lu_cmd.repl_start_time,
 						endtime, diff);
-					ns = diff.tv_sec*1000000000L;
+					ns = diff.tv_sec*SEC_IN_NS;
 					ns += diff.tv_nsec;
 					__sync_fetch_and_add(&spec->totalreadrepltime, ns);
 				}

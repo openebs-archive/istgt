@@ -528,7 +528,7 @@ handle_epoll_out_event(replica_t *r)
 }
 
 #define	ADD_TIMESPEC(var, s, d)	\
-	(var) += (uint64_t)(d.tv_sec - s.tv_sec) * (uint64_t)1000000000L + d.tv_nsec - s.tv_nsec;
+	(var) += (uint64_t)(d.tv_sec - s.tv_sec) * (uint64_t)SEC_IN_NS + d.tv_nsec - s.tv_nsec;
 
 static int
 handle_epoll_in_event(replica_t *r)

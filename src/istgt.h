@@ -111,6 +111,7 @@
 #define DEFAULT_MAXR2T 16
 #define TMF_TIMEOUT 2 
 
+#define	SEC_IN_NS	(1000000000L)
 #define ISTGT_PG_TAG_MAX 0x0000ffff
 #define ISTGT_LU_TAG_MAX 0x0000ffff
 #define ISTGT_UC_TAG     0x00010000

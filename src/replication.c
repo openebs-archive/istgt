@@ -2602,7 +2602,7 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 }
 
 #define	ADD_TIMESPEC(var, s, d)	\
-	(var) += (uint64_t)(d.tv_sec - s.tv_sec) * (uint64_t)1000000000L + d.tv_nsec - s.tv_nsec;
+	(var) += (uint64_t)(d.tv_sec - s.tv_sec) * (uint64_t)SEC_IN_NS + d.tv_nsec - s.tv_nsec;
 
 int64_t
 replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t nbytes)
@@ -2794,7 +2794,7 @@ retry_read:
 wait_for_other_responses:
 		/* wait for 500 ms(500000000 ns) */
 		clock_gettime(CLOCK_MONOTONIC_RAW, &now);
-		nsec = 1000000000 - now.tv_nsec;
+		nsec = SEC_IN_NS - now.tv_nsec;
 		if (nsec > 500000000) {
 			abstime.tv_sec = now.tv_sec;
 			abstime.tv_nsec = now.tv_nsec + 500000000;

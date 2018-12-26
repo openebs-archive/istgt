@@ -3097,7 +3097,7 @@ istgt_uctl_cmd_que(UCTL_Ptr uctl)
 #define	tdiff(_s, _n, _r) {                     \
 	if ((_n.tv_nsec - _s.tv_nsec) < 0) {        \
 		_r.tv_sec  = _n.tv_sec - _s.tv_sec-1;   \
-		_r.tv_nsec = 1000000000 + _n.tv_nsec - _s.tv_nsec; \
+		_r.tv_nsec = SEC_IN_NS + _n.tv_nsec - _s.tv_nsec; \
 	} else {                                    \
 		_r.tv_sec  = _n.tv_sec - _s.tv_sec;     \
 		_r.tv_nsec = _n.tv_nsec - _s.tv_nsec;   \
@@ -3193,7 +3193,7 @@ istgt_uctl_cmd_que(UCTL_Ptr uctl)
 			    (signed long)(spec->avgs[0].tot_nsec))) < 0) {
 				spec->avgs[0].tot_sec  =
 				    now.tv_sec - spec->avgs[0].tot_sec - 1;
-				spec->avgs[0].tot_nsec = 1000000000 +
+				spec->avgs[0].tot_nsec = SEC_IN_NS +
 				    now.tv_nsec - spec->avgs[0].tot_nsec;
 			} else {
 				spec->avgs[0].tot_sec =
@@ -3410,15 +3410,15 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 
 		json_object_object_add(jobj, "TotalReadTime",
 		    json_object_new_uint64(spec->totalreadtime));
-		json_object_object_add(jobj, "TotalReadLUTime",
+		json_object_object_add(jobj, "LUTotalReadTime",
 		    json_object_new_uint64(spec->totalreadlutime));
-		json_object_object_add(jobj, "TotalReadReplTime",
+		json_object_object_add(jobj, "ReplicationTotalReadTime",
 		    json_object_new_uint64(spec->totalreadrepltime));
 		json_object_object_add(jobj, "TotalWriteTime",
 		    json_object_new_uint64(spec->totalwritetime));
-		json_object_object_add(jobj, "TotalWriteLUTime",
+		json_object_object_add(jobj, "LUTotalWriteTime",
 		    json_object_new_uint64(spec->totalwritelutime));
-		json_object_object_add(jobj, "TotalWriteReplTime",
+		json_object_object_add(jobj, "ReplicationTotalWriteTime",
 		    json_object_new_uint64(spec->totalwriterepltime));
 		json_object_object_add(jobj, "TotalReadBlockCount",
 		    json_object_new_uint64(spec->totalreadblockcount));

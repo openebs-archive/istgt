@@ -786,10 +786,10 @@ typedef struct istgt_lu_disk_t {
 	uint64_t writebytes;
 	uint64_t totalreadtime;
 	uint64_t totalwritetime;
-	uint64_t totalreadlutime;
-	uint64_t totalwritelutime;
-	uint64_t totalreadrepltime;
-	uint64_t totalwriterepltime;
+	uint64_t totalreadlutime; /* Time for read IO at LU worker */
+	uint64_t totalwritelutime; /* Similar to above */
+	uint64_t totalreadrepltime; /* Time for read IO at replication module */
+	uint64_t totalwriterepltime; /* Similar to above */
 	uint64_t totalreadblockcount;
 	uint64_t totalwriteblockcount;
 #endif
