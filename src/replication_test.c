@@ -417,7 +417,7 @@ main(int argc, char **argv)
 	int iofd = -1, mgmtfd, sfd, rc, epfd, event_count, i;
 	int64_t count;
 	struct epoll_event event, *events;
-	uint8_t *data, *data_ptr_cpy;
+	uint8_t *data, *mgmt_data;
 	uint64_t nbytes = 0;
 	int vol_fd;
 	zvol_op_code_t opcode;
@@ -500,7 +500,7 @@ main(int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 
-	clock_gettime(CLOCK_MONOTONIC, &now);
+	clock_gettime(CLOCK_MONOTONIC_RAW, &now);
 	srandom(now.tv_sec);
 
 	data = NULL;
@@ -585,8 +585,8 @@ again:
 				}
 
 				if(mgmtio->len) {
-					data = data_ptr_cpy = malloc(mgmtio->len);
-					count = test_read_data(events[i].data.fd, (uint8_t *)data, mgmtio->len);
+					mgmt_data = malloc(mgmtio->len);
+					count = test_read_data(events[i].data.fd, (uint8_t *)mgmt_data, mgmtio->len);
 					if (count < 0) {
 						rc = -1;
 						goto error;
@@ -598,7 +598,7 @@ again:
 					}
 				}
 				opcode = mgmtio->opcode;
-				send_mgmt_ack(mgmtfd, opcode, data, replica_ip, replica_port, zrepl_status, &zrepl_status_msg_cnt);
+				send_mgmt_ack(mgmtfd, opcode, mgmt_data, replica_ip, replica_port, zrepl_status, &zrepl_status_msg_cnt);
 			} else if (events[i].data.fd == sfd) {
 				struct sockaddr saddr;
 				socklen_t slen;
@@ -808,7 +808,7 @@ execute_io:
 
 error:
 	REPLICA_ERRLOG("shutting down replica(%s:%d) IOs(read:%lu write:%lu)\n",
-	    ctrl_ip, ctrl_port, read_ios, write_ios);
+	    replica_ip, replica_port, read_ios, write_ios);
 	if (data)
 		free(data);
 	close(vol_fd);

@@ -7715,7 +7715,7 @@ istgt_lu_print_q(ISTGT_LU_Ptr lu, int lun)
 #define tdiff(_s, _n, _r) {                     \
 	if ((_n.tv_nsec - _s.tv_nsec) < 0) {        \
 		_r.tv_sec  = _n.tv_sec - _s.tv_sec-1;   \
-		_r.tv_nsec = 1000000000 + _n.tv_nsec - _s.tv_nsec; \
+		_r.tv_nsec = SEC_IN_NS + _n.tv_nsec - _s.tv_nsec; \
 	} else {                                    \
 		_r.tv_sec  = _n.tv_sec - _s.tv_sec;     \
 		_r.tv_nsec = _n.tv_nsec - _s.tv_nsec;   \
@@ -8237,7 +8237,7 @@ istgt_lu_disk_queue(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 	{	\
                 if ((_n.tv_nsec - _s.tv_nsec) < 0) {        \
                         _r.tv_sec  = _n.tv_sec - _s.tv_sec-1;   \
-                        _r.tv_nsec = 1000000000 + _n.tv_nsec - _s.tv_nsec; \
+                        _r.tv_nsec = SEC_IN_NS + _n.tv_nsec - _s.tv_nsec; \
                 } else {                                    \
                         _r.tv_sec  = _n.tv_sec - _s.tv_sec;     \
                         _r.tv_nsec = _n.tv_nsec - _s.tv_nsec;   \
@@ -8245,8 +8245,8 @@ istgt_lu_disk_queue(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 		spec->avgs[id].count++;	\
 		spec->avgs[id].tot_sec += _r.tv_sec;	\
 		spec->avgs[id].tot_nsec += _r.tv_nsec;	\
-		secs = spec->avgs[id].tot_nsec/1000000000;	\
-		nsecs = spec->avgs[id].tot_nsec%1000000000;	\
+		secs = spec->avgs[id].tot_nsec/SEC_IN_NS;	\
+		nsecs = spec->avgs[id].tot_nsec%SEC_IN_NS;	\
 		spec->avgs[id].tot_sec += secs;	\
 		spec->avgs[id].tot_nsec = nsecs;	\
 	}	\

@@ -16,6 +16,7 @@
 #include <syslog.h>
 #include <stdbool.h>
 #include "replication_log.h"
+#include <json-c/json_object.h>
 #include "zrepl_prot.h"
 
 #define	MAXREPLICA 5
@@ -113,7 +114,8 @@ typedef struct rcmd_s {
 	uint64_t offset;
 	uint64_t data_len;
 	struct iovec iov[41];
-	struct timespec queued_time;
+	struct timespec start_time;
+	struct timespec ready_time;
 } rcmd_t;
 
 typedef struct replica_s replica_t;
@@ -194,6 +196,7 @@ int initialize_volume(spec_t *spec, int, int);
 void destroy_volume(spec_t *spec);
 void inform_mgmt_conn(replica_t *r);
 extern const char * get_cv_status(spec_t *spec, int replica_cnt, int healthy_replica_cnt);
+extern void get_replica_stats_json(replica_t *replica, struct json_object **jobj);
 
 /* Replica default timeout is 200 seconds */
 #define	REPLICA_DEFAULT_TIMEOUT	200

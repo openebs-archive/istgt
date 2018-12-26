@@ -430,6 +430,8 @@ typedef struct istgt_lu_cmd_t {
 #ifdef REPLICATION
 	uint32_t   luworkerindx;
 	struct timespec start_rw_time;
+	struct timespec lu_start_time;
+	struct timespec repl_start_time;
 #endif
 } ISTGT_LU_CMD;
 typedef ISTGT_LU_CMD *ISTGT_LU_CMD_Ptr;
@@ -784,6 +786,10 @@ typedef struct istgt_lu_disk_t {
 	uint64_t writebytes;
 	uint64_t totalreadtime;
 	uint64_t totalwritetime;
+	uint64_t totalreadlutime; /* Time for read IO at LU worker */
+	uint64_t totalwritelutime; /* Similar to above */
+	uint64_t totalreadrepltime; /* Time for read IO at replication module */
+	uint64_t totalwriterepltime; /* Similar to above */
 	uint64_t totalreadblockcount;
 	uint64_t totalwriteblockcount;
 #endif
