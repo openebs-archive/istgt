@@ -3097,7 +3097,7 @@ istgt_uctl_cmd_que(UCTL_Ptr uctl)
 #define	tdiff(_s, _n, _r) {                     \
 	if ((_n.tv_nsec - _s.tv_nsec) < 0) {        \
 		_r.tv_sec  = _n.tv_sec - _s.tv_sec-1;   \
-		_r.tv_nsec = 1000000000 + _n.tv_nsec - _s.tv_nsec; \
+		_r.tv_nsec = SEC_IN_NS + _n.tv_nsec - _s.tv_nsec; \
 	} else {                                    \
 		_r.tv_sec  = _n.tv_sec - _s.tv_sec;     \
 		_r.tv_nsec = _n.tv_nsec - _s.tv_nsec;   \
@@ -3193,7 +3193,7 @@ istgt_uctl_cmd_que(UCTL_Ptr uctl)
 			    (signed long)(spec->avgs[0].tot_nsec))) < 0) {
 				spec->avgs[0].tot_sec  =
 				    now.tv_sec - spec->avgs[0].tot_sec - 1;
-				spec->avgs[0].tot_nsec = 1000000000 +
+				spec->avgs[0].tot_nsec = SEC_IN_NS +
 				    now.tv_nsec - spec->avgs[0].tot_nsec;
 			} else {
 				spec->avgs[0].tot_sec =
@@ -3410,8 +3410,16 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 
 		json_object_object_add(jobj, "TotalReadTime",
 		    json_object_new_uint64(spec->totalreadtime));
+		json_object_object_add(jobj, "LUTotalReadTime",
+		    json_object_new_uint64(spec->totalreadlutime));
+		json_object_object_add(jobj, "ReplicationTotalReadTime",
+		    json_object_new_uint64(spec->totalreadrepltime));
 		json_object_object_add(jobj, "TotalWriteTime",
 		    json_object_new_uint64(spec->totalwritetime));
+		json_object_object_add(jobj, "LUTotalWriteTime",
+		    json_object_new_uint64(spec->totalwritelutime));
+		json_object_object_add(jobj, "ReplicationTotalWriteTime",
+		    json_object_new_uint64(spec->totalwriterepltime));
 		json_object_object_add(jobj, "TotalReadBlockCount",
 		    json_object_new_uint64(spec->totalreadblockcount));
 		json_object_object_add(jobj, "TotalWriteBlockCount",
@@ -3430,12 +3438,19 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 		MTX_LOCK(&spec->rq_mtx);
 		TAILQ_FOREACH(replica, &spec->rq, r_next) {
 		    MTX_LOCK(&replica->r_mtx);
-		    json_object *jobjarr = json_object_new_object();
-		    json_object_object_add(jobjarr, "Address",
-			json_object_new_string(replica->ip));
-		    json_object_object_add(jobjarr, "Mode",
-			json_object_new_string(((replica->state ==
-			    ZVOL_STATUS_HEALTHY) ? "HEALTHY" : "DEGRADED")));
+
+		    struct json_object *jobjarr = NULL;
+		    get_replica_stats_json(replica, &jobjarr);
+
+		    json_object_object_add(jobjarr, "ReadReqTime",
+			json_object_new_uint64(replica->totalread_reqtime));
+		    json_object_object_add(jobjarr, "ReadRespTime",
+			json_object_new_uint64(replica->totalread_resptime));
+
+		    json_object_object_add(jobjarr, "WriteReqTime",
+			json_object_new_uint64(replica->totalwrite_reqtime));
+		    json_object_object_add(jobjarr, "WriteRespTime",
+			json_object_new_uint64(replica->totalwrite_resptime));
 		    MTX_UNLOCK(&replica->r_mtx);
 		    json_object_array_add(jobj_arr, jobjarr);
 		}

@@ -2778,7 +2778,8 @@ is_persist_enabled(void)
 	return (persist);
 }
 
-clockid_t clockid = CLOCK_UPTIME_FAST; // CLOCK_SECOND  CLOCK_MONOTONIC_FAST
+/* COARSE have precision till 1000Hz, which might be 1ms usually */
+clockid_t clockid = CLOCK_MONOTONIC_COARSE; // CLOCK_SECOND  CLOCK_MONOTONIC_FAST
 extern int detectDoubleFree;
 // int enable_xcopy = 0;
 int enable_oldBL = 0;
