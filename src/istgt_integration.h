@@ -88,6 +88,17 @@ typedef struct replica_s {
 
 	struct timespec create_time;
 
+	/* This is calculated from create time till the queued time into readyQ */
+	/* Total time(ns) waited in queue to send read_IO req */
+	uint64_t totalread_reqtime;
+	/* Total time(ns) waited in queue to send write_IO req */
+	uint64_t totalwrite_reqtime;
+
+	/* This is calculated from create time till the entire resp read from wire*/
+	/* Total time(ns) to recv read_IO resp */
+	uint64_t totalread_resptime;
+	/* Total time(ns) to recv write_IO resp */
+	uint64_t totalwrite_resptime;
 	/*
 	 * Following variables should be updated with atomic operation only
 	 */

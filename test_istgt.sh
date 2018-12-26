@@ -123,26 +123,35 @@ run_and_verify_iostats() {
 		[[ $? -ne 0 ]] && echo "mount for $device_name" && exit 1
 
 		sudo dd if=/dev/urandom of=/mnt/store/file1 bs=4k count=10000 oflag=direct
-		istgtcontrol iostats
-		var1="$(istgtcontrol iostats | grep -oP "(?<=TotalWriteBytes\": \")[^ ]+" | cut -d '"' -f 1)"
+		$ISTGTCONTROL iostats
+		var1="$($ISTGTCONTROL iostats | grep -oP "(?<=TotalWriteBytes\": \")[^ ]+" | cut -d '"' -f 1)"
 		if [ $var1 -eq 0 ]; then
 			echo "iostats command failed" && exit 1
 		fi
 
 		sudo dd if=/dev/urandom of=/mnt/store/file1 bs=4k count=10000 oflag=direct
-		istgtcontrol iostats
-		var2="$(istgtcontrol iostats | grep -oP "(?<=TotalWriteBytes\": \")[^ ]+" | cut -d '"' -f 1)"
+		$ISTGTCONTROL iostats
+		var2="$($ISTGTCONTROL iostats | grep -oP "(?<=TotalWriteBytes\": \")[^ ]+" | cut -d '"' -f 1)"
 		if [ $var2 -eq 0 ]; then
 			echo "iostats command failed" && exit 1
 		fi
 
 		if [ "$var2" == "$var1" ]; then
 			echo "iostats command failed, both the values are same" && exit 1
-		else echo "iostats test passed"
+		else
+			echo "iostats test passed"
 		fi
 
 		sudo umount /mnt/store
 		logout_of_volume
+		readReqTime="$($ISTGTCONTROL -q iostats | jq '.Replicas[0].ReadReqTime' | cut -d '"' -f 2)"
+		readRespTime="$($ISTGTCONTROL -q iostats | jq '.Replicas[0].ReadRespTime' | cut -d '"' -f 2)"
+		writeReqTime="$($ISTGTCONTROL -q iostats | jq '.Replicas[0].WriteReqTime' | cut -d '"' -f 2)"
+		writeRespTime="$($ISTGTCONTROL -q iostats | jq '.Replicas[0].WriteRespTime' | cut -d '"' -f 2)"
+		if [ $readReqTime -gt $readRespTime ] || [ $writeReqTime -gt $writeRespTime ]; then
+			echo "Issue in replica latency stats" && tail -20 $LOGFILE && exit 1
+		fi
+
 		sleep 5
 	else
 		echo "Unable to detect iSCSI device, login failed"; exit 1
@@ -313,6 +322,8 @@ run_data_integrity_test() {
 	else
 		echo "Replica timeout passed"
 	fi
+
+	$ISTGTCONTROL -q iostats
 
 	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V "/tmp/test_vol1" &
 	replica1_pid=$!
@@ -564,7 +575,7 @@ run_rebuild_time_test_in_single_replica()
 		rt=$(eval $cmd)
 		echo "replica start time $rt"
 		if [ $rt -gt 40 ]; then
-			cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[0].status'"
+			cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[0].Mode'"
 			rstatus=$(eval $cmd)
 			echo "replica status $rstatus"
 			if [ ${rstatus} != "\"Healthy\"" ]; then
@@ -664,7 +675,7 @@ run_rebuild_time_test_in_multiple_replicas()
 			echo "replica start time $rt"
 			if [ $1 -eq 0 ]; then
 				if [ $rt -gt 40 ]; then
-					cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"["$i"].status'"
+					cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"["$i"].Mode'"
 					rstatus=$(eval $cmd)
 					echo "replica status $rstatus"
 					if [ ${rstatus} == "\"Healthy\"" ]; then
@@ -681,7 +692,7 @@ run_rebuild_time_test_in_multiple_replicas()
 				fi
 			else
 				if [ $rt -le 30 ]; then
-					cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"["$i"].status'"
+					cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"["$i"].Mode'"
 					rstatus=$(eval $cmd)
 					echo "replica status $rstatus"
 					if [ ${rstatus} == "\"Healthy\"" ]; then
@@ -714,7 +725,7 @@ run_rebuild_time_test_in_multiple_replicas()
 		fi
 		cnt=0
 		for (( i = 0; i < 3; i++ )) do
-			cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"["$i"].status'"
+			cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"["$i"].Mode'"
 			rt=$(eval $cmd)
 			if [ ${rt} == "\"Healthy\"" ]; then
 				cnt=`expr $cnt + 1`

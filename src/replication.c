@@ -581,13 +581,15 @@ trigger_rebuild(spec_t *spec)
 	if (spec->rebuild_info.rebuild_in_progress == true) {
 		assert(spec->ready == true);
 		REPLICA_NOTICELOG("Rebuild is already in progress "
-		    "on volume(%s)\n", spec->volname);
+		    "on volume(%s) for replica (%lu)\n", spec->volname,
+		    spec->rebuild_info.dw_replica->zvol_guid);
 		return;
 	}
 
 	if (!spec->degraded_rcount) {
-		REPLICA_NOTICELOG("No downgraded replica on volume(%s) "
-		", rebuild will not be attempted\n", spec->volname);
+		REPLICA_NOTICELOG("No downgraded replica on volume(%s),"
+		    "healthy: %d degraded: %d, rebuild will not be attempted\n",
+		    spec->volname, spec->healthy_rcount, spec->degraded_rcount);
 		return;
 	}
 
@@ -1162,7 +1164,7 @@ replica_error:
 	/* Update the volume ready state */
 	update_volstate(spec);
 	MTX_UNLOCK(&spec->rq_mtx);
-	clock_gettime(CLOCK_MONOTONIC, &replica->create_time);
+	clock_gettime(CLOCK_MONOTONIC_COARSE, &replica->create_time);
 	return 0;
 }
 
@@ -1379,8 +1381,8 @@ pause_and_timed_wait_for_ongoing_ios(spec_t *spec, int sec)
 	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 	spec->quiesce = 1;
 
-	clock_gettime(CLOCK_MONOTONIC, &last);
-	timesdiff(CLOCK_MONOTONIC, last, now, diff);
+	clock_gettime(CLOCK_MONOTONIC_COARSE, &last);
+	timesdiff(CLOCK_MONOTONIC_COARSE, last, now, diff);
 
 	while ((diff.tv_sec < sec) && (can_take_snapshot(spec) == true)) {
 		io_found = false;
@@ -1407,7 +1409,7 @@ pause_and_timed_wait_for_ongoing_ios(spec_t *spec, int sec)
 		 */
 		sleep (1);
 		MTX_LOCK(&spec->rq_mtx);
-		timesdiff(CLOCK_MONOTONIC, last, now, diff);
+		timesdiff(CLOCK_MONOTONIC_COARSE, last, now, diff);
 	}
 
 	if (ret == false)
@@ -1440,7 +1442,7 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	rcommon_mgmt_cmd_t *rcomm_mgmt;
 	uint64_t io_seq;
 
-	clock_gettime(CLOCK_MONOTONIC, &last);
+	clock_gettime(CLOCK_MONOTONIC_COARSE, &last);
 	MTX_LOCK(&spec->rq_mtx);
 
 	/* Wait for any ongoing snapshot commands */
@@ -1452,7 +1454,7 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 
 	if (can_take_snapshot(spec) == false) {
 		MTX_UNLOCK(&spec->rq_mtx);
-		REPLICA_ERRLOG("volume is not healthy..\n");
+		REPLICA_ERRLOG("volume is not healthy to take snapshots..\n");
 		return false;
 	}
 
@@ -1474,7 +1476,7 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 
 	uint8_t cf = spec->consistency_factor;
 
-	timesdiff(CLOCK_MONOTONIC, last, now, diff);
+	timesdiff(CLOCK_MONOTONIC_COARSE, last, now, diff);
 	MTX_LOCK(&rcomm_mgmt->mtx);
 
 	while (diff.tv_sec < wait_time) {
@@ -1485,7 +1487,7 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 		sleep(1);
 		MTX_LOCK(&spec->rq_mtx);
 		MTX_LOCK(&rcomm_mgmt->mtx);
-		timesdiff(CLOCK_MONOTONIC, last, now, diff);
+		timesdiff(CLOCK_MONOTONIC_COARSE, last, now, diff);
 	}
 	rcomm_mgmt->caller_gone = 1;
 	if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed)) {
@@ -1520,7 +1522,7 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	return r;
 }
 
-static void
+void
 get_replica_stats_json(replica_t *replica, struct json_object **jobj)
 {
 	struct json_object *j_stats;
@@ -1530,7 +1532,10 @@ get_replica_stats_json(replica_t *replica, struct json_object **jobj)
 	json_object_object_add(j_stats, "replicaId",
 	    json_object_new_uint64(replica->zvol_guid));
 
-	json_object_object_add(j_stats, "status",
+	json_object_object_add(j_stats, "Address",
+	    json_object_new_string(replica->ip));
+
+	json_object_object_add(j_stats, "Mode",
 	    json_object_new_string((replica->state == ZVOL_STATUS_HEALTHY) ?
 	    REPLICA_STATUS_HEALTHY : REPLICA_STATUS_DEGRADED));
 
@@ -1546,7 +1551,7 @@ get_replica_stats_json(replica_t *replica, struct json_object **jobj)
 	json_object_object_add(j_stats, "inflightSync",
 	    json_object_new_uint64(replica->replica_inflight_sync_io_cnt));
 
-	clock_gettime(CLOCK_MONOTONIC, &now);
+	clock_gettime(CLOCK_MONOTONIC_COARSE, &now);
 	json_object_object_add(j_stats, "upTime",
 	    json_object_new_int64(now.tv_sec - replica->create_time.tv_sec));
 
@@ -1823,7 +1828,7 @@ handle_update_spec_stats(spec_t *spec, zvol_io_hdr_t *hdr, void *resp)
 		return;
 	if (strcmp(stats->label, "used") == 0)
 		spec->stats.used = stats->value;
-	clock_gettime(CLOCK_MONOTONIC, &spec->stats.updated_stats_time);
+	clock_gettime(CLOCK_MONOTONIC_COARSE, &spec->stats.updated_stats_time);
 	return;
 }
 
@@ -2425,6 +2430,7 @@ respond_with_error_for_all_outstanding_mgmt_ios(replica_t *r)
 		    sizeof(struct zvol_io_rw_hdr));			\
 		rcmd = malloc(sizeof(*rcmd));				\
 		memset(rcmd, 0, sizeof (*rcmd));			\
+		clock_gettime(CLOCK_MONOTONIC_RAW, &rcmd->start_time);	\
 		rcmd->opcode = rcomm_cmd->opcode;			\
 		rcmd->offset = rcomm_cmd->offset;			\
 		rcmd->data_len = rcomm_cmd->data_len;			\
@@ -2595,6 +2601,9 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 	return rc;
 }
 
+#define	ADD_TIMESPEC(var, s, d)	\
+	(var) += (uint64_t)(d.tv_sec - s.tv_sec) * (uint64_t)SEC_IN_NS + d.tv_nsec - s.tv_nsec;
+
 int64_t
 replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t nbytes)
 {
@@ -2636,7 +2645,8 @@ again:
 	ASSERT(spec->io_seq);
 	build_rcomm_cmd(rcomm_cmd, cmd, offset, nbytes);
 
-	clock_gettime(CLOCK_MONOTONIC, &io_queue_time[cmd->luworkerindx]);
+	clock_gettime(CLOCK_MONOTONIC_COARSE, &io_queue_time[cmd->luworkerindx]);
+	clock_gettime(CLOCK_MONOTONIC_RAW, &cmd->repl_start_time);
 
 retry_read:
 	replica_choosen = false;
@@ -2705,17 +2715,18 @@ retry_read:
 
 	MTX_UNLOCK(&spec->rq_mtx);
 
-	clock_gettime(CLOCK_MONOTONIC, &queued_time);
+	clock_gettime(CLOCK_MONOTONIC_RAW, &queued_time);
 
 	// now wait for command to complete
 	while (1) {
-		timesdiff(CLOCK_MONOTONIC, queued_time, now, diff);
+		timesdiff(CLOCK_MONOTONIC_RAW, queued_time, now, diff);
 		count = 0;
 		for (i = 0; i < rcomm_cmd->copies_sent; i++) {
 			resp_replica = rcomm_cmd->resp_list[i].replica;
 			if (rcomm_cmd->resp_list[i].status &
-			    (RECEIVED_OK|RECEIVED_ERR|REPLICATE_TIMED_OUT))
+			    (RECEIVED_OK|RECEIVED_ERR|REPLICATE_TIMED_OUT)) {
 				count++;
+			}
 			else if (diff.tv_sec >= (time_t)io_max_wait_time) {
 				ASSERT(resp_replica);
 				rcomm_cmd->resp_list[i].status |=
@@ -2782,8 +2793,8 @@ retry_read:
 
 wait_for_other_responses:
 		/* wait for 500 ms(500000000 ns) */
-		clock_gettime(CLOCK_REALTIME, &now);
-		nsec = 1000000000 - now.tv_nsec;
+		clock_gettime(CLOCK_MONOTONIC_RAW, &now);
+		nsec = SEC_IN_NS - now.tv_nsec;
 		if (nsec > 500000000) {
 			abstime.tv_sec = now.tv_sec;
 			abstime.tv_nsec = now.tv_nsec + 500000000;
@@ -3026,7 +3037,7 @@ init_replication(void *arg __attribute__((__unused__)))
 
 	events = calloc(MAXEVENTS, sizeof(event));
 	timeout = replica_poll_time * 1000;
-	clock_gettime(CLOCK_MONOTONIC, &last);
+	clock_gettime(CLOCK_MONOTONIC_COARSE, &last);
 
 #ifdef	DEBUG
 	/*
@@ -3117,7 +3128,7 @@ init_replication(void *arg __attribute__((__unused__)))
 		}
 
 		// send replica_status query to degraded replicas at max interval of '2*replica_poll_time' seconds
-		timesdiff(CLOCK_MONOTONIC, last, now, diff);
+		timesdiff(CLOCK_MONOTONIC_COARSE, last, now, diff);
 		if (diff.tv_sec >= replica_poll_time) {
 			spec_t *spec = NULL;
 			MTX_LOCK(&specq_mtx);
@@ -3126,7 +3137,7 @@ init_replication(void *arg __attribute__((__unused__)))
 				get_replica_stats(spec);
 			}
 			MTX_UNLOCK(&specq_mtx);
-			clock_gettime(CLOCK_MONOTONIC, &last);
+			clock_gettime(CLOCK_MONOTONIC_COARSE, &last);
 		}
 	}
 
@@ -3150,7 +3161,7 @@ initialize_replication()
 		REPLICA_ERRLOG("Failed to init specq_mtx err(%d)\n", rc);
 		return -1;
 	}
-	clock_gettime(CLOCK_MONOTONIC_RAW, &istgt_start_time);
+	clock_gettime(CLOCK_MONOTONIC_COARSE, &istgt_start_time);
 	return 0;
 }
 

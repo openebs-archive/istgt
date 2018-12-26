@@ -596,7 +596,7 @@ errored_replica(void *arg)
 	io_hdr = malloc(sizeof(zvol_io_hdr_t));
 	mgmtio = malloc(sizeof(zvol_io_hdr_t));
 
-	clock_gettime(CLOCK_MONOTONIC, &now);
+	clock_gettime(CLOCK_MONOTONIC_RAW, &now);
 	srandom(now.tv_sec);
 
 	snprintf(tinfo, 50, "mock_nwrepl%d", replica_port);
