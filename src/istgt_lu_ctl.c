@@ -689,8 +689,6 @@ istgt_uctl_cmd_max_io_wait(UCTL_Ptr uctl)
 	return (UCTL_CMD_OK);
 }
 
-#endif
-
 static int
 istgt_uctl_set_write_luworkers(ISTGT_LU_DISK *spec, int val)
 {
@@ -715,6 +713,7 @@ istgt_uctl_set_write_luworkers(ISTGT_LU_DISK *spec, int val)
 	}
 	return 0;
 }
+#endif
 
 static int
 istgt_uctl_cmd_set(UCTL_Ptr uctl)
@@ -1051,6 +1050,7 @@ istgt_uctl_cmd_set(UCTL_Ptr uctl)
 
 		break;
 #endif
+#ifdef	REPLICATION
 	case 16:
 		rc = istgt_uctl_set_write_luworkers(spec, setval);
 		if (rc == -1) {
@@ -1058,6 +1058,7 @@ istgt_uctl_cmd_set(UCTL_Ptr uctl)
 			goto error_return;
 		}
 		break;
+#endif
 	default:
 		istgt_uctl_snprintf(uctl, "ERR invalid option %d\n", setopt);
 		goto error_return;
