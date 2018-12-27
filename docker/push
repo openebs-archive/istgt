@@ -97,5 +97,5 @@ then
   sudo docker login -u "${GITLAB_DNAME}" -p "${GITLAB_DPASS}";
 
   # Push COMMIT tagged image - :COMMIT
-  TagAndPushImage "${DIMAGE}" "${COMMIT}"
+  TagAndPushImage "${IMAGE_REPO}" "${COMMIT}"
 fi;
