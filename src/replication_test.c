@@ -124,7 +124,7 @@ static uint64_t
 fetch_update_io_buf(zvol_io_hdr_t *io_hdr, uint8_t *user_data,
     uint8_t **resp_data)
 {
-	uint32_t count = 0;
+	uint32_t count = 1;
 	uint64_t len = io_hdr->len;
 	uint64_t offset = io_hdr->offset;
 	uint64_t start = offset;
@@ -135,6 +135,7 @@ fetch_update_io_buf(zvol_io_hdr_t *io_hdr, uint8_t *user_data,
 	struct zvol_io_rw_hdr *last_io_rw_hdr;
 	uint8_t *resp;
 
+	md_io_num = read_metadata(start);
 	while (start < end) {
 		if (md_io_num != read_metadata(start)) {
 			count++;
@@ -411,7 +412,6 @@ main(int argc, char **argv)
 	char replica_ip[MAX_IP_LEN];
 	int replica_port = 0;
 	char test_vol[1024];
-	int sleeptime = 0;
 	struct zvol_io_rw_hdr *io_rw_hdr;
 	zvol_op_open_data_t *open_ptr;
 	int iofd = -1, mgmtfd, sfd, rc, epfd, event_count, i;
@@ -747,12 +747,9 @@ execute_io:
 						}
 
 						data -= sizeof(struct zvol_io_rw_hdr);
-						usleep(sleeptime);
 						write_ios++;
 					} else if(io_hdr->opcode == ZVOL_OPCODE_READ) {
 						uint8_t *user_data = NULL;
-						if (delay > 0)
-							sleep(delay);
 
 						if(io_hdr->len) {
 							user_data = malloc(io_hdr->len);

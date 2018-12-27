@@ -158,6 +158,65 @@ run_and_verify_iostats() {
 	fi
 }
 
+write_and_verify_inflight(){
+	login_to_volume "$CONTROLLER_IP:3260"
+	sleep 5
+	get_scsi_disk
+	if [ "$device_name"!="" ]; then
+		$ISTGTCONTROL -t vol1 SET 16 2
+
+		dd if=/dev/urandom of=/dev/$device_name bs=4k count=3 oflag=direct &
+		dd if=/dev/urandom of=/dev/$device_name bs=4k count=3 seek=10 oflag=direct &
+		dd_pid=$!
+
+		for (( i = 0; i < 5; i++ )) do
+			$ISTGTCONTROL -q REPLICA | json_pp
+			inflight_cnt=$($ISTGTCONTROL -q REPLICA | json_pp | grep -w "inflightWrite" | grep "\"2\"" | wc -l)
+			echo $inflight_cnt
+			if [ $inflight_cnt -ne 0 ]; then
+				break
+			fi
+			sleep 1
+		done
+		if [ $i -eq 5 ]; then
+			$ISTGTCONTROL -q REPLICA | json_pp
+			echo "inflighWrite test1 failed" && tail -20 $LOGFILE && exit 1
+		fi
+
+		$ISTGTCONTROL -t vol1 SET 16 1
+		for (( i = 0; i < 10; i++ )) do
+			$ISTGTCONTROL -q REPLICA | json_pp
+			inflight_cnt=$($ISTGTCONTROL -q REPLICA | json_pp | grep -w "inflightWrite" | grep "\"1\"" | wc -l)
+			echo $inflight_cnt
+			if [ $inflight_cnt -ne 0 ]; then
+				break;
+			fi
+			sleep 1
+		done
+		if [ $i -eq 10 ]; then
+			$ISTGTCONTROL -q REPLICA | json_pp
+			echo "inflighWrite test2 failed" && tail -20 $LOGFILE && exit 1
+		fi
+
+		$ISTGTCONTROL -t vol1 SET 16 0
+		for (( i = 0; i < 5; i++ )) do
+			$ISTGTCONTROL -q REPLICA | json_pp
+			inflight_cnt=$($ISTGTCONTROL -q REPLICA | json_pp | grep -w "inflightWrite" | grep "\"2\"" | wc -l)
+			echo $inflight_cnt
+			if [ $inflight_cnt -ne 0 ]; then
+				break;
+			fi
+			sleep 1
+		done
+		if [ $i -eq 5 ]; then
+			$ISTGTCONTROL -q REPLICA | json_pp
+			echo "inflighWrite test3 failed" && tail -20 $LOGFILE && exit 1
+		fi
+
+		wait $dd_pid
+	fi
+}
+
 write_and_verify_data(){
 	login_to_volume "$CONTROLLER_IP:3260"
 	sleep 5
@@ -246,6 +305,40 @@ list_descendants ()
 	done
 
 	echo "$children"
+}
+
+run_write_luworkers_test() {
+	local replica1_port="6161"
+	local replica2_port="6162"
+	local replica3_port="6163"
+	local replica1_ip="127.0.0.1"
+	local replica2_ip="127.0.0.1"
+	local replica3_ip="127.0.0.1"
+
+	setup_test_env
+
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V "/tmp/test_vol1" &
+	replica1_pid=$!
+
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V "/tmp/test_vol2" &
+	replica2_pid=$!
+
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -t 5 -V "/tmp/test_vol3" &
+	replica3_pid=$!
+	sleep 15
+
+	write_and_verify_inflight
+
+	pkill -9 -P $replica1_pid
+	pkill -9 -P $replica2_pid
+	pkill -9 -P $replica3_pid
+
+	kill -SIGKILL $replica1_pid
+	kill -SIGKILL $replica2_pid
+	kill -SIGKILL $replica3_pid
+
+	cleanup_test_env
+	logout_of_volume
 }
 
 run_data_integrity_test() {
@@ -906,6 +999,7 @@ run_io_timeout_test()
 }
 
 run_lu_rf_test
+run_write_luworkers_test
 run_data_integrity_test
 run_mempool_test
 run_istgt_integration

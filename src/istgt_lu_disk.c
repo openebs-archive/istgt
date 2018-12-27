@@ -921,6 +921,7 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 		spec->lu = lu;
 #ifdef	REPLICATION
 		spec->volname = xstrdup(spec->lu->volname);
+		spec->write_luworkers = 0;
 #endif
 		spec->num = lu->num;
 		spec->lun = i;
@@ -969,6 +970,19 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 		istgt_queue_init(&spec->maint_cmd_queue);
 		istgt_queue_init(&spec->maint_blocked_queue);
 
+#ifdef	REPLICATION
+		rc = pthread_cond_init(&spec->write_throttle_cv, NULL);
+		if (rc != 0) {
+			ISTGT_ERRLOG("LU%d: write_throttle_cv() failed errno:%d\n", lu->num, errno);
+			return -1;
+		}
+
+		rc = pthread_mutex_init(&spec->write_throttle_mtx, &istgt->mutex_attr);
+		if (rc != 0) {
+			ISTGT_ERRLOG("LU%d: write_throttle_mtx() failed errno:%d\n", lu->num, errno);
+			return -1;
+		}
+#endif
 		rc = pthread_mutex_init(&spec->clone_mutex, &istgt->mutex_attr);
 		if (rc != 0) {
 			ISTGT_ERRLOG("LU%d: clone_mutex_init() failed errno:%d\n", lu->num, errno);

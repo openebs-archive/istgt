@@ -692,21 +692,43 @@ istgt_uctl_cmd_max_io_wait(UCTL_Ptr uctl)
 #endif
 
 static int
+istgt_uctl_set_write_luworkers(ISTGT_LU_DISK *spec, int val)
+{
+	if (val < 0)
+		return -1;
+
+	if (spec != NULL) {
+		pthread_mutex_lock(&spec->write_throttle_mtx);
+		spec->write_luworkers = val;
+		pthread_cond_signal(&spec->write_throttle_cv);
+		pthread_mutex_unlock(&spec->write_throttle_mtx);
+	}
+	else {
+		MTX_LOCK(&specq_mtx);
+		TAILQ_FOREACH(spec, &spec_q, spec_next) {
+			pthread_mutex_lock(&spec->write_throttle_mtx);
+			spec->write_luworkers = val;
+			pthread_cond_signal(&spec->write_throttle_cv);
+			pthread_mutex_unlock(&spec->write_throttle_mtx);
+		}
+		MTX_UNLOCK(&specq_mtx);
+	}
+	return 0;
+}
+
+static int
 istgt_uctl_cmd_set(UCTL_Ptr uctl)
 {
-	ISTGT_Ptr istgt = uctl->istgt;
 	ISTGT_LU_Ptr lu = NULL;
-	ISTGT_LU_DISK *spec = NULL, *spec1 = NULL;
+	ISTGT_LU_DISK *spec = NULL;
 	const char *delim = ARGS_DELIM;
 	char *arg;
 	char *iqn;
 	char *lun;
-	int i = 0;
 	int rc = 0;
-	uint8_t val1, val2;
 
 	int setopt = 0;
-	int setval = 0, j, tot = 0;
+	int setval = 0;
 	arg = uctl->arg;
 	iqn = strsepq(&arg, delim);
 	lun = strsepq(&arg, delim);
@@ -731,14 +753,18 @@ istgt_uctl_cmd_set(UCTL_Ptr uctl)
 	}
 	if (strcmp(iqn, "ALL")) {
 		lu = istgt_lu_find_target(uctl->istgt, iqn);
+		if (lu == NULL)
+			lu = istgt_lu_find_target_by_volname(uctl->istgt, iqn);
 		if (lu == NULL) {
 			istgt_uctl_snprintf(uctl, "ERR no target\n");
 			goto error_return;
-		}
+		} else
+			ISTGT_NOTICELOG("found vol %s to do SET\n", iqn);
 		spec = lu->lun[0].spec;
 	}
 
 	switch (setopt) {
+#if 0
 	case 1:
 		if (setval > 1 || setval < 0) {
 			istgt_uctl_snprintf(uctl,
@@ -1024,6 +1050,14 @@ istgt_uctl_cmd_set(UCTL_Ptr uctl)
 		spec->percent_count = (j>>1);
 
 		break;
+#endif
+	case 16:
+		rc = istgt_uctl_set_write_luworkers(spec, setval);
+		if (rc == -1) {
+			istgt_uctl_snprintf(uctl, "ERR invalid option %d\n", setopt);
+			goto error_return;
+		}
+		break;
 	default:
 		istgt_uctl_snprintf(uctl, "ERR invalid option %d\n", setopt);
 		goto error_return;
@@ -1035,8 +1069,8 @@ istgt_uctl_cmd_set(UCTL_Ptr uctl)
 	}
 	return (UCTL_CMD_OK);
 
-spec_error:
-	istgt_uctl_snprintf(uctl, "ERR spec is NULL\n");
+//spec_error:
+//	istgt_uctl_snprintf(uctl, "ERR spec is NULL\n");
 
 error_return:
 	rc = istgt_uctl_writeline(uctl);
