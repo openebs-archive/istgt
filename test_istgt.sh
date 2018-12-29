@@ -184,7 +184,7 @@ write_and_verify_inflight(){
 		fi
 
 		sudo $ISTGTCONTROL -t vol1 SET 16 1
-		for (( i = 0; i < 10; i++ )) do
+		for (( i = 0; i < 13; i++ )) do
 			sudo $ISTGTCONTROL -q REPLICA | json_pp
 			inflight_cnt=$(sudo $ISTGTCONTROL -q REPLICA | json_pp | grep -w "inflightWrite" | grep "\"1\"" | wc -l)
 			echo $inflight_cnt
@@ -193,7 +193,7 @@ write_and_verify_inflight(){
 			fi
 			sleep 1
 		done
-		if [ $i -eq 10 ]; then
+		if [ $i -eq 13 ]; then
 			sudo $ISTGTCONTROL -q REPLICA | json_pp
 			echo "inflighWrite test2 failed" && tail -20 $LOGFILE && exit 1
 		fi
@@ -201,7 +201,7 @@ write_and_verify_inflight(){
 		sleep 1
 
 		sudo $ISTGTCONTROL -t vol1 SET 16 0
-		for (( i = 0; i < 5; i++ )) do
+		for (( i = 0; i < 7; i++ )) do
 			sudo $ISTGTCONTROL -q REPLICA | json_pp
 			inflight_cnt=$(sudo $ISTGTCONTROL -q REPLICA | json_pp | grep -w "inflightWrite" | grep "\"2\"" | wc -l)
 			echo $inflight_cnt
