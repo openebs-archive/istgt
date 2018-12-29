@@ -4547,8 +4547,11 @@ luscheduler(void *arg)
 	struct timespec sch1, sch2, sch3, sch4, sch5, sch6, r;
 	int qcnt = 0, ind = 0;
 	int worker_id;
+	int need_write_luworker = 0, maxind;
 	int id, found_worker = 0;
 	unsigned long secs, nsecs;
+	uint8_t write_luworkers;
+
 #define	tdiff(_s, _n, _r) {                     \
 	if (unlikely(spec->do_avg == 1))	\
 	{	\
@@ -4602,12 +4605,17 @@ start:
 		clock_gettime(clockid, &sch1);
 		ind = 0;
 		MTX_LOCK(&spec->schdler_mutex);
+		write_luworkers = spec->write_luworkers;
 		while (ind <= (ISTGT_MAX_NUM_LUWORKERS/32)) {
 			found_worker = ((spec->lu_free_matrix[ind] != 0) &&
 					((lu->limit_q_size == 0) || ((ind == 0) && ((spec->lu_free_matrix[ind] & 1) == 1))))
 					? 1 : 0;
 			if (found_worker == 0) {
-				if (ind == (ISTGT_MAX_NUM_LUWORKERS/32)) {
+				maxind = ISTGT_MAX_NUM_LUWORKERS / 32;
+				if (need_write_luworker == 1)
+					if (write_luworkers > 0)
+						maxind = (write_luworkers - 1) / 32;
+				if (ind == maxind) {
 					if (istgt_lu_get_state(lu) != ISTGT_STATE_RUNNING)
 					{
 						MTX_UNLOCK(&spec->schdler_mutex);
@@ -4635,6 +4643,11 @@ next_lu_worker:
 		worker_id--; // Bits are numbered starting at 1, the least significant bit.
 		worker_id += (ind<<5);
 
+		if (need_write_luworker == 1) {
+			if ((write_luworkers > 0) && (worker_id >= write_luworkers)) 
+				goto start;
+			goto assign_lu_task;
+		}
 		if (worker_id >= spec->luworkers) // worker_id can't be >= luworkers
 			goto start;
 
@@ -4696,6 +4709,22 @@ next_lu_worker:
 			    lu->num, qcnt);
 		}
 		lu_task = istgt_queue_dequeue(&spec->cmd_queue);
+assign_lu_task:
+	        switch (lu_task->lu_cmd.cdb0) {
+			case SBC_WRITE_6:
+			case SBC_WRITE_10:
+			case SBC_WRITE_12:
+			case SBC_WRITE_16:
+			case SBC_WRITE_AND_VERIFY_10:
+			case SBC_WRITE_AND_VERIFY_12:
+			case SBC_WRITE_AND_VERIFY_16:
+
+			if ((write_luworkers > 0) && (worker_id >= write_luworkers)) {
+				need_write_luworker = 1;
+				goto next_lu_worker;
+			}
+			need_write_luworker = 0;
+		}
 		clock_gettime(clockid, &sch3);
 		id = 19;
 		tdiff(sch5, sch3, r);
@@ -4706,11 +4735,13 @@ next_lu_worker:
 			lu_task->conn->inflight++;
 			lu_task->lu_cmd.flags |= ISTGT_SCHEDULED;
 			MTX_UNLOCK(&spec->complete_queue_mutex);
+			lu_task = NULL;
 		} else {
 			spec->error_count++;
 			istgt_queue_enqueue_first(&spec->cmd_queue, lu_task);
 			MTX_UNLOCK(&spec->complete_queue_mutex);
 			MTX_UNLOCK(&spec->luworker_mutex[worker_id]);
+			lu_task = NULL;
 			if ((spec->lu_free_matrix[ind] > 0) &&
 				(likely(lu->limit_q_size == 0)))
 				goto next_lu_worker;
@@ -4721,7 +4752,9 @@ next_lu_worker:
 		MTX_LOCK(&spec->schdler_mutex);
 		spec->inflight++;
 		BUNSET32(spec->lu_free_matrix[(worker_id >> 5)], (worker_id&31));
+		write_luworkers = spec->write_luworkers;
 		MTX_UNLOCK(&spec->schdler_mutex);
+//		ISTGT_ERRLOG("Assing IO to worker: %d write_workers: %d\n", worker_id, write_luworkers);
 		if (spec->luworker_waiting[worker_id]) {
 			MTX_UNLOCK(&spec->luworker_mutex[worker_id]);
 			pthread_cond_signal(&spec->luworker_cond[worker_id]);

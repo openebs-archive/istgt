@@ -754,8 +754,10 @@ typedef struct istgt_lu_disk_t {
 	int persist;
 #ifdef	REPLICATION
 	char *volname;
-	int write_luworkers;
-	int inflight_writes;
+	uint8_t write_luworkers;
+//	uint8_t inflight_writes;
+	uint8_t write_throttle_wait;
+	uint8_t reserved;
 	pthread_mutex_t write_throttle_mtx;
 	pthread_cond_t write_throttle_cv;
 #endif

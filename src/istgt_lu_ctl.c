@@ -695,19 +695,22 @@ istgt_uctl_set_write_luworkers(ISTGT_LU_DISK *spec, int val)
 	if (val < 0)
 		return -1;
 
+	if (val > spec->luworkers)
+		return -1;
+
 	if (spec != NULL) {
-		pthread_mutex_lock(&spec->write_throttle_mtx);
-		spec->write_luworkers = val;
-		pthread_cond_signal(&spec->write_throttle_cv);
-		pthread_mutex_unlock(&spec->write_throttle_mtx);
+		MTX_LOCK(&spec->schdler_mutex);
+		spec->write_luworkers = (uint8_t)val;
+		pthread_cond_signal(&spec->schdler_cond);
+		MTX_UNLOCK(&spec->schdler_mutex);
 	}
 	else {
 		MTX_LOCK(&specq_mtx);
 		TAILQ_FOREACH(spec, &spec_q, spec_next) {
-			pthread_mutex_lock(&spec->write_throttle_mtx);
-			spec->write_luworkers = val;
-			pthread_cond_signal(&spec->write_throttle_cv);
-			pthread_mutex_unlock(&spec->write_throttle_mtx);
+			MTX_LOCK(&spec->schdler_mutex);
+			spec->write_luworkers = (uint8_t)val;
+			pthread_cond_signal(&spec->schdler_cond);
+			MTX_UNLOCK(&spec->schdler_mutex);
 		}
 		MTX_UNLOCK(&specq_mtx);
 	}
@@ -726,6 +729,12 @@ istgt_uctl_cmd_set(UCTL_Ptr uctl)
 	char *lun;
 	int rc = 0;
 
+#ifndef REPLICATION
+	ISTGT_Ptr istgt = uctl->istgt;
+	int i = 0, j, tot = 0;
+	uint8_t val1, val2;
+	ISTGT_LU_DISK *spec1 = NULL;
+#endif
 	int setopt = 0;
 	int setval = 0;
 	arg = uctl->arg;
@@ -763,7 +772,7 @@ istgt_uctl_cmd_set(UCTL_Ptr uctl)
 	}
 
 	switch (setopt) {
-#if 0
+#ifndef REPLICATION
 	case 1:
 		if (setval > 1 || setval < 0) {
 			istgt_uctl_snprintf(uctl,
@@ -1070,8 +1079,10 @@ istgt_uctl_cmd_set(UCTL_Ptr uctl)
 	}
 	return (UCTL_CMD_OK);
 
-//spec_error:
-//	istgt_uctl_snprintf(uctl, "ERR spec is NULL\n");
+#ifndef REPLICATION
+spec_error:
+	istgt_uctl_snprintf(uctl, "ERR spec is NULL\n");
+#endif
 
 error_return:
 	rc = istgt_uctl_writeline(uctl);

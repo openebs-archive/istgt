@@ -922,6 +922,8 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 #ifdef	REPLICATION
 		spec->volname = xstrdup(spec->lu->volname);
 		spec->write_luworkers = 0;
+//		spec->inflight_writes = 0;
+		spec->write_throttle_wait = 0;
 #endif
 		spec->num = lu->num;
 		spec->lun = i;

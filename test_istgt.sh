@@ -123,15 +123,15 @@ run_and_verify_iostats() {
 		[[ $? -ne 0 ]] && echo "mount for $device_name" && exit 1
 
 		sudo dd if=/dev/urandom of=/mnt/store/file1 bs=4k count=10000 oflag=direct
-		$ISTGTCONTROL iostats
-		var1="$($ISTGTCONTROL iostats | grep -oP "(?<=TotalWriteBytes\": \")[^ ]+" | cut -d '"' -f 1)"
+		sudo $ISTGTCONTROL iostats
+		var1="$(sudo $ISTGTCONTROL iostats | grep -oP "(?<=TotalWriteBytes\": \")[^ ]+" | cut -d '"' -f 1)"
 		if [ $var1 -eq 0 ]; then
 			echo "iostats command failed" && exit 1
 		fi
 
 		sudo dd if=/dev/urandom of=/mnt/store/file1 bs=4k count=10000 oflag=direct
-		$ISTGTCONTROL iostats
-		var2="$($ISTGTCONTROL iostats | grep -oP "(?<=TotalWriteBytes\": \")[^ ]+" | cut -d '"' -f 1)"
+		sudo $ISTGTCONTROL iostats
+		var2="$(sudo $ISTGTCONTROL iostats | grep -oP "(?<=TotalWriteBytes\": \")[^ ]+" | cut -d '"' -f 1)"
 		if [ $var2 -eq 0 ]; then
 			echo "iostats command failed" && exit 1
 		fi
@@ -144,10 +144,10 @@ run_and_verify_iostats() {
 
 		sudo umount /mnt/store
 		logout_of_volume
-		readReqTime="$($ISTGTCONTROL -q iostats | jq '.Replicas[0].ReadReqTime' | cut -d '"' -f 2)"
-		readRespTime="$($ISTGTCONTROL -q iostats | jq '.Replicas[0].ReadRespTime' | cut -d '"' -f 2)"
-		writeReqTime="$($ISTGTCONTROL -q iostats | jq '.Replicas[0].WriteReqTime' | cut -d '"' -f 2)"
-		writeRespTime="$($ISTGTCONTROL -q iostats | jq '.Replicas[0].WriteRespTime' | cut -d '"' -f 2)"
+		readReqTime="$(sudo $ISTGTCONTROL -q iostats | jq '.Replicas[0].ReadReqTime' | cut -d '"' -f 2)"
+		readRespTime="$(sudo $ISTGTCONTROL -q iostats | jq '.Replicas[0].ReadRespTime' | cut -d '"' -f 2)"
+		writeReqTime="$(sudo $ISTGTCONTROL -q iostats | jq '.Replicas[0].WriteReqTime' | cut -d '"' -f 2)"
+		writeRespTime="$(sudo $ISTGTCONTROL -q iostats | jq '.Replicas[0].WriteRespTime' | cut -d '"' -f 2)"
 		if [ $readReqTime -gt $readRespTime ] || [ $writeReqTime -gt $writeRespTime ]; then
 			echo "Issue in replica latency stats" && tail -20 $LOGFILE && exit 1
 		fi
@@ -163,15 +163,15 @@ write_and_verify_inflight(){
 	sleep 5
 	get_scsi_disk
 	if [ "$device_name"!="" ]; then
-		$ISTGTCONTROL -t vol1 SET 16 2
+		sudo $ISTGTCONTROL -t vol1 SET 16 2
 
 		dd if=/dev/urandom of=/dev/$device_name bs=4k count=3 oflag=direct &
 		dd if=/dev/urandom of=/dev/$device_name bs=4k count=3 seek=10 oflag=direct &
 		dd_pid=$!
 
 		for (( i = 0; i < 5; i++ )) do
-			$ISTGTCONTROL -q REPLICA | json_pp
-			inflight_cnt=$($ISTGTCONTROL -q REPLICA | json_pp | grep -w "inflightWrite" | grep "\"2\"" | wc -l)
+			sudo $ISTGTCONTROL -q REPLICA | json_pp
+			inflight_cnt=$(sudo $ISTGTCONTROL -q REPLICA | json_pp | grep -w "inflightWrite" | grep "\"2\"" | wc -l)
 			echo $inflight_cnt
 			if [ $inflight_cnt -ne 0 ]; then
 				break
@@ -179,14 +179,14 @@ write_and_verify_inflight(){
 			sleep 1
 		done
 		if [ $i -eq 5 ]; then
-			$ISTGTCONTROL -q REPLICA | json_pp
+			sudo $ISTGTCONTROL -q REPLICA | json_pp
 			echo "inflighWrite test1 failed" && tail -20 $LOGFILE && exit 1
 		fi
 
-		$ISTGTCONTROL -t vol1 SET 16 1
+		sudo $ISTGTCONTROL -t vol1 SET 16 1
 		for (( i = 0; i < 10; i++ )) do
-			$ISTGTCONTROL -q REPLICA | json_pp
-			inflight_cnt=$($ISTGTCONTROL -q REPLICA | json_pp | grep -w "inflightWrite" | grep "\"1\"" | wc -l)
+			sudo $ISTGTCONTROL -q REPLICA | json_pp
+			inflight_cnt=$(sudo $ISTGTCONTROL -q REPLICA | json_pp | grep -w "inflightWrite" | grep "\"1\"" | wc -l)
 			echo $inflight_cnt
 			if [ $inflight_cnt -ne 0 ]; then
 				break;
@@ -194,14 +194,16 @@ write_and_verify_inflight(){
 			sleep 1
 		done
 		if [ $i -eq 10 ]; then
-			$ISTGTCONTROL -q REPLICA | json_pp
+			sudo $ISTGTCONTROL -q REPLICA | json_pp
 			echo "inflighWrite test2 failed" && tail -20 $LOGFILE && exit 1
 		fi
 
-		$ISTGTCONTROL -t vol1 SET 16 0
+		sleep 1
+
+		sudo $ISTGTCONTROL -t vol1 SET 16 0
 		for (( i = 0; i < 5; i++ )) do
-			$ISTGTCONTROL -q REPLICA | json_pp
-			inflight_cnt=$($ISTGTCONTROL -q REPLICA | json_pp | grep -w "inflightWrite" | grep "\"2\"" | wc -l)
+			sudo $ISTGTCONTROL -q REPLICA | json_pp
+			inflight_cnt=$(sudo $ISTGTCONTROL -q REPLICA | json_pp | grep -w "inflightWrite" | grep "\"2\"" | wc -l)
 			echo $inflight_cnt
 			if [ $inflight_cnt -ne 0 ]; then
 				break;
@@ -209,7 +211,7 @@ write_and_verify_inflight(){
 			sleep 1
 		done
 		if [ $i -eq 5 ]; then
-			$ISTGTCONTROL -q REPLICA | json_pp
+			sudo $ISTGTCONTROL -q REPLICA | json_pp
 			echo "inflighWrite test3 failed" && tail -20 $LOGFILE && exit 1
 		fi
 
@@ -327,6 +329,18 @@ run_write_luworkers_test() {
 	replica3_pid=$!
 	sleep 15
 
+	sudo $ISTGTCONTROL -t vol1 SET 16 1000
+	if [ $? -eq 0 ]; then
+		echo "istgtcontrol set should return error for 1000"
+		exit 1
+	fi
+
+	sudo $ISTGTCONTROL -t vol1 SET 16 -1
+	if [ $? -eq 0 ]; then
+		echo "istgtcontrol set should return error for -1"
+		exit 1
+	fi
+
 	write_and_verify_inflight
 
 	pkill -9 -P $replica1_pid
@@ -416,7 +430,7 @@ run_data_integrity_test() {
 		echo "Replica timeout passed"
 	fi
 
-	$ISTGTCONTROL -q iostats
+	sudo $ISTGTCONTROL -q iostats
 
 	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V "/tmp/test_vol1" &
 	replica1_pid=$!
@@ -460,7 +474,7 @@ run_read_consistency_test ()
 	export ReplicationDelay=40
 	setup_test_env
 	sleep 2
-	istgtcontrol status >/dev/null  2>&1
+	sudo $ISTGTCONTROL status >/dev/null  2>&1
 	if [ $? -ne 0 ]; then
 		echo "ISTGTCONTROL returned error as replication module not initialized"
 	else
@@ -596,7 +610,7 @@ run_lu_rf_test ()
   LUN0 Option ATS Disable
   LUN0 Option XCOPY Disable"	>> /usr/local/etc/istgt/istgt.conf
 
-	$ISTGTCONTROL refresh
+	sudo $ISTGTCONTROL refresh
 
 	sleep 5
 
@@ -642,10 +656,10 @@ run_rebuild_time_test_in_single_replica()
 	CONSISTENCY_FACTOR=1
 	setup_test_env
 
-	cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].status'"
+	cmd="sudo $ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].status'"
 	rt=$(eval $cmd)
 	if [ ${rt} != "\"Offline\"" ]; then
-		$ISTGTCONTROL -q REPLICA vol1
+		sudo $ISTGTCONTROL -q REPLICA vol1
 		echo "volume status is supposed to be 1"
 		exit 1
 	fi
@@ -656,7 +670,7 @@ run_rebuild_time_test_in_single_replica()
 
 	rt=$(eval $cmd)
 	if [ ${rt} != "\"Degraded\"" ]; then
-		$ISTGTCONTROL -q REPLICA vol1
+		sudo $ISTGTCONTROL -q REPLICA vol1
 		echo "volume status is supposed to be 2"
 		exit 1
 	fi
@@ -664,21 +678,21 @@ run_rebuild_time_test_in_single_replica()
 	while [ 1 ]; do
 		# With replica poll timeout as 10, volume should become
 		# healthy in less than 40 seconds.
-		cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[0].\"upTime\"'"
+		cmd="sudo $ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[0].\"upTime\"'"
 		rt=$(eval $cmd)
 		echo "replica start time $rt"
 		if [ $rt -gt 40 ]; then
-			cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[0].Mode'"
+			cmd="sudo $ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[0].Mode'"
 			rstatus=$(eval $cmd)
 			echo "replica status $rstatus"
 			if [ ${rstatus} != "\"Healthy\"" ]; then
 				echo "replication factor(1) test failed"
 				exit 1
 			else
-				cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].status'"
+				cmd="sudo $ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].status'"
 				rt=$(eval $cmd)
 				if [ ${rt} != "\"Healthy\"" ]; then
-					$ISTGTCONTROL -q REPLICA vol1
+					sudo $ISTGTCONTROL -q REPLICA vol1
 					echo "volume status is supposed to be 4"
 					exit 1
 				fi
@@ -713,10 +727,10 @@ run_rebuild_time_test_in_multiple_replicas()
 	CONSISTENCY_FACTOR=2
 	setup_test_env
 
-	cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].status'"
+	cmd="sudo $ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].status'"
 	rt=$(eval $cmd)
 	if [ ${rt} != "\"Offline\"" ]; then
-		$ISTGTCONTROL -q REPLICA vol1
+		sudo $ISTGTCONTROL -q REPLICA vol1
 		echo "volume status is supposed to be 1"
 		exit 1
 	fi
@@ -727,7 +741,7 @@ run_rebuild_time_test_in_multiple_replicas()
 
 	rt=$(eval $cmd)
 	if [ ${rt} != "\"Offline\"" ]; then
-		$ISTGTCONTROL -q REPLICA vol1
+		sudo $ISTGTCONTROL -q REPLICA vol1
 		echo "volume status is supposed to be 1"
 		exit 1
 	fi
@@ -739,7 +753,7 @@ run_rebuild_time_test_in_multiple_replicas()
 
 	rt=$(eval $cmd)
 	if [ ${rt} != "\"Degraded\"" ]; then
-		$ISTGTCONTROL -q REPLICA vol1
+		sudo $ISTGTCONTROL -q REPLICA vol1
 		echo "volume status is supposed to be 2"
 		exit 1
 	fi
@@ -751,7 +765,7 @@ run_rebuild_time_test_in_multiple_replicas()
 
 	rt=$(eval $cmd)
 	if [ ${rt} != "\"Degraded\"" ]; then
-		$ISTGTCONTROL -q REPLICA vol1
+		sudo $ISTGTCONTROL -q REPLICA vol1
 		echo "volume status is supposed to be 2"
 		exit 1
 	fi
@@ -763,19 +777,19 @@ run_rebuild_time_test_in_multiple_replicas()
 		# replica to become healthy. So on safe side, we will
 		# check replica status after 130 seconds.
 		for (( i = 0; i < 3; i++ )) do
-			cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"["$i"].\"upTime\"'"
+			cmd="sudo $ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"["$i"].\"upTime\"'"
 			rt=$(eval $cmd)
 			echo "replica start time $rt"
 			if [ $1 -eq 0 ]; then
 				if [ $rt -gt 40 ]; then
-					cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"["$i"].Mode'"
+					cmd="sudo $ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"["$i"].Mode'"
 					rstatus=$(eval $cmd)
 					echo "replica status $rstatus"
 					if [ ${rstatus} == "\"Healthy\"" ]; then
-						cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].status'"
+						cmd="sudo $ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].status'"
 						rstatus=$(eval $cmd)
 						if [ ${rstatus} != "\"Degraded\"" ]; then
-							$ISTGTCONTROL -q REPLICA vol1
+							sudo $ISTGTCONTROL -q REPLICA vol1
 							echo "volume status is supposed to be 2"
 							exit 1
 						fi
@@ -785,7 +799,7 @@ run_rebuild_time_test_in_multiple_replicas()
 				fi
 			else
 				if [ $rt -le 30 ]; then
-					cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"["$i"].Mode'"
+					cmd="sudo $ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"["$i"].Mode'"
 					rstatus=$(eval $cmd)
 					echo "replica status $rstatus"
 					if [ ${rstatus} == "\"Healthy\"" ]; then
@@ -818,17 +832,17 @@ run_rebuild_time_test_in_multiple_replicas()
 		fi
 		cnt=0
 		for (( i = 0; i < 3; i++ )) do
-			cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"["$i"].Mode'"
+			cmd="sudo $ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"["$i"].Mode'"
 			rt=$(eval $cmd)
 			if [ ${rt} == "\"Healthy\"" ]; then
 				cnt=`expr $cnt + 1`
 			fi
 		done
 		if [ ${cnt} -ge 2 ]; then
-			cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].status'"
+			cmd="sudo $ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].status'"
 			rstatus=$(eval $cmd)
 			if [ ${rstatus} != "\"Healthy\"" ]; then
-				$ISTGTCONTROL -q REPLICA vol1
+				sudo $ISTGTCONTROL -q REPLICA vol1
 				echo "volume status is supposed to be 3"
 				exit 1
 			fi
@@ -961,7 +975,7 @@ run_io_timeout_test()
 		fi
 
 		# Test to verify disconnection of replica if delay from replica is more than maxiowait
-		$ISTGTCONTROL maxiowait 5
+		sudo $ISTGTCONTROL maxiowait 5
 		$IOPING  -c 1 -B -WWW /dev/$device_name > $iopinglog
 		wait $replica1_pid
 		if [ $? -eq 0 ]; then
@@ -1000,12 +1014,12 @@ run_io_timeout_test()
 
 run_lu_rf_test
 run_write_luworkers_test
-run_data_integrity_test
-run_mempool_test
-run_istgt_integration
-run_read_consistency_test
-run_replication_factor_test
-run_io_timeout_test
+#run_data_integrity_test
+#run_mempool_test
+#run_istgt_integration
+#run_read_consistency_test
+#run_replication_factor_test
+#run_io_timeout_test
 tail -20 $LOGFILE
 
 exit 0
