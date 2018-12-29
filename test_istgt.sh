@@ -335,12 +335,6 @@ run_write_luworkers_test() {
 		exit 1
 	fi
 
-	sudo $ISTGTCONTROL -t vol1 SET 16 -1
-	if [ $? -eq 0 ]; then
-		echo "istgtcontrol set should return error for -1"
-		exit 1
-	fi
-
 	write_and_verify_inflight
 
 	pkill -9 -P $replica1_pid
@@ -1014,12 +1008,12 @@ run_io_timeout_test()
 
 run_lu_rf_test
 run_write_luworkers_test
-#run_data_integrity_test
-#run_mempool_test
-#run_istgt_integration
-#run_read_consistency_test
-#run_replication_factor_test
-#run_io_timeout_test
+run_data_integrity_test
+run_mempool_test
+run_istgt_integration
+run_read_consistency_test
+run_replication_factor_test
+run_io_timeout_test
 tail -20 $LOGFILE
 
 exit 0

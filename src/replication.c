@@ -2624,20 +2624,6 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 
 	(void) cmd_read;
 	CHECK_IO_TYPE(cmd, cmd_read, cmd_write, cmd_sync);
-#if 0
-	if (cmd_write) {
-		pthread_mutex_lock(&spec->write_throttle_mtx);
-		while ((spec->write_luworkers > 0) &&
-		    (spec->inflight_writes >= spec->write_luworkers)) {
-			spec->write_throttle_wait++;
-			pthread_cond_wait(&spec->write_throttle_cv,
-			    &spec->write_throttle_mtx);
-			spec->write_throttle_wait--;
-		}
-		spec->inflight_writes++;
-		pthread_mutex_unlock(&spec->write_throttle_mtx);
-	}
-#endif
 again:
 	MTX_LOCK(&spec->rq_mtx);
 	if(spec->ready == false) {
@@ -2827,15 +2813,6 @@ wait_for_other_responses:
 	io_queue_time[cmd->luworkerindx].tv_sec =
 	    io_queue_time[cmd->luworkerindx].tv_nsec = 0;
 end:
-#if 0
-	if (cmd_write) {
-		pthread_mutex_lock(&spec->write_throttle_mtx);
-		spec->inflight_writes--;
-		if (spec->write_throttle_wait > 0)
-			pthread_cond_signal(&spec->write_throttle_cv);
-		pthread_mutex_unlock(&spec->write_throttle_mtx);
-	}
-#endif
 	return rc;
 }
 
