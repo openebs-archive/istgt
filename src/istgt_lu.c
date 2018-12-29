@@ -4547,10 +4547,13 @@ luscheduler(void *arg)
 	struct timespec sch1, sch2, sch3, sch4, sch5, sch6, r;
 	int qcnt = 0, ind = 0;
 	int worker_id;
-	int need_write_luworker = 0, maxind;
+#ifdef REPLICATION
+	int need_write_luworker = 0;
+	uint8_t write_luworkers;
+#endif
+	int maxind;
 	int id, found_worker = 0;
 	unsigned long secs, nsecs;
-	uint8_t write_luworkers;
 
 #define	tdiff(_s, _n, _r) {                     \
 	if (unlikely(spec->do_avg == 1))	\
@@ -4605,16 +4608,20 @@ start:
 		clock_gettime(clockid, &sch1);
 		ind = 0;
 		MTX_LOCK(&spec->schdler_mutex);
+#ifdef REPLICATION
 		write_luworkers = spec->write_luworkers;
+#endif
 		while (ind <= (ISTGT_MAX_NUM_LUWORKERS/32)) {
 			found_worker = ((spec->lu_free_matrix[ind] != 0) &&
 					((lu->limit_q_size == 0) || ((ind == 0) && ((spec->lu_free_matrix[ind] & 1) == 1))))
 					? 1 : 0;
 			if (found_worker == 0) {
 				maxind = ISTGT_MAX_NUM_LUWORKERS / 32;
+#ifdef REPLICATION
 				if (need_write_luworker == 1)
 					if (write_luworkers > 0)
 						maxind = (write_luworkers - 1) / 32;
+#endif
 				if (ind == maxind) {
 					if (istgt_lu_get_state(lu) != ISTGT_STATE_RUNNING)
 					{
@@ -4642,12 +4649,13 @@ next_lu_worker:
 			goto start;
 		worker_id--; // Bits are numbered starting at 1, the least significant bit.
 		worker_id += (ind<<5);
-
+#ifdef REPLICATION
 		if (need_write_luworker == 1) {
 			if ((write_luworkers > 0) && (worker_id >= write_luworkers)) 
 				goto start;
 			goto assign_lu_task;
 		}
+#endif
 		if (worker_id >= spec->luworkers) // worker_id can't be >= luworkers
 			goto start;
 
@@ -4709,6 +4717,7 @@ next_lu_worker:
 			    lu->num, qcnt);
 		}
 		lu_task = istgt_queue_dequeue(&spec->cmd_queue);
+#ifdef REPLICATION
 assign_lu_task:
 	        switch (lu_task->lu_cmd.cdb0) {
 			case SBC_WRITE_6:
@@ -4725,6 +4734,7 @@ assign_lu_task:
 			}
 			need_write_luworker = 0;
 		}
+#endif
 		clock_gettime(clockid, &sch3);
 		id = 19;
 		tdiff(sch5, sch3, r);
@@ -4752,9 +4762,10 @@ assign_lu_task:
 		MTX_LOCK(&spec->schdler_mutex);
 		spec->inflight++;
 		BUNSET32(spec->lu_free_matrix[(worker_id >> 5)], (worker_id&31));
+#ifdef REPLICATION
 		write_luworkers = spec->write_luworkers;
+#endif
 		MTX_UNLOCK(&spec->schdler_mutex);
-//		ISTGT_ERRLOG("Assing IO to worker: %d write_workers: %d\n", worker_id, write_luworkers);
 		if (spec->luworker_waiting[worker_id]) {
 			MTX_UNLOCK(&spec->luworker_mutex[worker_id]);
 			pthread_cond_signal(&spec->luworker_cond[worker_id]);
