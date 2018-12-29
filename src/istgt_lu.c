@@ -3732,6 +3732,8 @@ istgt_lu_create_task(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, int lun, ISTGT_LU_D
 	}
 
 #ifdef REPLICATION
+	lu_task->lu_cmd.lu_start_time.tv_sec = 0;
+	lu_task->lu_cmd.repl_start_time.tv_sec = 0;
 	lu_task->lu_cmd.start_rw_time = lu_cmd->start_rw_time;
 #endif
 	lu_task->condwait = 0;
@@ -4344,7 +4346,7 @@ luworker(void *arg)
 	{	\
 		if ((_n.tv_nsec - _s.tv_nsec) < 0) {        \
 			_r.tv_sec  = _n.tv_sec - _s.tv_sec-1;   \
-			_r.tv_nsec = 1000000000 + _n.tv_nsec - _s.tv_nsec; \
+			_r.tv_nsec = SEC_IN_NS + _n.tv_nsec - _s.tv_nsec; \
 		} else {                                    \
 			_r.tv_sec  = _n.tv_sec - _s.tv_sec;     \
 			_r.tv_nsec = _n.tv_nsec - _s.tv_nsec;   \
@@ -4352,8 +4354,8 @@ luworker(void *arg)
 		spec->avgs[id].count++;	\
 		spec->avgs[id].tot_sec += _r.tv_sec;	\
 		spec->avgs[id].tot_nsec += _r.tv_nsec;	\
-		secs = spec->avgs[id].tot_nsec/1000000000;	\
-		nsecs = spec->avgs[id].tot_nsec%1000000000;	\
+		secs = spec->avgs[id].tot_nsec/SEC_IN_NS;	\
+		nsecs = spec->avgs[id].tot_nsec%SEC_IN_NS;	\
 		spec->avgs[id].tot_sec += secs;	\
 		spec->avgs[id].tot_nsec = nsecs;	\
 	}	\
@@ -4506,6 +4508,7 @@ luworker(void *arg)
 			tdiff(second2, third, r);
 #ifdef REPLICATION
 			lu_task->lu_cmd.luworkerindx = tind;
+			clock_gettime(CLOCK_MONOTONIC_RAW, &lu_task->lu_cmd.lu_start_time);
 #endif
 			lu_task->lu_cmd.flags |= ISTGT_WORKER_PICKED;
 			rc = istgt_lu_disk_queue_start(lu, lu_num, tind);
@@ -4551,7 +4554,7 @@ luscheduler(void *arg)
 	{	\
 		if ((_n.tv_nsec - _s.tv_nsec) < 0) {        \
 			_r.tv_sec  = _n.tv_sec - _s.tv_sec-1;   \
-			_r.tv_nsec = 1000000000 + _n.tv_nsec - _s.tv_nsec; \
+			_r.tv_nsec = SEC_IN_NS + _n.tv_nsec - _s.tv_nsec; \
 		} else {                                    \
 			_r.tv_sec  = _n.tv_sec - _s.tv_sec;     \
 			_r.tv_nsec = _n.tv_nsec - _s.tv_nsec;   \
@@ -4559,8 +4562,8 @@ luscheduler(void *arg)
 		spec->avgs[id].count++;	\
 		spec->avgs[id].tot_sec += _r.tv_sec;	\
 		spec->avgs[id].tot_nsec += _r.tv_nsec;	\
-		secs = spec->avgs[id].tot_nsec/1000000000;	\
-		nsecs = spec->avgs[id].tot_nsec%1000000000;	\
+		secs = spec->avgs[id].tot_nsec/SEC_IN_NS;	\
+		nsecs = spec->avgs[id].tot_nsec%SEC_IN_NS;	\
 		spec->avgs[id].tot_sec += secs;	\
 		spec->avgs[id].tot_nsec = nsecs;	\
 	}	\

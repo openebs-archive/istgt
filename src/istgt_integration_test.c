@@ -676,7 +676,7 @@ mock_repl_io_worker(void *args)
 	snprintf(tinfo, 50, "mockiowork%d", rargs->replica_port);
 	prctl(PR_SET_NAME, tinfo, 0, 0, 0);
 
-	clock_gettime(CLOCK_MONOTONIC, &prev);
+	clock_gettime(CLOCK_MONOTONIC_RAW, &prev);
 	while (1) {
 		MTX_LOCK(&rargs->io_recv_mtx);
 		while (TAILQ_EMPTY(&(rargs->io_recv_list))) {
@@ -712,7 +712,7 @@ mock_repl_io_worker(void *args)
 				break;
 		}
 
-		clock_gettime(CLOCK_MONOTONIC, &now);
+		clock_gettime(CLOCK_MONOTONIC_RAW, &now);
 		if (now.tv_sec - prev.tv_sec > 1) {
 			prev = now;
 			REPLICA_LOG("read %d wrote %d sync %d from %s\n",
@@ -1391,7 +1391,7 @@ main(int argc, char **argv)
 	int i;
 	bool do_snap = false;
 
-	clock_gettime(CLOCK_MONOTONIC, &now);
+	clock_gettime(CLOCK_MONOTONIC_RAW, &now);
 	srandom(now.tv_sec);
 
 	replica_poll_time = 5;
