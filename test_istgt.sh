@@ -165,8 +165,8 @@ write_and_verify_inflight(){
 	if [ "$device_name"!="" ]; then
 		sudo $ISTGTCONTROL -t vol1 SET 16 2
 
-		dd if=/dev/urandom of=/dev/$device_name bs=4k count=3 oflag=direct &
-		dd if=/dev/urandom of=/dev/$device_name bs=4k count=3 seek=10 oflag=direct &
+		dd if=/dev/urandom of=/dev/$device_name bs=4k count=4 oflag=direct &
+		dd if=/dev/urandom of=/dev/$device_name bs=4k count=4 seek=10 oflag=direct &
 		dd_pid=$!
 
 		for (( i = 0; i < 5; i++ )) do
@@ -184,7 +184,7 @@ write_and_verify_inflight(){
 		fi
 
 		sudo $ISTGTCONTROL -t vol1 SET 16 1
-		for (( i = 0; i < 13; i++ )) do
+		for (( i = 0; i < 18; i++ )) do
 			sudo $ISTGTCONTROL -q REPLICA | json_pp
 			inflight_cnt=$(sudo $ISTGTCONTROL -q REPLICA | json_pp | grep -w "inflightWrite" | grep "\"1\"" | wc -l)
 			echo $inflight_cnt
@@ -193,7 +193,7 @@ write_and_verify_inflight(){
 			fi
 			sleep 1
 		done
-		if [ $i -eq 13 ]; then
+		if [ $i -eq 18 ]; then
 			sudo $ISTGTCONTROL -q REPLICA | json_pp
 			echo "inflighWrite test2 failed" && tail -20 $LOGFILE && exit 1
 		fi
@@ -201,7 +201,7 @@ write_and_verify_inflight(){
 		sleep 1
 
 		sudo $ISTGTCONTROL -t vol1 SET 16 0
-		for (( i = 0; i < 7; i++ )) do
+		for (( i = 0; i < 12; i++ )) do
 			sudo $ISTGTCONTROL -q REPLICA | json_pp
 			inflight_cnt=$(sudo $ISTGTCONTROL -q REPLICA | json_pp | grep -w "inflightWrite" | grep "\"2\"" | wc -l)
 			echo $inflight_cnt
@@ -210,7 +210,7 @@ write_and_verify_inflight(){
 			fi
 			sleep 1
 		done
-		if [ $i -eq 5 ]; then
+		if [ $i -eq 12 ]; then
 			sudo $ISTGTCONTROL -q REPLICA | json_pp
 			echo "inflighWrite test3 failed" && tail -20 $LOGFILE && exit 1
 		fi
@@ -276,6 +276,7 @@ setup_test_env() {
 	logout_of_volume
 	sudo killall -9 istgt
 	sudo killall -9 replication_test
+	sudo killall -9 istgt_integration
 	touch $INTEGRATION_TEST_LOGFILE
 	start_istgt 5G
 }
