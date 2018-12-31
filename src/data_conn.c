@@ -264,6 +264,7 @@ handle_data_conn_error(replica_t *r)
 	int fd, data_eventfd, mgmt_eventfd2, epollfd;
 	spec_t *spec;
 	replica_t *r1 = NULL;
+	int found_in_quorum = 0;
 
 	if (r->iofd == -1) {
 		REPLICA_ERRLOG("repl %s %d %p\n", r->ip, r->port, r);
@@ -274,10 +275,20 @@ handle_data_conn_error(replica_t *r)
 	spec = r->spec;
 
 	TAILQ_FOREACH(r1, &(spec->rq), r_next)
-		if (r1 == r)
+		if (r1 == r) {
+			found_in_quorum = 1;
 			break;
+		}
+
+	if (r1 == NULL)
+		TAILQ_FOREACH(r1, &(spec->non_quorum_rq), r_next)
+			if (r1 == r) {
+				found_in_quorum = 2;
+				break;
+			}
 
 	if (r1 == NULL) {
+		MTX_LOCK(&r->r_mtx);
 		REPLICA_ERRLOG("replica %s %d not part of rqlist..\n",
 		    r->ip, r->port);
 		/*
@@ -289,16 +300,23 @@ handle_data_conn_error(replica_t *r)
 		 */
 		if (r->mgmt_eventfd2 != -1)
 			r->mgmt_eventfd2 = -1;
+		MTX_UNLOCK(&r->r_mtx);
 		MTX_UNLOCK(&spec->rq_mtx);
 		return -1;
 	}
 
-	TAILQ_REMOVE(&spec->rq, r, r_next);
-
-	if (r->state == ZVOL_STATUS_HEALTHY)
-		spec->healthy_rcount--;
-	else if (r->state == ZVOL_STATUS_DEGRADED)
-		spec->degraded_rcount--;
+	if (found_in_quorum == 1) {
+		TAILQ_REMOVE(&spec->rq, r, r_next);
+		if (r->state == ZVOL_STATUS_HEALTHY)
+			spec->healthy_rcount--;
+		else {
+			ASSERT(r->state == ZVOL_STATUS_DEGRADED);
+			spec->degraded_rcount--;
+		}
+	} else {
+		ASSERT(found_in_quorum == 2);
+		TAILQ_REMOVE(&spec->non_quorum_rq, r, r_next);
+	}
 
 	update_volstate(r->spec);
 

@@ -36,6 +36,7 @@ __thread char  tinfo[50] =  {0};
 	mgmt_ack_data->pool_guid = replica_port;\
 	mgmt_ack_data->checkpointed_io_seq = 1000;\
 	mgmt_ack_data->zvol_guid = replica_port;\
+	mgmt_ack_data->quorum = replica_quorum;\
 }
 
 bool degraded_mode = false;
@@ -230,7 +231,7 @@ test_read_data(int fd, uint8_t *data, uint64_t len)
 
 static int
 send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
-    int replica_port, zrepl_status_ack_t *zrepl_status,
+    int replica_port, int replica_quorum, int delay,zrepl_status_ack_t *zrepl_status,
     int *zrepl_status_msg_cnt)
 {
 	int i, nbytes = 0;
@@ -287,6 +288,8 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 		iovec_count = 2;
 	} else {
 		build_mgmt_ack_data;
+		if(delay > 0)
+			sleep(5);
 
 		iovec[1].iov_base = mgmt_ack_data;
 		iovec[1].iov_len = sizeof (mgmt_ack_t);
@@ -394,6 +397,7 @@ usage(void)
 	printf(" -P replica port\n");
 	printf(" -r retry if failed to connect\n");
 	printf(" -V volume path\n");
+	printf(" -q replica quorum(default is set to 0)\n");
 	printf(" -n number of IOs to serve before sleeping for 60 seconds\n");
 	printf(" -d run in degraded mode only\n");
 	printf(" -e error frequency (should be <= 10, default is 0)\n");
@@ -417,7 +421,7 @@ main(int argc, char **argv)
 	int iofd = -1, mgmtfd, sfd, rc, epfd, event_count, i;
 	int64_t count;
 	struct epoll_event event, *events;
-	uint8_t *data, *mgmt_data;
+	uint8_t *data, *data_ptr_cpy;
 	uint64_t nbytes = 0;
 	int vol_fd;
 	zvol_op_code_t opcode;
@@ -434,8 +438,9 @@ main(int argc, char **argv)
 	struct timespec now;
 	int delay = 0;
 	bool retry = false;
+	int replica_quorum = 0;
 
-	while ((ch = getopt(argc, argv, "i:p:I:P:V:n:e:t:dr")) != -1) {
+	while ((ch = getopt(argc, argv, "i:p:I:P:V:q:n:e:t:dr")) != -1) {
 		switch (ch) {
 			case 'i':
 				strncpy(ctrl_ip, optarg, sizeof(ctrl_ip));
@@ -456,6 +461,9 @@ main(int argc, char **argv)
 			case 'V':
 				strncpy(test_vol, optarg, sizeof(test_vol));
 				check |= 1 << 5;
+				break;
+			case 'q':
+				replica_quorum = atoi(optarg);
 				break;
 			case 'n':
 				io_cnt = atoi(optarg);
@@ -500,7 +508,7 @@ main(int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 
-	clock_gettime(CLOCK_MONOTONIC_RAW, &now);
+	clock_gettime(CLOCK_MONOTONIC, &now);
 	srandom(now.tv_sec);
 
 	data = NULL;
@@ -585,8 +593,8 @@ again:
 				}
 
 				if(mgmtio->len) {
-					mgmt_data = malloc(mgmtio->len);
-					count = test_read_data(events[i].data.fd, (uint8_t *)mgmt_data, mgmtio->len);
+					data = data_ptr_cpy = malloc(mgmtio->len);
+					count = test_read_data(events[i].data.fd, (uint8_t *)data, mgmtio->len);
 					if (count < 0) {
 						rc = -1;
 						goto error;
@@ -598,12 +606,16 @@ again:
 					}
 				}
 				opcode = mgmtio->opcode;
-				send_mgmt_ack(mgmtfd, opcode, mgmt_data, replica_ip, replica_port, zrepl_status, &zrepl_status_msg_cnt);
+				send_mgmt_ack(mgmtfd, opcode, data, replica_ip, replica_port, replica_quorum, delay,zrepl_status, &zrepl_status_msg_cnt);
 			} else if (events[i].data.fd == sfd) {
 				struct sockaddr saddr;
 				socklen_t slen;
 				char hbuf[NI_MAXHOST], sbuf[NI_MAXSERV];
 				slen = sizeof(saddr);
+				if (delay > 0)
+				{
+					sleep(10);
+				}
 				iofd = accept(sfd, &saddr, &slen);
 				if (iofd == -1) {
 					if((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
@@ -750,6 +762,8 @@ execute_io:
 						usleep(sleeptime);
 						write_ios++;
 					} else if(io_hdr->opcode == ZVOL_OPCODE_READ) {
+						if ( replica_quorum == 0)
+							goto error;
 						uint8_t *user_data = NULL;
 						if (delay > 0)
 							sleep(delay);
@@ -808,7 +822,7 @@ execute_io:
 
 error:
 	REPLICA_ERRLOG("shutting down replica(%s:%d) IOs(read:%lu write:%lu)\n",
-	    replica_ip, replica_port, read_ios, write_ios);
+	    ctrl_ip, ctrl_port, read_ios, write_ios);
 	if (data)
 		free(data);
 	close(vol_fd);
