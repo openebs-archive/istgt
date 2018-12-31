@@ -50,8 +50,6 @@ static int handle_mgmt_event_fd(replica_t *replica);
 		uint64_t blockcnt = 0;                                  \
 		rcomm_cmd = malloc(sizeof (*rcomm_cmd));		\
 		memset(rcomm_cmd, 0, sizeof (*rcomm_cmd));		\
-		rcomm_cmd->copies_sent = 0;				\
-		rcomm_cmd->total_len = 0;				\
 		rcomm_cmd->offset = offset;				\
 		rcomm_cmd->data_len = nbytes;				\
 		rcomm_cmd->state = CMD_CREATED;				\
@@ -2446,7 +2444,8 @@ respond_with_error_for_all_outstanding_mgmt_ios(replica_t *r)
 		rcmd->offset = rcomm_cmd->offset;			\
 		rcmd->data_len = rcomm_cmd->data_len;			\
 		rcmd->io_seq = rcomm_cmd->io_seq;			\
-		rcmd->idx = rcomm_cmd->copies_sent - 1;			\
+		rcmd->idx = rcomm_cmd->non_quorum_copies_sent +		\
+		    rcomm_cmd->copies_sent - 1;				\
 		rcomm_cmd->resp_list[rcmd->idx].replica = replica;	\
 		rcomm_cmd->resp_list[rcmd->idx].status |= 		\
 		    (replica->state == ZVOL_STATUS_HEALTHY) ? 		\
@@ -2618,7 +2617,7 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 int64_t
 replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t nbytes)
 {
-	int rc = -1, i;
+	int rc = -1, i, copies_sent;
 	bool cmd_write = false, cmd_read = false, cmd_sync = false;
 	replica_t *replica, *last_replica = NULL, *resp_replica= NULL;
 	rcommon_cmd_t *rcomm_cmd;
@@ -2722,6 +2721,20 @@ retry_read:
 			break;
 	}
 
+	if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) {
+		TAILQ_FOREACH(replica, &spec->non_quorum_rq, r_next) {
+			rcomm_cmd->non_quorum_copies_sent++;
+
+			build_rcmd();
+
+			INCREMENT_INFLIGHT_REPLICA_IO_CNT(replica, rcmd->opcode);
+
+			put_to_mempool(&replica->cmdq, rcmd);
+
+			eventfd_write(replica->data_eventfd, 1);
+		}
+	}
+
 	TAILQ_INSERT_TAIL(&spec->rcommon_waitq, rcomm_cmd, wait_cmd_next);
 
 	MTX_UNLOCK(&spec->rq_mtx);
@@ -2732,7 +2745,9 @@ retry_read:
 	while (1) {
 		timesdiff(CLOCK_MONOTONIC_RAW, queued_time, now, diff);
 		count = 0;
-		for (i = 0; i < rcomm_cmd->copies_sent; i++) {
+		copies_sent = rcomm_cmd->copies_sent + rcomm_cmd->non_quorum_copies_sent;
+
+		for (i = 0; i < copies_sent; i++) {
 			resp_replica = rcomm_cmd->resp_list[i].replica;
 			if (rcomm_cmd->resp_list[i].status &
 			    (RECEIVED_OK|RECEIVED_ERR|REPLICATE_TIMED_OUT)) {
@@ -2764,7 +2779,7 @@ retry_read:
 			}
 		}
 
-		if (count != rcomm_cmd->copies_sent)
+		if (count != copies_sent)
 			goto wait_for_other_responses;
 
 		// check for status of rcomm_cmd
@@ -2775,6 +2790,7 @@ retry_read:
 			} else if (rcomm_cmd->opcode == ZVOL_OPCODE_READ &&
 			    rcomm_cmd->copies_sent == 1) {
 				rcomm_cmd->copies_sent = 0;
+				rcomm_cmd->non_quorum_copies_sent = 0;
 				memset(rcomm_cmd->resp_list, 0,
 				    sizeof (rcomm_cmd->resp_list));
 				MTX_LOCK(&spec->rq_mtx);
@@ -3205,6 +3221,7 @@ initialize_volume(spec_t *spec, int replication_factor, int consistency_factor)
 	spec->io_seq = 0;
 	TAILQ_INIT(&spec->rcommon_waitq);
 	TAILQ_INIT(&spec->rq);
+	TAILQ_INIT(&spec->non_quorum_rq);
 	TAILQ_INIT(&spec->rwaitq);
 	TAILQ_INIT(&spec->identified_replica);
 
@@ -3328,7 +3345,7 @@ cleanup_deadlist(void *arg)
 {
 	spec_t *spec = (spec_t *)arg;
 	rcommon_cmd_t *rcomm_cmd;
-	int i, count = 0, entry_count = 0;
+	int i, count = 0, entry_count = 0, copies_sent = 0;
 
 	while (1) {
 		entry_count = get_num_entries_from_mempool(&spec->rcommon_deadlist);
@@ -3338,13 +3355,14 @@ cleanup_deadlist(void *arg)
 
 			ASSERT(rcomm_cmd->state == CMD_EXECUTION_DONE);
 
-			for (i = 0; i < rcomm_cmd->copies_sent; i++) {
+			copies_sent = rcomm_cmd->copies_sent + rcomm_cmd->non_quorum_copies_sent;
+			for (i = 0; i < copies_sent; i++) {
 				if (rcomm_cmd->resp_list[i].status &
 				    (RECEIVED_OK|RECEIVED_ERR))
 					count++;
 			}
 
-			if (count == rcomm_cmd->copies_sent) {
+			if (count == copies_sent) {
 				destroy_resp_list(rcomm_cmd);
 
 				for (i=1; i<rcomm_cmd->iovcnt + 1; i++)
