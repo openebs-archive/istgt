@@ -267,7 +267,7 @@ handle_data_conn_error(replica_t *r)
 	int found_in_list = 0;
 
 	if (r->iofd == -1) {
-		REPLICA_ERRLOG("repl %s %d %p\n", r->ip, r->port, r);
+		REPLICA_ERRLOG("repl %s %d %p data_conn error\n", r->ip, r->port, r);
 		return -1;
 	}
 
