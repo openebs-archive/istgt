@@ -83,6 +83,7 @@ typedef struct rcommon_cmd_s {
 	TAILQ_ENTRY(rcommon_cmd_s)  wait_cmd_next; /* for rcommon_waitq */
 	int luworker_id;
 	int copies_sent;
+	int non_quorum_copies_sent;
 	uint8_t replication_factor;
 	uint8_t consistency_factor;
 	zvol_op_code_t opcode;
