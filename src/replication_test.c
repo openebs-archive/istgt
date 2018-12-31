@@ -36,7 +36,7 @@ __thread char  tinfo[50] =  {0};
 	mgmt_ack_data->pool_guid = replica_port;\
 	mgmt_ack_data->checkpointed_io_seq = 1000;\
 	mgmt_ack_data->zvol_guid = replica_port;\
-	mgmt_ack_data->quorum = replica_quorum;\
+	mgmt_ack_data->quorum = *replica_quorum;\
 }
 
 bool degraded_mode = false;
@@ -231,7 +231,7 @@ test_read_data(int fd, uint8_t *data, uint64_t len)
 
 static int
 send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
-    int replica_port, int replica_quorum, int delay,zrepl_status_ack_t *zrepl_status,
+    int replica_port, int *replica_quorum, int delay,zrepl_status_ack_t *zrepl_status,
     int *zrepl_status_msg_cnt)
 {
 	int i, nbytes = 0;
@@ -241,6 +241,7 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 	zvol_io_hdr_t *mgmt_ack_hdr = NULL;
 	mgmt_ack_t *mgmt_ack_data = NULL;
 	int ret = -1;
+	bool state_changed_non_quorum=false;
 	zvol_op_stat_t stats;
 
 	/* Init mgmt_ack_hdr */
@@ -265,6 +266,8 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 			zrepl_status->state = ZVOL_STATUS_HEALTHY;
 			zrepl_status->rebuild_status = ZVOL_REBUILDING_DONE;
 			(*zrepl_status_msg_cnt) = 0;
+			if(*replica_quorum == 0)
+				state_changed_non_quorum=true;
 		}
 
 		if (zrepl_status->rebuild_status == ZVOL_REBUILDING_SNAP) {
@@ -320,6 +323,8 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 			}
 		}
 	}
+	if(state_changed_non_quorum)
+		*replica_quorum=1;
 	ret = 0;
 out:
 	if (mgmt_ack_hdr)
@@ -606,7 +611,7 @@ again:
 					}
 				}
 				opcode = mgmtio->opcode;
-				send_mgmt_ack(mgmtfd, opcode, data, replica_ip, replica_port, replica_quorum, delay,zrepl_status, &zrepl_status_msg_cnt);
+				send_mgmt_ack(mgmtfd, opcode, data, replica_ip, replica_port, &replica_quorum, delay,zrepl_status, &zrepl_status_msg_cnt);
 			} else if (events[i].data.fd == sfd) {
 				struct sockaddr saddr;
 				socklen_t slen;
