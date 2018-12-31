@@ -1515,8 +1515,8 @@ istgt_lu_disk_shutdown(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr
 					sleep(1);
 			} while ((workers_signaled == 0) && (++loop  < 10));
 
-#ifndef	REPLICATION
 			timesdiff(clockid, _wrk, _wrkx, _s1)
+#ifndef	REPLICATION
 			if (!spec->lu->readonly) {
 				rc = spec->sync(spec, 0, spec->size);
 				if (rc < 0) {
@@ -1524,8 +1524,8 @@ istgt_lu_disk_shutdown(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr
 					/* ignore error */
 				}
 			}
-			timesdiff(clockid, _wrkx, _wrk, _s2)
 #endif
+			timesdiff(clockid, _wrkx, _wrk, _s2)
 			rc = spec->close(spec);
 			if (rc < 0) {
 				//ISTGT_ERRLOG("LU%d: lu_disk_close() failed\n", lu->num);
@@ -5715,6 +5715,7 @@ istgt_lu_disk_lbread(ISTGT_LU_DISK *spec, CONN_Ptr conn __attribute__((__unused_
 	rc = pread(spec->fd, data, nbytes, offset);
 #endif
 	timediffw(lu_cmd, 'D');
+
 	exitblockingcall(endofmacro2)
 	if (markedForFree == 1 || markedForReturn == 1) {
 		ISTGT_TRACELOG(ISTGT_TRACE_NET, "c#%d connGone(%d)OrMarkedReturn(%d):%p:%d pendingIO:%d (read:%zd/%zd lba:%lu+%u)",
@@ -6941,6 +6942,7 @@ istgt_lu_disk_stop(ISTGT_LU_Ptr lu, int lun)
 	}
 #endif
 
+	timesdiff(clockid, _wrk, _wrkx, _s3)
 	MTX_LOCK(&spec->state_mutex);
 	spec->ex_state = ISTGT_LUN_CLOSE;
 	MTX_UNLOCK(&spec->state_mutex);
@@ -7790,7 +7792,7 @@ istgt_lu_print_q(ISTGT_LU_Ptr lu, int lun)
 #define tdiff(_s, _n, _r) {                     \
 	if ((_n.tv_nsec - _s.tv_nsec) < 0) {        \
 		_r.tv_sec  = _n.tv_sec - _s.tv_sec-1;   \
-		_r.tv_nsec = 1000000000 + _n.tv_nsec - _s.tv_nsec; \
+		_r.tv_nsec = SEC_IN_NS + _n.tv_nsec - _s.tv_nsec; \
 	} else {                                    \
 		_r.tv_sec  = _n.tv_sec - _s.tv_sec;     \
 		_r.tv_nsec = _n.tv_nsec - _s.tv_nsec;   \
@@ -8312,7 +8314,7 @@ istgt_lu_disk_queue(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 	{	\
                 if ((_n.tv_nsec - _s.tv_nsec) < 0) {        \
                         _r.tv_sec  = _n.tv_sec - _s.tv_sec-1;   \
-                        _r.tv_nsec = 1000000000 + _n.tv_nsec - _s.tv_nsec; \
+                        _r.tv_nsec = SEC_IN_NS + _n.tv_nsec - _s.tv_nsec; \
                 } else {                                    \
                         _r.tv_sec  = _n.tv_sec - _s.tv_sec;     \
                         _r.tv_nsec = _n.tv_nsec - _s.tv_nsec;   \
@@ -8320,8 +8322,8 @@ istgt_lu_disk_queue(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 		spec->avgs[id].count++;	\
 		spec->avgs[id].tot_sec += _r.tv_sec;	\
 		spec->avgs[id].tot_nsec += _r.tv_nsec;	\
-		secs = spec->avgs[id].tot_nsec/1000000000;	\
-		nsecs = spec->avgs[id].tot_nsec%1000000000;	\
+		secs = spec->avgs[id].tot_nsec/SEC_IN_NS;	\
+		nsecs = spec->avgs[id].tot_nsec%SEC_IN_NS;	\
 		spec->avgs[id].tot_sec += secs;	\
 		spec->avgs[id].tot_nsec = nsecs;	\
 	}	\
@@ -8933,10 +8935,10 @@ istgt_lu_disk_queue_start(ISTGT_LU_Ptr lu, int lun, int worker_id)
 						INFLIGHT_IO_CLEANUP;
 						lu_task->error = 1;
 						lu_task->lu_cmd.aborted = 1;
+						MTX_UNLOCK(&lu_task->trans_mutex);
 						MTX_LOCK(&spec->wait_lu_task_mutex);
 						spec->wait_lu_task[worker_id] = NULL;
 						MTX_UNLOCK(&spec->wait_lu_task_mutex);
-						MTX_UNLOCK(&lu_task->trans_mutex);
 
 						now = time(NULL);
 						ISTGT_ERRLOG("c#%d timeout trans_cond CmdSN=0x%x "

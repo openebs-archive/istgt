@@ -429,6 +429,9 @@ typedef struct istgt_lu_cmd_t {
 	uint8_t	   release_aborted;
 #ifdef REPLICATION
 	uint32_t   luworkerindx;
+	struct timespec start_rw_time;
+	struct timespec lu_start_time;
+	struct timespec repl_start_time;
 #endif
 } ISTGT_LU_CMD;
 typedef ISTGT_LU_CMD *ISTGT_LU_CMD_Ptr;
@@ -781,6 +784,14 @@ typedef struct istgt_lu_disk_t {
 	uint64_t reads;
 	uint64_t readbytes;
 	uint64_t writebytes;
+	uint64_t totalreadtime;
+	uint64_t totalwritetime;
+	uint64_t totalreadlutime; /* Time for read IO at LU worker */
+	uint64_t totalwritelutime; /* Similar to above */
+	uint64_t totalreadrepltime; /* Time for read IO at replication module */
+	uint64_t totalwriterepltime; /* Similar to above */
+	uint64_t totalreadblockcount;
+	uint64_t totalwriteblockcount;
 #endif
 	/* modify lun */
 	int dofake;
@@ -844,8 +855,11 @@ typedef struct istgt_lu_disk_t {
 	int healthy_rcount;
 	int degraded_rcount;
 	bool ready;
-	bool rebuild_in_progress;
-	struct replica_s *target_replica;
+	struct {
+		struct replica_s *dw_replica;
+		void *healthy_replica;
+		bool rebuild_in_progress;
+	} rebuild_info;
 
 	/*Common for both the above queues,
 	Since same cmd is part of both the queues*/

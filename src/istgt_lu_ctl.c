@@ -56,6 +56,7 @@
 #ifdef	REPLICATION
 #include <json-c/json_object.h>
 #include "istgt_integration.h"
+#include <replication_misc.h>
 #endif
 
 #if !defined(__GNUC__)
@@ -77,7 +78,6 @@ typedef struct istgt_uctl_t {
 	ISTGT_Ptr istgt;
 	PORTAL portal;
 	int sock;
-	pthread_t thread;
 
 	int family;
 	char caddr[MAX_ADDRBUF];
@@ -651,6 +651,44 @@ istgt_uctl_cmd_replica_stats(UCTL_Ptr uctl)
 	}
 	return (UCTL_CMD_OK);
 }
+
+static int
+istgt_uctl_cmd_max_io_wait(UCTL_Ptr uctl)
+{
+	const char *delim = ARGS_DELIM;
+	int rc = 0;
+	char *arg;
+	uint64_t max_wait_time, new_wait_time;
+	char *s_io_wait_time = NULL;
+	arg = uctl->arg;
+
+	if (arg) {
+		s_io_wait_time = strsepq(&arg, delim);
+		new_wait_time = strtoull(s_io_wait_time, NULL, 10);
+		if (errno) {
+			istgt_uctl_snprintf(uctl, "ERR error code:%d\n", errno);
+			(void) istgt_uctl_writeline(uctl);
+			return (UCTL_CMD_ERR);
+		}
+
+		istgt_set_max_io_wait_time(new_wait_time);
+	}
+
+	max_wait_time = istgt_get_max_io_wait_time();
+	istgt_uctl_snprintf(uctl, "%s  %lu\n", uctl->cmd, max_wait_time);
+	rc = istgt_uctl_writeline(uctl);
+	if (rc != UCTL_CMD_OK) {
+		return (rc);
+	}
+
+	istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
+	rc = istgt_uctl_writeline(uctl);
+	if (rc != UCTL_CMD_OK) {
+		return (rc);
+	}
+	return (UCTL_CMD_OK);
+}
+
 #endif
 
 static int
@@ -3059,7 +3097,7 @@ istgt_uctl_cmd_que(UCTL_Ptr uctl)
 #define	tdiff(_s, _n, _r) {                     \
 	if ((_n.tv_nsec - _s.tv_nsec) < 0) {        \
 		_r.tv_sec  = _n.tv_sec - _s.tv_sec-1;   \
-		_r.tv_nsec = 1000000000 + _n.tv_nsec - _s.tv_nsec; \
+		_r.tv_nsec = SEC_IN_NS + _n.tv_nsec - _s.tv_nsec; \
 	} else {                                    \
 		_r.tv_sec  = _n.tv_sec - _s.tv_sec;     \
 		_r.tv_nsec = _n.tv_nsec - _s.tv_nsec;   \
@@ -3155,7 +3193,7 @@ istgt_uctl_cmd_que(UCTL_Ptr uctl)
 			    (signed long)(spec->avgs[0].tot_nsec))) < 0) {
 				spec->avgs[0].tot_sec  =
 				    now.tv_sec - spec->avgs[0].tot_sec - 1;
-				spec->avgs[0].tot_nsec = 1000000000 +
+				spec->avgs[0].tot_nsec = SEC_IN_NS +
 				    now.tv_nsec - spec->avgs[0].tot_nsec;
 			} else {
 				spec->avgs[0].tot_sec =
@@ -3332,109 +3370,107 @@ _verb_istat ISCSIstat_rslt[ISCSI_ARYSZ] = { {0, 0, 0} };
 static int
 istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 {
-	ISTGT_LU_Ptr lu;
-	int rc, length;
+	int rc, replica_cnt;
 	uint64_t usedlogicalblocks;
+	struct timespec now;
+	uint64_t time_diff;
 	/* instantiate json_object from json-c library. */
 	struct json_object *jobj;
-	/*
-	 * these are utility variables that will be freed
-	 * at the end of the function.
-	 */
-	char *writes, *reads, *totalreadbytes, *totalwritebytes, *size,
-	    *usedblocks, *sectorsize;
+	replica_t *replica;
 	ISTGT_LU_DISK *spec;
+
 	MTX_LOCK(&specq_mtx);
 	TAILQ_FOREACH(spec, &spec_q, spec_next) {
-		lu = spec->lu;
 		jobj = json_object_new_object();	/* create new object */
-		json_object *jIQN = json_object_new_string(lu->name);
-		json_object_object_add(jobj, "iqn", jIQN);
 
-		length = snprintf(NULL, 0,
-		    "%"PRIu64, spec->writes);	/* get the length */
-		writes = malloc(length + 1);
-		snprintf(writes, length + 1,
-		    "%"PRIu64, spec->writes);	/* uint64 to string */
-
-		length = snprintf(NULL, 0, "%"PRIu64, spec->reads);
-		reads = malloc(length + 1);
-		snprintf(reads, length + 1, "%"PRIu64, spec->reads);
-
-		length = snprintf(NULL, 0, "%"PRIu64, spec->readbytes);
-		totalreadbytes = malloc(length + 1);
-		snprintf(totalreadbytes, length + 1,
-		    "%"PRIu64, spec->readbytes);
-
-		length = snprintf(NULL, 0, "%"PRIu64, spec->writebytes);
-		totalwritebytes = malloc(length + 1);
-		snprintf(totalwritebytes, length + 1,
-		    "%"PRIu64, spec->writebytes);
-
-		length = snprintf(NULL, 0, "%"PRIu64, spec->size);
-		size = malloc(length + 1);
-		snprintf(size, length + 1, "%"PRIu64, spec->size);
-		usedlogicalblocks = (spec->stats.used / spec->blocklen);
-
-		length = snprintf(NULL, 0, "%"PRIu64, usedlogicalblocks);
-		usedblocks = malloc(length + 1);
-		snprintf(usedblocks, length + 1, "%"PRIu64, usedlogicalblocks);
-
-		length = snprintf(NULL, 0, "%"PRIu64, spec->blocklen);
-		sectorsize = malloc(length + 1);
-		snprintf(sectorsize, length + 1, "%"PRIu64, spec->blocklen);
-
-		json_object *jreads = json_object_new_string(
-		    reads);	/* instantiate child object */
-		json_object *jwrites = json_object_new_string(writes);
-		json_object *jtotalreadbytes =
-		    json_object_new_string(totalreadbytes);
-		json_object *jtotalwritebytes =
-		    json_object_new_string(totalwritebytes);
-		json_object *jsize = json_object_new_string(size);
-		json_object *jusedlogicalblocks =
-		    json_object_new_string(usedblocks);
-		json_object *jsectorsize = json_object_new_string(sectorsize);
-
+		json_object_object_add(jobj, "iqn",
+		    json_object_new_string(spec->lu->name));
 		json_object_object_add(jobj, "WriteIOPS",
-		    jwrites);	/* add values to object field */
-		json_object_object_add(jobj, "ReadIOPS", jreads);
+		    json_object_new_uint64(spec->writes));
+		json_object_object_add(jobj, "ReadIOPS",
+		    json_object_new_uint64(spec->reads));
 		json_object_object_add(jobj, "TotalWriteBytes",
-		    jtotalwritebytes);
-		json_object_object_add(jobj, "TotalReadBytes", jtotalreadbytes);
-		json_object_object_add(jobj, "Size", jsize);
+		    json_object_new_uint64(spec->writebytes));
+		json_object_object_add(jobj, "TotalReadBytes",
+		    json_object_new_uint64(spec->readbytes));
+		json_object_object_add(jobj, "Size",
+		    json_object_new_uint64(spec->size));
+
+		usedlogicalblocks = (spec->stats.used / spec->blocklen);
 		json_object_object_add(jobj, "UsedLogicalBlocks",
-		    jusedlogicalblocks);
-		json_object_object_add(jobj, "SectorSize", jsectorsize);
+		    json_object_new_uint64(usedlogicalblocks));
+
+		json_object_object_add(jobj, "SectorSize",
+		    json_object_new_uint64(spec->blocklen));
+
+		clock_gettime(CLOCK_MONOTONIC_RAW, &now);
+		time_diff = (uint64_t)(now.tv_sec - istgt_start_time.tv_sec);
+		json_object_object_add(jobj, "UpTime",
+		    json_object_new_uint64(time_diff));
+
+		json_object_object_add(jobj, "TotalReadTime",
+		    json_object_new_uint64(spec->totalreadtime));
+		json_object_object_add(jobj, "LUTotalReadTime",
+		    json_object_new_uint64(spec->totalreadlutime));
+		json_object_object_add(jobj, "ReplicationTotalReadTime",
+		    json_object_new_uint64(spec->totalreadrepltime));
+		json_object_object_add(jobj, "TotalWriteTime",
+		    json_object_new_uint64(spec->totalwritetime));
+		json_object_object_add(jobj, "LUTotalWriteTime",
+		    json_object_new_uint64(spec->totalwritelutime));
+		json_object_object_add(jobj, "ReplicationTotalWriteTime",
+		    json_object_new_uint64(spec->totalwriterepltime));
+		json_object_object_add(jobj, "TotalReadBlockCount",
+		    json_object_new_uint64(spec->totalreadblockcount));
+		json_object_object_add(jobj, "TotalWriteBlockCount",
+		    json_object_new_uint64(spec->totalwriteblockcount));
+
+                replica_cnt = spec->healthy_rcount + spec->degraded_rcount;
+		json_object_object_add(jobj, "ReplicaCounter",
+		    json_object_new_int(replica_cnt));
+		json_object_object_add(jobj, "RevisionCounter",
+		    json_object_new_uint64(spec->io_seq));
+		json_object_object_add(jobj, "Status",
+		    json_object_new_string(get_cv_status(spec, replica_cnt,
+                        spec->healthy_rcount)));
+
+		json_object *jobj_arr = json_object_new_array();
+		MTX_LOCK(&spec->rq_mtx);
+		TAILQ_FOREACH(replica, &spec->rq, r_next) {
+		    MTX_LOCK(&replica->r_mtx);
+
+		    struct json_object *jobjarr = NULL;
+		    get_replica_stats_json(replica, &jobjarr);
+
+		    json_object_object_add(jobjarr, "ReadReqTime",
+			json_object_new_uint64(replica->totalread_reqtime));
+		    json_object_object_add(jobjarr, "ReadRespTime",
+			json_object_new_uint64(replica->totalread_resptime));
+
+		    json_object_object_add(jobjarr, "WriteReqTime",
+			json_object_new_uint64(replica->totalwrite_reqtime));
+		    json_object_object_add(jobjarr, "WriteRespTime",
+			json_object_new_uint64(replica->totalwrite_resptime));
+		    MTX_UNLOCK(&replica->r_mtx);
+		    json_object_array_add(jobj_arr, jobjarr);
+		}
+		MTX_UNLOCK(&spec->rq_mtx);
+
+		json_object_object_add(jobj, "Replicas", jobj_arr);
 
 		istgt_uctl_snprintf(uctl, "%s  %s\n",
 		    uctl->cmd, json_object_to_json_string(jobj));
 		rc = istgt_uctl_writeline(uctl);
+
+		/* freeing root json_object will free all the allocated memory
+		** associated with the json_object.
+		*/
+		json_object_put(jobj);
+
 		if (rc != UCTL_CMD_OK) {
-			// free the pointers
-			free(reads);
-			free(writes);
-			free(totalreadbytes);
-			free(totalwritebytes);
-			free(size);
-			free(usedblocks);
-			free(sectorsize);
-			/*
-			 * freeing root json_object will free all the allocated
-			 * memory associated with the json_object.
-			 */
-			json_object_put(jobj);
+			MTX_UNLOCK(&specq_mtx);
 			return (rc);
 		}
-
-		free(reads);
-		free(writes);
-		free(totalreadbytes);
-		free(totalwritebytes);
-		free(size);
-		free(usedblocks);
-		free(sectorsize);
-		json_object_put(jobj);
 	}
 	MTX_UNLOCK(&specq_mtx);
 	istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
@@ -3689,6 +3725,7 @@ static ISTGT_UCTL_CMD_TABLE istgt_uctl_cmd_table[] =
 	{ "SNAPCREATE", istgt_uctl_cmd_snap},
 	{ "SNAPDESTROY", istgt_uctl_cmd_snap},
 	{ "REPLICA", istgt_uctl_cmd_replica_stats},
+	{ "MAXIOWAIT", istgt_uctl_cmd_max_io_wait},
 #endif
 	{ NULL, NULL },
 };
@@ -3795,7 +3832,7 @@ uctlworker(void *arg)
 	rc = istgt_uctl_writeline(uctl);
 	if (rc != UCTL_CMD_OK) {
 		ISTGT_ERRLOG("uctl_writeline() failed\n");
-		return (NULL);
+		goto error;
 	}
 
 	while (1) {
@@ -3831,6 +3868,7 @@ uctlworker(void *arg)
 
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "exiting ctlworker\n");
 
+error:
 	close(uctl->sock);
 	uctl->sock = -1;
 	istgt_free_uctl(uctl);
@@ -3861,6 +3899,7 @@ istgt_create_uctl(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock,
 	UCTL_Ptr uctl;
 	int rc;
 	int i;
+	pthread_t thread;
 
 	uctl = xmalloc(sizeof (*uctl));
 	memset(uctl, 0, sizeof (*uctl));
@@ -3982,25 +4021,26 @@ istgt_create_uctl(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock,
 
 	/* create new thread */
 #ifdef ISTGT_STACKSIZE
-	rc = pthread_create(&uctl->thread, &istgt->attr, &uctlworker,
+	rc = pthread_create(&thread, &istgt->attr, &uctlworker,
 	    (void *)uctl);
 #else
-	rc = pthread_create(&uctl->thread, NULL, &uctlworker, (void *)uctl);
+	rc = pthread_create(&thread, NULL, &uctlworker, (void *)uctl);
 #endif
 	if (rc != 0) {
 		ISTGT_ERRLOG("pthread_create() failed\n");
-	error_return:
+error_return:
+		xfree(uctl->mediadirectory);
 		xfree(uctl->portal.label);
 		xfree(uctl->portal.host);
 		xfree(uctl->portal.port);
 		xfree(uctl);
 		return (-1);
 	}
-	rc = pthread_detach(uctl->thread);
+	rc = pthread_detach(thread);
 	if (rc != 0) {
 		ISTGT_ERRLOG("pthread_detach() failed\n");
-		goto error_return;
 	}
+
 	return (0);
 }
 

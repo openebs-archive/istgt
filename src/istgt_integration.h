@@ -17,7 +17,7 @@ typedef struct istgt_lu_disk_t spec_t;
 typedef struct rcmd_s rcmd_t;
 
 /*
- * state of commands queued for replica according to send/recieve
+ * state of commands queued for replica according to send/receive
  */
 typedef enum {
 	READ_IO_RESP_HDR = 1,	/* to read mgmt IO hdr */
@@ -32,37 +32,73 @@ typedef enum zvol_status replica_state_t;
 typedef struct replica_s {
 	TAILQ_ENTRY(replica_s) r_next;
 	TAILQ_ENTRY(replica_s) r_waitnext;
-	rte_smempool_t cmdq;	/* list of IOs queued from spec to replica */
-	TAILQ_HEAD(, rcmd_s) readyq;	/* list of IOs (non-blocking IOs) ready to sent to replica */
-	TAILQ_HEAD(, rcmd_s) waitq;	/* list of IOs waiting for the response from replica */
-	TAILQ_HEAD(, rcmd_s) blockedq;	/* list of blocked IOs */
-	pthread_cond_t r_cond;		/* replica level cond. variable */
-	pthread_mutex_t r_mtx;		/* replica level mutex lock */
+	/* list of IOs queued from spec to replica */
+	rte_smempool_t cmdq;
+	/* list of IOs (non-blocking IOs) ready to sent to replica */
+	TAILQ_HEAD(, rcmd_s) readyq;
+	/* list of IOs waiting for the response from replica */
+	TAILQ_HEAD(, rcmd_s) waitq;
+	/* list of blocked IOs */
+	TAILQ_HEAD(, rcmd_s) blockedq;
+	/* replica level cond. variable */
+	pthread_cond_t r_cond;
+	/* replica level mutex lock */
+	pthread_mutex_t r_mtx;
 	replica_state_t state;
 	spec_t *spec;
 	int iofd;
-	int mgmt_fd;			/* management connection descriptor */
-	int port;			/* replica's IOs server port */
-	char *ip;			/* replica's IP */
+	/* management connection descriptor */
+	int mgmt_fd;
+	uint8_t quorum;
+	uint8_t reserved;
+	/* replica's IOs server port */
+	uint16_t port;
+	/* replica's IP */
+	char *ip;
 	uint64_t pool_guid;
 	uint64_t zvol_guid;
 
-	void *ongoing_io_buf;		/* payload for current IO response for a replica */
-	uint64_t ongoing_io_len;	/* payload size for IO response for a replica */
-	rcmd_t *ongoing_io;		/* IO for which we are receiving response from replica */
-	void *m_event1;			/* data ptr for epoll */
-	int mgmt_eventfd1;		/* eventfd to notify for a command in replica's mgmt cmd queue */
-	void *m_event2;			/* data ptr for epoll */
-	int mgmt_eventfd2;		/* to inform mgmt interface for an error in data interface */
-	int disconnect_conn;		/* to inform data interface for an error in mgmt interface */
-	int conn_closed;		/* To track tear down of replica's interfaces(mgmt and data) */
-	int epollfd;			/* Epoll descriptor for data interface */
-	int data_eventfd;		/* eventfd to notify data interface for IOs in replica's cmdq */
-	int epfd;			/* Epoll descriptor for mgmt interface */
+	/* payload for current IO response for a replica */
+	void *ongoing_io_buf;
+
+	/* payload size for IO response for a replica */
+	uint64_t ongoing_io_len;
+	/* IO for which we are receiving response from replica */
+	rcmd_t *ongoing_io;
+	/* data ptr for epoll */
+	void *m_event1;
+	/* eventfd to notify for a command in replica's mgmt cmd queue */
+	int mgmt_eventfd1;
+	/* data ptr for epoll */
+	void *m_event2;
+	/* to inform mgmt interface for an error in data interface */
+	int mgmt_eventfd2;
+	/* to inform data interface for an error in mgmt interface */
+	int disconnect_conn;
+	/* To track tear down of replica's interfaces(mgmt and data) */
+	int conn_closed;
+	/* Epoll descriptor for data interface */
+	int epollfd;
+	/* eventfd to notify data interface for IOs in replica's cmdq */
+	int data_eventfd;
+	/* Epoll descriptor for mgmt interface */
+	int epfd;
+
 	int dont_free;
 
 	struct timespec create_time;
 
+	/* This is calculated from create time till the queued time into readyQ */
+	/* Total time(ns) waited in queue to send read_IO req */
+	uint64_t totalread_reqtime;
+	/* Total time(ns) waited in queue to send write_IO req */
+	uint64_t totalwrite_reqtime;
+
+	/* This is calculated from create time till the entire resp read from wire*/
+	/* Total time(ns) to recv read_IO resp */
+	uint64_t totalread_resptime;
+	/* Total time(ns) to recv write_IO resp */
+	uint64_t totalwrite_resptime;
 	/*
 	 * Following variables should be updated with atomic operation only
 	 */
@@ -70,15 +106,23 @@ typedef struct replica_s {
 	uint64_t replica_inflight_read_io_cnt;
 	uint64_t replica_inflight_sync_io_cnt;
 
-	zvol_io_hdr_t *io_resp_hdr;	/* header recieved on data connection */
-	int io_state;			/* state of command on data connection */
-	uint32_t io_read;			/* amount of IO data read in current IO state for data connection */
-	zvol_io_hdr_t *mgmt_io_resp_hdr;/* header recieved on management connection */
-	void *mgmt_io_resp_data;	/* data recieved on management connection */
-	TAILQ_HEAD(, mgmt_cmd_s) mgmt_cmd_queue;	/* mgmt command queue for management connection */
+	/* header recieved on data connection */
+	zvol_io_hdr_t *io_resp_hdr;
+	/* state of command on data connection */
+	int io_state;
+	/* amount of IO data read in current IO state for data connection */
+	uint32_t io_read;
+	/* header recieved on management connection */
+	zvol_io_hdr_t *mgmt_io_resp_hdr;
+	/* data recieved on management connection */
+	void *mgmt_io_resp_data;
+	/* mgmt command queue for management connection */
+	TAILQ_HEAD(, mgmt_cmd_s) mgmt_cmd_queue;
+
 	uint64_t initial_checkpointed_io_seq;
 #ifdef	DEBUG
-	int replica_mgmt_dport;		/* port from which replica has made mgmt conn. */
+	/* port from which replica has made mgmt conn. */
+	int replica_mgmt_dport;
 #endif
 } replica_t;
 

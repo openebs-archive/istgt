@@ -16,6 +16,7 @@
 #include "replication.h"
 #include "istgt_integration.h"
 #include "replication_misc.h"
+#include "assert.h"
 
 __thread char tinfo[50] = {0};
 int g_trace_flag = 0;
@@ -24,13 +25,13 @@ int replication_factor = 3, consistency_factor = 2;
 int new_replica_count = 3;	/* Assign same number as replication factor */
 
 typedef enum unit_test_state {
-        UNIT_TEST_STATE_NONE = 0,
-        UNIT_TEST_STATE_KILL_SINGLE_REPLICA,
-        UNIT_TEST_STATE_REREGISTER_REPLICA,
-        UNIT_TEST_STATE_READ_WRITE_REPLICA,
-        UNIT_TEST_STATE_KILL_ALL_REPLICA,
-        UNIT_TEST_STATE_REGISTER_NEW_REPLICA,
- 	UNIT_TEST_STATE_READ_WRITE_SINGLE_REPLICA,
+	UNIT_TEST_STATE_NONE = 0,
+	UNIT_TEST_STATE_KILL_SINGLE_REPLICA,
+	UNIT_TEST_STATE_REREGISTER_REPLICA,
+	UNIT_TEST_STATE_READ_WRITE_REPLICA,
+	UNIT_TEST_STATE_KILL_ALL_REPLICA,
+	UNIT_TEST_STATE_REGISTER_NEW_REPLICA,
+	UNIT_TEST_STATE_READ_WRITE_SINGLE_REPLICA,
 } unit_test_state_t;
 
 typedef struct rebuild_test_s {
@@ -40,6 +41,16 @@ typedef struct rebuild_test_s {
 	unit_test_state_t state;
 	bool data_read_write_test_done;
 } rebuild_test_t;
+
+typedef struct snapshot_resp_s {
+	pthread_mutex_t snap_resp_mtx;
+	int required_resp;
+	int test_id;
+	int success_cnt;
+	int failure_cnt;
+} snapshot_resp_t;
+
+snapshot_resp_t snap_resp;
 
 extern int replica_poll_time;
 extern int replica_timeout;
@@ -92,12 +103,16 @@ typedef struct rargs_s {
 	zvol_status_t 	zrepl_status;
 	zvol_rebuild_status_t zrepl_rebuild_status;
 
-	uint64_t write_cnt;	
+	uint64_t write_cnt;
 	uint64_t destroy_snap_ioseq;
+	char *destroy_snapname;
 	int rebuild_status_enquiry;
+
 	/* flag to stop replica threads once this is set to 1 */
 	int kill_replica;
 	int kill_is_over;
+
+	int snap_error;
 } rargs_t;
 
 typedef struct zvol_io_cmd_s {
@@ -105,6 +120,12 @@ typedef struct zvol_io_cmd_s {
 	zvol_io_hdr_t 	hdr;
 	void		*buf;
 } zvol_io_cmd_t;
+
+void init_snap_resp_list(void);
+void destroy_snap_resp_list(void);
+void update_snap_resp_list(spec_t *spec);
+static pthread_t reregister_replica(char *volname, rargs_t *rargs, int port);
+void verify_snap_response(int res);
 
 /*
  * Allocate zio command along with
@@ -181,8 +202,9 @@ handle_open(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 	zvol_io_hdr_t *hdr = &(zio_cmd->hdr);
 	zvol_op_open_data_t *data = zio_cmd->buf;
 
-	REPLICA_LOG("%d %s %d %d %d %s\n", rargs->replica_port, rargs->file_path, rargs->file_fd,
-	    data->timeout, data->tgt_block_size, data->volname);
+	REPLICA_LOG("%d %s %d %d %d %s\n", rargs->replica_port,
+		rargs->file_path, rargs->file_fd, data->timeout,
+		data->tgt_block_size, data->volname);
 	free(zio_cmd->buf);
 	hdr->len = 0;
 	zio_cmd->buf = NULL;
@@ -213,6 +235,53 @@ handle_replica_start_rebuild(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 	hdr->status = ZVOL_OP_STATUS_OK;
 }
 
+void
+init_snap_resp_list()
+{
+	(void) pthread_mutex_init(&snap_resp.snap_resp_mtx, NULL);
+}
+
+void
+destroy_snap_resp_list()
+{
+	(void) pthread_mutex_destroy(&snap_resp.snap_resp_mtx);
+}
+
+enum {
+	SNAP_CONSISTENCY_CHECK,
+	SNAP_CREATE_FAILURE,
+	SNAP_CREATE_TIMEOUT,
+	SNAP_TEST_COUNT,
+} snap_test_type;
+
+void
+update_snap_resp_list(spec_t *spec)
+{
+	if (snap_resp.test_id == SNAP_CREATE_TIMEOUT)
+		sleep(10);
+
+	MTX_LOCK(&snap_resp.snap_resp_mtx);
+	VERIFY0(snap_resp.required_resp);
+	snap_resp.required_resp = spec->consistency_factor;
+	snap_resp.success_cnt = 0;
+	snap_resp.failure_cnt = 0;
+	snap_resp.test_id = (++snap_resp.test_id) % SNAP_TEST_COUNT;
+	MTX_UNLOCK(&snap_resp.snap_resp_mtx);
+}
+
+void
+verify_snap_response(int res)
+{
+	MTX_LOCK(&snap_resp.snap_resp_mtx);
+	if (!res) {
+		VERIFY(snap_resp.success_cnt < snap_resp.required_resp);
+	} else {
+		VERIFY(snap_resp.success_cnt >= snap_resp.required_resp);
+	}
+	snap_resp.required_resp = 0;
+	MTX_UNLOCK(&snap_resp.snap_resp_mtx);
+}
+
 /* Handle SNAP commands */
 static void
 handle_snap_opcode(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
@@ -225,29 +294,36 @@ handle_snap_opcode(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 		exit(1);
 	}
 
-	if (strncmp(zio_cmd->buf, rargs->volname, strlen(rargs->volname)) != 0) {
-		REPLICA_ERRLOG("name mismatch %s %s\n", (char *)zio_cmd->buf, rargs->volname);
+	if (strncmp(zio_cmd->buf, rargs->volname,
+		strlen(rargs->volname)) != 0) {
+		REPLICA_ERRLOG("name mismatch %s %s\n",
+			(char *)zio_cmd->buf, rargs->volname);
 		exit(1);
 	}
 
 	if (hdr->opcode == ZVOL_OPCODE_SNAP_DESTROY) {
+		VERIFY0(strcmp(rargs->destroy_snapname, zio_cmd->buf));
 		if (rargs->destroy_snap_ioseq != 0) {
 			if (hdr->io_seq != rargs->destroy_snap_ioseq) {
-				REPLICA_ERRLOG("writes happened during snapshot..\n");
+				REPLICA_ERRLOG("writes happened \
+				during snapshot..\n");
 				exit(1);
 			}
 			rargs->destroy_snap_ioseq = 0;
 		}
 		goto send_response;
 	}
-	/* expectation of snap destroy due to prev failue, but, snap create opcode */
+	/*
+	 * expectation of snap destroy due to prev failue,
+	 * but, snap create opcode
+	 */
 	if (rargs->destroy_snap_ioseq != 0) {
 		REPLICA_ERRLOG("destroy_snap_ioseq should have been emtpy\n");
 		exit(1);
 	}
 	if (rargs->zrepl_status != ZVOL_STATUS_HEALTHY) {
 		REPLICA_ERRLOG("replica not healthy %d\n", rargs->zrepl_status);
-		exit(1);
+//		exit(1);
 	}
 
 	write_cnt1 = rargs->write_cnt;
@@ -255,7 +331,8 @@ handle_snap_opcode(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 	write_cnt2 = rargs->write_cnt;
 
 	if (write_cnt1 != write_cnt2) {
-		REPLICA_ERRLOG("writes still happening %lu %lu %lu\n", write_cnt1, write_cnt2, hdr->io_seq);
+		REPLICA_ERRLOG("writes still happening %lu %lu %lu\n",
+		write_cnt1, write_cnt2, hdr->io_seq);
 		/*
 		 * Write IOs still happening, so, destroy snap
 		 * should come with same io_seq
@@ -264,15 +341,49 @@ handle_snap_opcode(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 	}
 
 send_response:
+	if (hdr->opcode == ZVOL_OPCODE_SNAP_CREATE) {
+		MTX_LOCK(&snap_resp.snap_resp_mtx);
+		switch (snap_resp.test_id) {
+			case SNAP_CREATE_TIMEOUT:
+				if (snap_resp.success_cnt >= snap_resp.required_resp) {
+					rargs->snap_error = 1;
+					hdr->status = ZVOL_OP_STATUS_OK;
+				}
+				break;
+
+			case  SNAP_CONSISTENCY_CHECK:
+				if (snap_resp.success_cnt >= snap_resp.required_resp)
+					hdr->status = ZVOL_OP_STATUS_FAILED;
+				else
+					hdr->status = ZVOL_OP_STATUS_OK;
+				break;
+
+			case  SNAP_CREATE_FAILURE:
+				hdr->status = ZVOL_OP_STATUS_FAILED;
+				break;
+
+			default:
+				hdr->status = ZVOL_OP_STATUS_OK;
+				break;
+		}
+
+		if (!rargs->snap_error) {
+			if (hdr->status == ZVOL_OP_STATUS_FAILED) {
+				snap_resp.failure_cnt++;
+			} else
+				snap_resp.success_cnt++;
+		}
+		MTX_UNLOCK(&snap_resp.snap_resp_mtx);
+
+		if (rargs->destroy_snapname)
+			free(rargs->destroy_snapname);
+		rargs->destroy_snapname = strdup(zio_cmd->buf);
+	}
+
 	if (zio_cmd->buf)
 		free(zio_cmd->buf);
 	zio_cmd->buf = NULL;
 	hdr->len = 0;
-
-	if ((random() % 10) == 0)
-		hdr->status = ZVOL_OP_STATUS_FAILED;
-	else
-		hdr->status = ZVOL_OP_STATUS_OK;
 }
 
 static void
@@ -282,10 +393,10 @@ handle_stats(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 	zvol_io_hdr_t *hdr = &(zio_cmd->hdr);
 
 	if (strcmp(zio_cmd->buf, rargs->volname) != 0)
-		exit (1);
+		exit(1);
 
 	if (rargs->zrepl_status != ZVOL_STATUS_HEALTHY)
-		exit (1);
+		exit(1);
 
 	if (zio_cmd->buf)
 		free(zio_cmd->buf);
@@ -314,7 +425,7 @@ handle_replica_status(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 	zrepl_status_ack_t *zrepl_status;
 
 	zrepl_status = malloc(sizeof (*zrepl_status));
-	/* After 2 enquiries, mark replica healthy */	
+	/* After 2 enquiries, mark replica healthy */
 	if ((rargs->zrepl_status != ZVOL_STATUS_HEALTHY) &&
 	    (rargs->rebuild_status_enquiry >= 2)) {
 		rargs->zrepl_status = ZVOL_STATUS_HEALTHY;
@@ -399,8 +510,9 @@ mock_repl_mgmt_sender(void *args)
 	while (1) {
 		MTX_LOCK(&rargs->mgmt_send_mtx);
 		while (TAILQ_EMPTY(&rargs->mgmt_send_list)) {
-			pthread_cond_wait(&rargs->mgmt_send_cv, &rargs->mgmt_send_mtx);
-			if (rargs->kill_replica == true) {
+			pthread_cond_wait(&rargs->mgmt_send_cv,
+          &rargs->mgmt_send_mtx);
+			if (rargs->kill_replica == true || rargs->snap_error) {
 				MTX_UNLOCK(&rargs->mgmt_send_mtx);
 				goto end;
 			}
@@ -409,11 +521,13 @@ mock_repl_mgmt_sender(void *args)
 		TAILQ_REMOVE(&rargs->mgmt_send_list, zio_cmd, next);
 		MTX_UNLOCK(&rargs->mgmt_send_mtx);
 
-		rc = uzfs_zvol_socket_write(rargs->mgmtfd, (char *)&zio_cmd->hdr, sizeof (zio_cmd->hdr));
+		rc = uzfs_zvol_socket_write(rargs->mgmtfd,
+		(char *)&zio_cmd->hdr, sizeof (zio_cmd->hdr));
 		if (rc != 0)
 			goto end;
 		if (zio_cmd->buf != NULL) {
-			rc = uzfs_zvol_socket_write(rargs->mgmtfd, zio_cmd->buf, zio_cmd->hdr.len);
+			rc = uzfs_zvol_socket_write(rargs->mgmtfd,
+			zio_cmd->buf, zio_cmd->hdr.len);
 			if (rc != 0)
 				goto end;
 		}
@@ -421,7 +535,7 @@ mock_repl_mgmt_sender(void *args)
 	}
 end:
 	REPLICA_LOG("mock_repl_mgmt_sender exiting....\n");
-	return NULL;
+	return (NULL);
 }
 
 /*
@@ -441,8 +555,9 @@ mock_repl_io_sender(void *args)
 	while (1) {
 		MTX_LOCK(&rargs->io_send_mtx);
 		while (TAILQ_EMPTY(&rargs->io_send_list)) {
-			pthread_cond_wait(&rargs->io_send_cv, &rargs->io_send_mtx);
-			if (rargs->kill_replica == true) {
+			pthread_cond_wait(&rargs->io_send_cv,
+          &rargs->io_send_mtx);
+			if (rargs->kill_replica == true || rargs->snap_error) {
 				MTX_UNLOCK(&rargs->io_send_mtx);
 				goto end;
 			}
@@ -451,11 +566,13 @@ mock_repl_io_sender(void *args)
 		TAILQ_REMOVE(&rargs->io_send_list, zio_cmd, next);
 		MTX_UNLOCK(&rargs->io_send_mtx);
 
-		rc = uzfs_zvol_socket_write(rargs->iofd, (char *)&zio_cmd->hdr, sizeof (zio_cmd->hdr));
+		rc = uzfs_zvol_socket_write(rargs->iofd,
+		(char *)&zio_cmd->hdr, sizeof (zio_cmd->hdr));
 		if (rc != 0)
 			goto end;
 		if (zio_cmd->buf != NULL) {
-			rc = uzfs_zvol_socket_write(rargs->iofd, zio_cmd->buf, zio_cmd->hdr.len);
+			rc = uzfs_zvol_socket_write(rargs->iofd, zio_cmd->buf,
+			zio_cmd->hdr.len);
 			if (rc != 0)
 				goto end;
 		}
@@ -463,7 +580,7 @@ mock_repl_io_sender(void *args)
 	}
 end:
 	REPLICA_LOG("mock_repl_io_sender exiting....\n");
-	return NULL;
+	return (NULL);
 }
 
 static void
@@ -479,9 +596,10 @@ handle_read(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 	orig_data = data = malloc(len + sizeof (struct zvol_io_rw_hdr));
 	nbytes = 0;
 	data += sizeof (struct zvol_io_rw_hdr);
-	while((rc = pread(rargs->file_fd, data + nbytes, len - nbytes, offset + nbytes))) {
-		if(rc == -1) {
-			if(errno == EAGAIN) {
+	while ((rc = pread(rargs->file_fd, data + nbytes,
+	len - nbytes, offset + nbytes))) {
+		if (rc == -1) {
+			if (errno == EAGAIN) {
 				sleep(1);
 				continue;
 			}
@@ -489,7 +607,7 @@ handle_read(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 			exit(EXIT_FAILURE);
 		}
 		nbytes += rc;
-		if(nbytes == hdr->len) {
+		if (nbytes == hdr->len) {
 			break;
 		}
 	}
@@ -510,10 +628,11 @@ handle_write(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 	uint8_t *data = zio_cmd->buf;
 	struct zvol_io_rw_hdr *io_rw_hdr = (struct zvol_io_rw_hdr *)data;
 
-	data += sizeof(struct zvol_io_rw_hdr);
-	while((rc = pwrite(rargs->file_fd, data + nbytes, io_rw_hdr->len - nbytes, hdr->offset + nbytes))) {
-		if(rc == -1 ) {
-			if(errno == EAGAIN) {
+	data += sizeof (struct zvol_io_rw_hdr);
+	while ((rc = pwrite(rargs->file_fd, data + nbytes,
+	io_rw_hdr->len - nbytes, hdr->offset + nbytes))) {
+		if (rc == -1) {
+			if (errno == EAGAIN) {
 				sleep(1);
 				continue;
 			}
@@ -521,7 +640,7 @@ handle_write(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 			exit(EXIT_FAILURE);
 		}
 		nbytes += rc;
-		if(nbytes == io_rw_hdr->len) {
+		if (nbytes == io_rw_hdr->len) {
 			break;
 		}
 	}
@@ -557,12 +676,13 @@ mock_repl_io_worker(void *args)
 	snprintf(tinfo, 50, "mockiowork%d", rargs->replica_port);
 	prctl(PR_SET_NAME, tinfo, 0, 0, 0);
 
-	clock_gettime(CLOCK_MONOTONIC, &prev);
+	clock_gettime(CLOCK_MONOTONIC_RAW, &prev);
 	while (1) {
 		MTX_LOCK(&rargs->io_recv_mtx);
 		while (TAILQ_EMPTY(&(rargs->io_recv_list))) {
-			pthread_cond_wait(&rargs->io_recv_cv, &rargs->io_recv_mtx);
-			if (rargs->kill_replica == true) {
+			pthread_cond_wait(&rargs->io_recv_cv,
+          &rargs->io_recv_mtx);
+			if (rargs->kill_replica == true || rargs->snap_error) {
 				MTX_UNLOCK(&rargs->io_recv_mtx);
 				goto end;
 			}
@@ -571,8 +691,7 @@ mock_repl_io_worker(void *args)
 		TAILQ_REMOVE(&rargs->io_recv_list, zio_cmd, next);
 		MTX_UNLOCK(&rargs->io_recv_mtx);
 		hdr = &zio_cmd->hdr;
-		switch(hdr->opcode)
-		{
+		switch (hdr->opcode) {
 			case ZVOL_OPCODE_OPEN:
 				handle_open(rargs, zio_cmd);
 				break;
@@ -593,7 +712,7 @@ mock_repl_io_worker(void *args)
 				break;
 		}
 
-		clock_gettime(CLOCK_MONOTONIC, &now);
+		clock_gettime(CLOCK_MONOTONIC_RAW, &now);
 		if (now.tv_sec - prev.tv_sec > 1) {
 			prev = now;
 			REPLICA_LOG("read %d wrote %d sync %d from %s\n",
@@ -606,7 +725,7 @@ mock_repl_io_worker(void *args)
 	}
 end:
 	REPLICA_LOG("mock_repl_io_worker exiting....\n");
-	return NULL;
+	return (NULL);
 }
 
 /*
@@ -627,8 +746,9 @@ mock_repl_mgmt_worker(void *args)
 	while (1) {
 		MTX_LOCK(&rargs->mgmt_recv_mtx);
 		while (TAILQ_EMPTY(&(rargs->mgmt_recv_list))) {
-			pthread_cond_wait(&rargs->mgmt_recv_cv, &rargs->mgmt_recv_mtx);
-			if (rargs->kill_replica == true) {
+			pthread_cond_wait(&rargs->mgmt_recv_cv,
+          &rargs->mgmt_recv_mtx);
+			if (rargs->kill_replica == true || rargs->snap_error) {
 				MTX_UNLOCK(&rargs->mgmt_recv_mtx);
 				goto end;
 			}
@@ -637,8 +757,7 @@ mock_repl_mgmt_worker(void *args)
 		TAILQ_REMOVE(&rargs->mgmt_recv_list, zio_cmd, next);
 		MTX_UNLOCK(&rargs->mgmt_recv_mtx);
 		hdr = &zio_cmd->hdr;
-		switch(hdr->opcode)
-		{
+		switch (hdr->opcode) {
 			case ZVOL_OPCODE_HANDSHAKE:
 			case ZVOL_OPCODE_PREPARE_FOR_REBUILD:
 				handle_handshake(rargs, zio_cmd);
@@ -661,13 +780,17 @@ mock_repl_mgmt_worker(void *args)
 		}
 
 		MTX_LOCK(&rargs->mgmt_send_mtx);
+		if (rargs->snap_error) {
+			MTX_UNLOCK(&rargs->mgmt_send_mtx);
+			goto end;
+		}
 		TAILQ_INSERT_TAIL(&rargs->mgmt_send_list, zio_cmd, next);
 		pthread_cond_signal(&rargs->mgmt_send_cv);
 		MTX_UNLOCK(&rargs->mgmt_send_mtx);
 	}
 end:
 	REPLICA_LOG("mock_repl_mgmt_worker exiting....\n");
-	return NULL;
+	return (NULL);
 }
 
 /*
@@ -689,14 +812,18 @@ mock_repl_mgmt_receiver(void *args)
 		rc = uzfs_zvol_socket_read(rargs->mgmtfd, (char *)hdr,
 		    sizeof (*hdr));
 		if (rc != 0) {
-			REPLICA_ERRLOG("error reading from socket: %d\n", errno);
+			REPLICA_ERRLOG("error reading \
+			from socket: %d\n", errno);
 			goto end;
 		}
+
+		VERIFY0(rargs->snap_error);
 
 		zio_cmd = zio_cmd_alloc(hdr);
 		/* Read payload for commands which have it */
 		if (hdr->len != 0) {
-			rc = uzfs_zvol_socket_read(rargs->mgmtfd, zio_cmd->buf, hdr->len);
+			rc = uzfs_zvol_socket_read(rargs->mgmtfd,
+			zio_cmd->buf, hdr->len);
 			if (rc != 0) {
 				zio_cmd_free(&zio_cmd);
 				REPLICA_ERRLOG("Socket read failed with "
@@ -717,8 +844,11 @@ mock_repl_mgmt_receiver(void *args)
 	}
 end:
 	free(hdr);
+	if (rargs->snap_error == 1) {
+		rargs->snap_error = 2;
+	}
 	REPLICA_LOG("mock_repl_mgmt_receiver exiting....\n");
-	return NULL;
+	return (NULL);
 }
 
 /*
@@ -736,18 +866,20 @@ mock_repl_io_receiver(void *args)
 	snprintf(tinfo, 50, "mockiorecv%d", rargs->replica_port);
 	prctl(PR_SET_NAME, tinfo, 0, 0, 0);
 
-	while (1) {
+	while (1 && !rargs->snap_error) {
 		rc = uzfs_zvol_socket_read(rargs->iofd, (char *)hdr,
 		    sizeof (*hdr));
 		if (rc != 0) {
-			REPLICA_ERRLOG("error reading from socket: %d\n", errno);
+			REPLICA_ERRLOG("error reading \
+			from socket: %d\n", errno);
 			goto end;
 		}
 
 		zio_cmd = zio_cmd_alloc(hdr);
 		/* Read payload for commands which have it */
 		if (zio_cmd->buf != NULL) {
-			rc = uzfs_zvol_socket_read(rargs->iofd, zio_cmd->buf, hdr->len);
+			rc = uzfs_zvol_socket_read(rargs->iofd,
+			zio_cmd->buf, hdr->len);
 			if (rc != 0) {
 				zio_cmd_free(&zio_cmd);
 				REPLICA_ERRLOG("Socket read failed with "
@@ -763,12 +895,15 @@ mock_repl_io_receiver(void *args)
 	}
 end:
 	free(hdr);
+	if (rargs->snap_error) {
+		rargs->snap_error = 2;
+	}
 	REPLICA_LOG("mock_repl_io_receiver exiting....\n");
-	return NULL;
+	return (NULL);
 }
 
 pthread_mutexattr_t mutex_attr;
-extern void create_mock_client(spec_t *);
+extern void create_mock_client(spec_t *, bool);
 extern int start_errored_replica(int replica_count);
 extern void trigger_data_conn_error(void);
 extern void shutdown_errored_replica(void);
@@ -792,20 +927,22 @@ initialize_spec(spec_t *spec)
 	spec->blocklen = blocklen;
 	spec->blockcnt = (volsize / spec->blocklen);
 
-	for(k = 0; k < ISTGT_MAX_NUM_LUWORKERS; k++) {
+	for (k = 0; k < ISTGT_MAX_NUM_LUWORKERS; k++) {
 		rc = pthread_cond_init(&spec->luworker_rcond[k], NULL);
 		if (rc != 0) {
-			REPLICA_ERRLOG("luworker %d rcond_init() failed errno:%d\n", k, errno);
-			return -1;
+			REPLICA_ERRLOG("luworker %d rcond_init() \
+			failed errno:%d\n", k, errno);
+			return (-1);
 		}
 
 		rc = pthread_mutex_init(&spec->luworker_rmutex[k], &mutex_attr);
 		if (rc != 0) {
-			REPLICA_ERRLOG("luworker %d mutex_init() failed errno:%d\n", k, errno);
-			return -1;
+			REPLICA_ERRLOG("luworker %d mutex_init() \
+			failed errno:%d\n", k, errno);
+			return (-1);
 		}
 	}
-	return 0;
+	return (0);
 }
 
 /*
@@ -828,18 +965,21 @@ mock_repl(void *args)
 
 	rargs->file_fd = file_fd = open(rargs->file_path, O_RDWR, 0666);
 	if (file_fd < 0) {
-		REPLICA_ERRLOG("file %s open failed, errorno:%d", rargs->file_path, errno);
+		REPLICA_ERRLOG("file %s open failed, \
+		errorno:%d", rargs->file_path, errno);
 		abort();
 	}
 
-	//Create listener for io connections from controller and add to epoll
-	if((sfd = cstor_ops.conn_listen(rargs->replica_ip, rargs->replica_port, 32, 0)) < 0) {
+	// Create listener for io connections from controller and add to epoll
+	if ((sfd = cstor_ops.conn_listen(rargs->replica_ip, rargs->replica_port,
+			32, 0)) < 0) {
 		REPLICA_ERRLOG("conn_listen() failed, errorno:%d", errno);
 		abort();
-        }
+		}
 
-	//Connect to controller to start handshake and connect to epoll
-	while((rargs->mgmtfd = mgmtfd = cstor_ops.conn_connect(rargs->ctrl_ip, rargs->ctrl_port)) < 0) {
+	// Connect to controller to start handshake and connect to epoll
+	while ((rargs->mgmtfd = mgmtfd =
+		cstor_ops.conn_connect(rargs->ctrl_ip, rargs->ctrl_port)) < 0) {
 		REPLICA_ERRLOG("conn_connect() failed errno:%d\n", errno);
 		sleep(1);
 	}
@@ -862,7 +1002,7 @@ mock_repl(void *args)
 	TAILQ_INIT(&rargs->io_recv_list);
 	TAILQ_INIT(&rargs->io_send_list);
 
-	rargs->zrepl_status = ZVOL_STATUS_DEGRADED; 
+	rargs->zrepl_status = ZVOL_STATUS_DEGRADED;
 	rargs->zrepl_rebuild_status = ZVOL_REBUILDING_INIT;
 	rargs->rebuild_status_enquiry = 0;
 
@@ -878,47 +1018,60 @@ mock_repl(void *args)
 	pthread_create(&io_worker2, NULL, &mock_repl_io_worker, args);
 	pthread_create(&io_worker3, NULL, &mock_repl_io_worker, args);
 	while(1) {
-		sleep(5);
-		if (rargs->kill_replica == true) {
+		sleep(2);
+		if (rargs->kill_replica == true || rargs->snap_error == 2) {
 			REPLICA_ERRLOG("Killing replica:%s port:%d\n",
 			    rargs->replica_ip, rargs->replica_port);
 			pthread_cond_broadcast(&rargs->mgmt_recv_cv);
 			pthread_cond_broadcast(&rargs->mgmt_send_cv);
 			pthread_cond_broadcast(&rargs->io_recv_cv);
 			pthread_cond_broadcast(&rargs->io_send_cv);
-			sleep(5);
+			if (rargs->kill_replica)
+				sleep(5);
 			shutdown(rargs->mgmtfd, SHUT_RDWR);
 			shutdown(rargs->iofd, SHUT_RDWR);
 			close(rargs->mgmtfd);
 			close(rargs->iofd);
 			close(rargs->file_fd);
 			close(sfd);
-			sleep(5);
+			if (rargs->kill_replica)
+				sleep(5);
 
 			while (!TAILQ_EMPTY(&(rargs->mgmt_recv_list))) {
 				zio_cmd = TAILQ_FIRST(&rargs->mgmt_recv_list);
-				TAILQ_REMOVE(&rargs->mgmt_recv_list, zio_cmd, next);
+				TAILQ_REMOVE(&rargs->mgmt_recv_list,
+				zio_cmd, next);
 				zio_cmd_free(&zio_cmd);
 			}
 
 			while (!TAILQ_EMPTY(&rargs->mgmt_send_list)) {
-				zio_cmd = TAILQ_FIRST(&rargs->mgmt_send_list);
-				TAILQ_REMOVE(&rargs->mgmt_send_list, zio_cmd, next);
+				zio_cmd =
+				TAILQ_FIRST(&rargs->mgmt_send_list);
+				TAILQ_REMOVE(&rargs->mgmt_send_list,
+				zio_cmd, next);
 				free(zio_cmd);
 			}
 
 			while (!TAILQ_EMPTY(&(rargs->io_recv_list))) {
-				zio_cmd = TAILQ_FIRST(&rargs->io_recv_list);
-				TAILQ_REMOVE(&rargs->io_recv_list, zio_cmd, next);
+				zio_cmd =
+				TAILQ_FIRST(&rargs->io_recv_list);
+				TAILQ_REMOVE(&rargs->io_recv_list,
+				zio_cmd, next);
 				free(zio_cmd);
 			}
 
 			while (!TAILQ_EMPTY(&rargs->io_send_list)) {
 				zio_cmd = TAILQ_FIRST(&rargs->io_send_list);
-				TAILQ_REMOVE(&rargs->io_send_list, zio_cmd, next);
+				TAILQ_REMOVE(&rargs->io_send_list,
+				zio_cmd, next);
 				free(zio_cmd);
 			}
 			rargs->mgmtfd = rargs->iofd = rargs->file_fd = -1;
+			pthread_cond_broadcast(&rargs->mgmt_recv_cv);
+			pthread_cond_broadcast(&rargs->mgmt_send_cv);
+			pthread_cond_broadcast(&rargs->io_recv_cv);
+			pthread_cond_broadcast(&rargs->io_send_cv);
+
 			pthread_mutex_destroy(&rargs->mgmt_recv_mtx);
 			pthread_mutex_destroy(&rargs->mgmt_send_mtx);
 
@@ -930,15 +1083,25 @@ mock_repl(void *args)
 
 			pthread_cond_destroy(&rargs->io_recv_cv);
 			pthread_cond_destroy(&rargs->io_send_cv);
-			rargs->kill_is_over = true;
+
+			if (rargs->kill_replica)
+				rargs->snap_error = 0;
+
+			if (rargs->kill_replica)
+				rargs->kill_is_over = true;
+
 			REPLICA_ERRLOG("Killing of replica:%s port:%d"
-			    " completed\n", rargs->replica_ip, rargs->replica_port);
+			    " killflag:%d snap_err:%d completed\n",
+			    rargs->replica_ip, rargs->replica_port,
+			    rargs->kill_replica, rargs->snap_error);
 			goto exit;
 		}
 	}
 exit:
 	REPLICA_LOG("mock_repl exiting....\n");
-	return NULL;
+	if (rargs->snap_error == 2 && !rargs->kill_is_over)
+		reregister_replica(rargs->volname, rargs, rargs->replica_port);
+	return (NULL);
 }
 
 /*
@@ -970,7 +1133,7 @@ create_mock_replicas(int r_factor, char *volname)
 		strncpy(rargs->replica_ip, "127.0.0.1", MAX_IP_LEN);
 		rargs->replica_port = 6061 + i;
 		rargs->kill_replica = false;
-		rargs->kill_is_over = false;	
+		rargs->kill_is_over = false;
 
 		strncpy(rargs->ctrl_ip, "127.0.0.1", MAX_IP_LEN);
 		rargs->ctrl_port = 6060;
@@ -987,7 +1150,8 @@ create_mock_replicas(int r_factor, char *volname)
 static void
 usage(void)
 {
-	printf("istgt_integration -b <blocklen> -s <volsize> -t <total_time_in_sec> -v <volname> -T <testid>\n");
+	printf("istgt_integration -b <blocklen> -s <volsize> \
+	-t <total_time_in_sec> -v <volname> -T <testid>\n");
 	exit(1);
 }
 
@@ -1092,21 +1256,25 @@ process_options(int argc, char **argv)
 }
 
 static pthread_t
-reregister_replica(spec_t *spec, rargs_t *rargs, int port)
+reregister_replica(char *volname, rargs_t *rargs, int port)
 {
 	char filepath[50];
 	pthread_t replica_thread;
 
-	sleep(60);
+	sleep(3);
+	if (rargs->kill_replica && rargs->snap_error)
+		return 0;
+
 	strncpy(rargs->replica_ip, "127.0.0.1", MAX_IP_LEN);
 	rargs->replica_port = port;
 	rargs->kill_replica = false;
-	rargs->kill_is_over = false;	
+	rargs->kill_is_over = false;
+	rargs->snap_error = 0;
 
 	strncpy(rargs->ctrl_ip, "127.0.0.1", MAX_IP_LEN);
 	rargs->ctrl_port = 6060;
 
-	strncpy(rargs->volname, spec->volname, MAX_NAME_LEN);
+	strncpy(rargs->volname, volname, MAX_NAME_LEN);
 
 	snprintf(filepath, 45, "/tmp/test_vol%d", 1);
 	strncpy(rargs->file_path, filepath, MAX_NAME_LEN);
@@ -1114,17 +1282,19 @@ reregister_replica(spec_t *spec, rargs_t *rargs, int port)
 	REPLICA_ERRLOG("Reconnecting new replica:%s port:%d\n",
 	    rargs->replica_ip, rargs->replica_port);
 	pthread_create(&replica_thread, NULL, &mock_repl, rargs);
-	return replica_thread;
+	return (replica_thread);
 }
 
 static void
 kill_all_replicas(void)
 {
-	int i; 
+	int i;
 
 	for (i = 0; i < MAXREPLICA; i++) {
-		if (all_rargs[i].replica_port)
+		if (all_rargs[i].replica_port) {
+			REPLICA_ERRLOG("killing replica %d from rebuild_test\n", all_rargs[i].replica_port);
 			all_rargs[i].kill_replica = true;
+		}
 	}
 }
 
@@ -1138,59 +1308,64 @@ rebuild_test(void *arg)
 	while (1) {
 		sleep(5);
 
-		switch(test_args->state) {
-		
-        		case UNIT_TEST_STATE_NONE:
+		switch (test_args->state) {
+				case UNIT_TEST_STATE_NONE:
 				if (spec->degraded_rcount == 0) {
 					test_args->state++;
 				}
 				break;
-        	
 			case UNIT_TEST_STATE_KILL_SINGLE_REPLICA:
 				rargs = &(all_rargs[0]);
-				rargs->kill_replica = true;
-				test_args->state++;
+				if (!rargs->snap_error) {
+					rargs->kill_replica = true;
+					test_args->state++;
+				}
 				break; 
 
-        		case UNIT_TEST_STATE_REREGISTER_REPLICA:
+				case UNIT_TEST_STATE_REREGISTER_REPLICA:
 				if (rargs->kill_is_over == true) {
-					reregister_replica(spec, rargs, rargs->replica_port);
+					reregister_replica(spec->volname,
+					rargs, rargs->replica_port);
 					test_args->state++;
 				}
 				break;
 
-        		case UNIT_TEST_STATE_READ_WRITE_REPLICA:
+				case UNIT_TEST_STATE_READ_WRITE_REPLICA:
 				if (spec->degraded_rcount == 0) {
 					MTX_LOCK(&test_args->test_mtx);
-					pthread_cond_signal(&test_args->test_state_cv);
+					pthread_cond_signal(
+					&test_args->test_state_cv);
 					MTX_UNLOCK(&test_args->test_mtx);
 					test_args->state++;
 				}
 				break;
-
-        		case UNIT_TEST_STATE_KILL_ALL_REPLICA:
-		    		if (test_args->data_read_write_test_done) {
+				case UNIT_TEST_STATE_KILL_ALL_REPLICA:
+					if (
+					test_args->data_read_write_test_done) {
 					kill_all_replicas();
 					test_args->state++;
 				}
- 				break;
-
-	       		case UNIT_TEST_STATE_REGISTER_NEW_REPLICA:
+				break;
+				case UNIT_TEST_STATE_REGISTER_NEW_REPLICA:
 				if ((spec->degraded_rcount == 0) &&
 				    (spec->healthy_rcount == 0)) {
 					spec->replication_factor = 1;
 					spec->consistency_factor = 1;
 					all_rthrds[new_replica_count] =
-					    reregister_replica(spec, &(all_rargs[new_replica_count]), 6166);
+					reregister_replica(
+					spec->volname, &(all_rargs[new_replica_count]),
+					6166);
 					test_args->state++;
 					new_replica_count += 1;
+				} else {
+					test_args->state--;
 				}
 				break;
-       
- 			case UNIT_TEST_STATE_READ_WRITE_SINGLE_REPLICA:
+				case UNIT_TEST_STATE_READ_WRITE_SINGLE_REPLICA:
 				if (spec->degraded_rcount == 0) {
 					MTX_LOCK(&test_args->test_mtx);
-					pthread_cond_signal(&test_args->test_state_cv);
+					pthread_cond_signal(
+					&test_args->test_state_cv);
 					MTX_UNLOCK(&test_args->test_mtx);
 					goto exit;
 				}
@@ -1200,7 +1375,7 @@ rebuild_test(void *arg)
 		}
 	}
 exit:
-	return NULL;
+	return (NULL);
 }
 
 int
@@ -1214,8 +1389,9 @@ main(int argc, char **argv)
 	rebuild_test_t *test_args;
 	struct timespec now;
 	int i;
+	bool do_snap = false;
 
-	clock_gettime(CLOCK_MONOTONIC, &now);
+	clock_gettime(CLOCK_MONOTONIC_RAW, &now);
 	srandom(now.tv_sec);
 
 	replica_poll_time = 5;
@@ -1227,7 +1403,7 @@ main(int argc, char **argv)
 	rc = pthread_cond_init(&test_args->test_state_cv, NULL);
 	if (rc != 0) {
 		REPLICA_ERRLOG("cond_init() failed errno:%d\n", errno);
-		return -1;
+		return (-1);
 	}
 
 	pthread_mutex_init(&test_args->test_mtx, NULL);
@@ -1238,7 +1414,7 @@ main(int argc, char **argv)
 	rc = pthread_mutexattr_init(&mutex_attr);
 	if (rc != 0) {
 		REPLICA_ERRLOG("mutexattr_init() failed\n");
-		return 1;
+		return (1);
 	}
 
 #ifdef HAVE_PTHREAD_MUTEX_ADAPTIVE_NP
@@ -1253,7 +1429,7 @@ main(int argc, char **argv)
 	 */
 	if (stat("/tmp/test_vol1", &sbuf)) {
 		REPLICA_ERRLOG("volume files (/tmp/test_vol*) not created\n");
-		return 1;
+		return (1);
 	}
 
 	volsize = sbuf.st_size;
@@ -1263,7 +1439,7 @@ main(int argc, char **argv)
 	rc = initialize_spec(spec);
 	if (rc != 0) {
 		REPLICA_ERRLOG("error in initializing spec..\n");
-		return 1;
+		return (1);
 	}
 
 	initialize_volume(spec, replication_factor, consistency_factor);
@@ -1274,10 +1450,13 @@ main(int argc, char **argv)
 
 	if (start_errored_replica(3)) {
 		REPLICA_ERRLOG("error in creating errored replica\n");
-		return 1;
+		return (1);
 	}
 
-	/* Let errored replica runs for 60 seconds with mgmt error injection enabled */
+	/*
+	 * Let errored replica runs for 60 seconds
+	 * with mgmt error injection enabled
+	 */
 	sleep(60);
 
 	/* Enable error injection in data connection */
@@ -1286,9 +1465,12 @@ main(int argc, char **argv)
 	/* Wait for the spec to be ready for IOs */
 	wait_for_spec_ready();
 
-	create_mock_client(spec);
+	create_mock_client(spec, do_snap);
 
-	/* Let errored replica runs for 60 seconds with data conn error injection enabled */
+	/*
+	 * Let errored replica runs for 60 seconds
+	 * with data conn error injection enabled
+	 */
 	sleep(60);
 
 	shutdown_errored_replica();
@@ -1297,30 +1479,34 @@ main(int argc, char **argv)
 	wait_for_mock_clients();
 
 	create_mock_replicas(spec->replication_factor, spec->volname);
-	pthread_create(&rebuild_test_thread, NULL, &rebuild_test, (void *)test_args);
+	pthread_create(&rebuild_test_thread, NULL,
+	&rebuild_test, (void *)test_args);
 
 	MTX_LOCK(&test_args->test_mtx);
 	pthread_cond_wait(&test_args->test_state_cv, &test_args->test_mtx);
 	MTX_UNLOCK(&test_args->test_mtx);
 
-	create_mock_client(spec);
+	do_snap = true;
+	create_mock_client(spec, do_snap);
 
 	MTX_LOCK(&test_args->test_mtx);
 	test_args->data_read_write_test_done = true;
 	pthread_cond_wait(&test_args->test_state_cv, &test_args->test_mtx);
 	MTX_UNLOCK(&test_args->test_mtx);
 
+	REPLICA_LOG("Killing all replicas\n");
 	kill_all_replicas();
 
 	for (i = 0; i < MAXREPLICA; i++) {
 		if (all_rthrds[i]) {
 			rc = pthread_join(all_rthrds[i], NULL);
 			if (rc)
-				REPLICA_ERRLOG("pthread_join failed for replica number(%d), err(%d)\n", i, rc);
+				REPLICA_ERRLOG("pthread_join failed \
+				for replica number(%d), err(%d)\n", i, rc);
 		}
 	}
 	free(all_rargs);
 	free(all_rthrds);
 
-	return 0;
+	return (0);
 }

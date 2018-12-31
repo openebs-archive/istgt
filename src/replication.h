@@ -16,6 +16,7 @@
 #include <syslog.h>
 #include <stdbool.h>
 #include "replication_log.h"
+#include <json-c/json_object.h>
 #include "zrepl_prot.h"
 
 #define	MAXREPLICA 5
@@ -48,10 +49,20 @@ typedef enum rcomm_cmd_state_s {
 } rcomm_cmd_state_t;
 
 typedef enum rcmd_state_s {
+	/*  Received successful response from replica */
 	RECEIVED_OK = 1 << 0,
+
+	/* Received error from replica */
 	RECEIVED_ERR = 1 << 1,
-	SENT_TO_HEALTHY = 1 << 2,
-	SENT_TO_DEGRADED = 1 << 3,
+
+	/* Didn't received a response within io_max_wait_time seconds for rcmd*/
+	REPLICATE_TIMED_OUT = 1 << 2,
+
+	/* command sent to healthy replica */
+	SENT_TO_HEALTHY = 1 << 3,
+
+	/* command sent to degraded replica */
+	SENT_TO_DEGRADED = 1 << 4,
 } rcmd_state_t;
 
 typedef struct resp_data {
@@ -60,6 +71,7 @@ typedef struct resp_data {
 } resp_data_t;
 
 struct replica_rcomm_resp {
+	struct replica_s *replica;
 	zvol_io_hdr_t io_resp_hdr;
 	uint8_t *data_ptr;
 	rcmd_state_t status;
@@ -102,7 +114,8 @@ typedef struct rcmd_s {
 	uint64_t offset;
 	uint64_t data_len;
 	struct iovec iov[41];
-	struct timespec queued_time;
+	struct timespec start_time;
+	struct timespec ready_time;
 } rcmd_t;
 
 typedef struct replica_s replica_t;
@@ -165,6 +178,8 @@ typedef struct known_replica_s {
 	uint64_t zvol_guid;
 } known_replica_t;
 
+extern struct timespec istgt_start_time;
+
 void *init_replication(void *);
 int make_socket_non_blocking(int);
 int send_mgmtack(int, zvol_op_code_t, void *, char *, int);
@@ -180,9 +195,19 @@ int64_t perform_read_write_on_fd(int fd, uint8_t *data, uint64_t len,
 int initialize_volume(spec_t *spec, int, int);
 void destroy_volume(spec_t *spec);
 void inform_mgmt_conn(replica_t *r);
+extern const char * get_cv_status(spec_t *spec, int replica_cnt, int healthy_replica_cnt);
+extern void get_replica_stats_json(replica_t *replica, struct json_object **jobj);
 
 /* Replica default timeout is 200 seconds */
 #define	REPLICA_DEFAULT_TIMEOUT	200
+
+// Volume status
+#define VOL_STATUS_OFFLINE "Offline"
+#define VOL_STATUS_DEGRADED "Degraded"
+#define VOL_STATUS_HEALTHY "Healthy"
+// Replica status
+#define REPLICA_STATUS_DEGRADED "Degraded"
+#define REPLICA_STATUS_HEALTHY "Healthy"
 
 #define	DECREMENT_INFLIGHT_REPLICA_IO_CNT(_r, _opcode)			\
 	do {								\

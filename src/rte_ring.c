@@ -1,4 +1,4 @@
-/*-
+/*
  *   BSD LICENSE
  *
  *   Copyright(c) 2010-2015 Intel Corporation. All rights reserved.
@@ -34,7 +34,7 @@
 /*
  * Derived from FreeBSD's bufring.c
  *
- **************************************************************************
+ * *************************************************************************
  *
  * Copyright (c) 2007,2008 Kip Macy kmacy@freebsd.org
  * All rights reserved.
@@ -61,7 +61,8 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- ***************************************************************************/
+ * *************************************************************************
+ */
 
 #include <stdio.h>
 #include <stdarg.h>
@@ -74,7 +75,7 @@
 #include "rte_ring.h"
 
 /* true if x is a power of 2 */
-#define POWEROF2(x) ((((x)-1) & (x)) == 0)
+#define	POWEROF2(x) ((((x)-1) & (x)) == 0)
 
 /* return the size of memory occupied by a ring */
 ssize_t
@@ -83,15 +84,15 @@ rte_ring_get_memsize(unsigned count)
 	ssize_t sz;
 
 	/* count must be a power of 2 */
-	if ((!POWEROF2(count)) || (count > RTE_RING_SZ_MASK )) {
+	if ((!POWEROF2(count)) || (count > RTE_RING_SZ_MASK)) {
 		printf("Requested size is invalid, must be power of 2, and "
 			"do not exceed the size limit %u\n", RTE_RING_SZ_MASK);
-		return -EINVAL;
+		return (-EINVAL);
 	}
 
-	sz = sizeof(struct rte_ring) + count * sizeof(void *);
+	sz = sizeof (struct rte_ring) + count * sizeof (void *);
 	sz = RTE_ALIGN(sz, RTE_CACHE_LINE_SIZE);
-	return sz;
+	return (sz);
 }
 
 int
@@ -101,18 +102,18 @@ rte_ring_init(struct rte_ring *r, const char *name, unsigned count,
 	int ret;
 
 	/* compilation-time checks */
-	RTE_BUILD_BUG_ON((sizeof(struct rte_ring) &
-			  RTE_CACHE_LINE_MASK) != 0);
+	RTE_BUILD_BUG_ON((sizeof (struct rte_ring) &
+	    RTE_CACHE_LINE_MASK) != 0);
 	RTE_BUILD_BUG_ON((offsetof(struct rte_ring, cons) &
-			  RTE_CACHE_LINE_MASK) != 0);
+	    RTE_CACHE_LINE_MASK) != 0);
 	RTE_BUILD_BUG_ON((offsetof(struct rte_ring, prod) &
-			  RTE_CACHE_LINE_MASK) != 0);
+	    RTE_CACHE_LINE_MASK) != 0);
 
 	/* init the ring structure */
-	memset(r, 0, sizeof(*r));
-	ret = snprintf(r->name, sizeof(r->name), "%s", name);
-	if (ret < 0 || ret >= (int)sizeof(r->name))
-		return -ENAMETOOLONG;
+	memset(r, 0, sizeof (*r));
+	ret = snprintf(r->name, sizeof (r->name), "%s", name);
+	if (ret < 0 || ret >= (int)sizeof (r->name))
+		return (-ENAMETOOLONG);
 	r->flags = flags;
 	r->prod.single = (flags & RING_F_SP_ENQ) ? __IS_SP : __IS_MP;
 	r->cons.single = (flags & RING_F_SC_DEQ) ? __IS_SC : __IS_MC;
@@ -123,9 +124,10 @@ rte_ring_init(struct rte_ring *r, const char *name, unsigned count,
 		r->capacity = count;
 	} else {
 		if ((!POWEROF2(count)) || (count > RTE_RING_SZ_MASK)) {
-			printf("Requested size is invalid, must be power of 2, and not exceed the size limit %u\n",
+			printf("Requested size is invalid, must be power of 2,"
+				"and not exceed the size limit %u\n",
 				RTE_RING_SZ_MASK);
-			return -EINVAL;
+			return (-EINVAL);
 		}
 		r->size = count;
 		r->mask = count - 1;
@@ -134,7 +136,7 @@ rte_ring_init(struct rte_ring *r, const char *name, unsigned count,
 	r->prod.head = r->cons.head = 0;
 	r->prod.tail = r->cons.tail = 0;
 
-	return 0;
+	return (0);
 }
 
 /* create the ring */
@@ -148,7 +150,7 @@ rte_ring_create(const char *name, unsigned count, int socket_id,
 	const unsigned int requested_count = count;
 	int ret;
 
-	(void)socket_id;
+	(void) socket_id;
 
 	/* for an exact size ring, round up from count to a power of two */
 	if (flags & RING_F_EXACT_SZ)
@@ -156,23 +158,23 @@ rte_ring_create(const char *name, unsigned count, int socket_id,
 
 	ring_size = rte_ring_get_memsize(count);
 	if (ring_size < 0) {
-		return NULL;
+		return (NULL);
 	}
 
-	ret = snprintf(mz_name, sizeof(mz_name), "%s%s",
+	ret = snprintf(mz_name, sizeof (mz_name), "%s%s",
 		RTE_RING_MZ_PREFIX, name);
-	if (ret < 0 || ret >= (int)sizeof(mz_name)) {
-		return NULL;
+	if (ret < 0 || ret >= (int)sizeof (mz_name)) {
+		return (NULL);
 	}
 
 	r = malloc(ring_size);
 	if (r == NULL) {
 		printf("Cannot reserve memory for tailq\n");
-		return NULL;
+		return (NULL);
 	}
 
 	rte_ring_init(r, name, requested_count, flags);
-	return r;
+	return (r);
 }
 
 /* free the ring */
@@ -187,14 +189,14 @@ rte_ring_free(struct rte_ring *r)
 	 * therefore, there is no memzone to free.
 	 */
 /*
-	if (r->memzone == NULL) {
-		printf("Cannot free ring (not created with rte_ring_create()");
-		return;
-	}
-	if (rte_memzone_free(r->memzone) != 0) {
-		printf("Cannot free memory\n");
-		return;
-	}
-*/
+ *	if (r->memzone == NULL) {
+ *		printf("Cannot free ring (not created with rte_ring_create()");
+ *		return;
+ *	}
+ *	if (rte_memzone_free(r->memzone) != 0) {
+ *		printf("Cannot free memory\n");
+ *		return;
+ *	}
+ */
 	free(r);
 }
