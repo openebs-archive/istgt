@@ -87,7 +87,6 @@ typedef struct rcommon_cmd_s {
 	uint8_t replication_factor;
 	uint8_t consistency_factor;
 	zvol_op_code_t opcode;
-	int healthy_count;	/* number of healthy replica when cmd queued */
 	uint64_t io_seq;
 	uint64_t lun_id;
 	uint64_t offset;
@@ -109,7 +108,6 @@ typedef struct rcmd_s {
 	uint64_t io_seq;
 	void *rcommq_ptr;
 	uint8_t *iov_data;	/* for header to be sent to replica */
-	int healthy_count;	/* number of healthy replica when cmd queued */
 	int idx;		/* index for rcommon_cmd in resp_list */
 	int64_t iovcnt;
 	uint64_t offset;

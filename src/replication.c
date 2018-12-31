@@ -58,7 +58,6 @@ static int handle_mgmt_event_fd(replica_t *replica);
 		    &spec->luworker_rmutex[cmd->luworkerindx];		\
 		rcomm_cmd->cond_var = 					\
 		    &spec->luworker_rcond[cmd->luworkerindx];		\
-		rcomm_cmd->healthy_count = spec->healthy_rcount;	\
 		rcomm_cmd->io_seq = ++spec->io_seq;			\
 		rcomm_cmd->replication_factor = 			\
 		    spec->replication_factor;				\
@@ -708,7 +707,7 @@ is_replica_newly_connected(spec_t *spec, replica_t *new_replica)
 		}
 	}
 
-	if (!found && familiar_replicas < spec->replication_factor) {
+	if (!found) {
 		kr = malloc(sizeof (known_replica_t));
 		kr->zvol_guid = new_replica->zvol_guid;
 		kr->is_connected = true;
@@ -734,25 +733,58 @@ is_replica_newly_connected(spec_t *spec, replica_t *new_replica)
 	return newly_connected;
 }
 
+/*
+ * This function returns the number of connected non-quorum replicas
+ */
+int
+get_non_quorum_replica_count(spec_t *spec)
+{
+	int replica_count = 0;
+	ASSERT(MTX_LOCKED(&spec->rq_mtx));
+	TAILQ_FOREACH(replica, &spec->non_quorum_rq, r_non_quorum_next)
+		replica_count++;
+	return replica_count;
+}
+
+/*
+ * This function checks whether given replica can be connected based on
+ * the number of already connected replicas.
+ * There is a max limit of MAXREPLICA on the number of connected replicas
+ * This functions returns true if it can be allowed, else, false
+ */
 static bool
-is_rf_replicas_connected(spec_t *spec, replica_t *replica)
+can_replica_connected(spec_t *spec, replica_t *replica)
 {
 	int replica_count;
-	bool ret = false;
+	bool ret = true;
 
 	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 
 	replica_count = spec->healthy_rcount + spec->degraded_rcount;
 	if (replica_count >= spec->replication_factor) {
-		REPLICA_ERRLOG("removing replica(%s:%d) since max replica "
-		    "connection limit(%d) reached\n", replica->ip,
-		    replica->port, spec->replication_factor);
-		ret = true;
+		REPLICA_ERRLOG("removing replica(%s:%d) since healthy: %d"
+		    " degraded: %d connected >= (%d)", replica->ip,
+		    replica->port, spec->healthy_rcount,
+		    spec->degraded_rcount, spec->replication_factor);
+		ret = false;
+	} else {
+		non_quorum_count = get_non_quorum_replica_count(spec);
+		if ((non_quorum_count + replica_count) >= MAXREPLICA) {
+			REPLICA_ERRLOG("erroring replica(%s:%d) since "
+			    "non_quorum: %d healthy: %d degraded: %d are"
+			    " connected >= %d", replica->ip, replica->port,
+			    non_quorum_count, spec->healthy_rcount,
+			    spec->degraded_rcount, MAXREPLICA);
+			ret = false;
+		}
 	}
 
 	return ret;
 }
 
+/*
+ * Update vol state based on the connected number of replicas and their status
+ */
 void
 update_volstate(spec_t *spec)
 {
@@ -1130,12 +1162,13 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	}
 
 	MTX_LOCK(&spec->rq_mtx);
-	if (is_rf_replicas_connected(spec, replica)) {
+	if (can_replica_connected(spec, replica) == false) {
 		MTX_UNLOCK(&spec->rq_mtx);
-		REPLICA_ERRLOG("Already %d replicas are connected..."
-		    " disconnecting new replica(ip:%s port:%d "
-		    "guid:%lu)\n", spec->replication_factor, replica->ip, replica->port,
-		    replica->zvol_guid);
+		REPLICA_ERRLOG("Already healthy: %d degraded: %d non_quorum: %d "
+		    "replicas are connected.. disconnecting new replica(ip:%s port:%d "
+		    "guid:%lu) before replica thread creation\n", spec->healthy_rcount,
+		    spec->degraded_rcount, get_non_quorum_replica_count(spec),
+		    replica->ip, replica->port, replica->zvol_guid);
 		goto replica_error;
 	}
 
@@ -1170,7 +1203,12 @@ replica_error:
 
 	if (replica->mgmt_eventfd2 == -1) {
 		REPLICA_ERRLOG("unable to set mgmteventfd2 for more than 10 "
-		    "seconfs for replica(%lu)\n", replica->zvol_guid);
+		    "seconds for replica(%lu)\n", replica->zvol_guid);
+		/*
+		 * as this function doesn't run in parallel with handle_mgmt_conn
+		 * for given replica, its fine to set these values to -1 here.
+		 */
+error_out_replica:
 		replica->dont_free = 1;
 		replica->iofd = -1;
 		MTX_UNLOCK(&replica->r_mtx);
@@ -1178,6 +1216,18 @@ replica_error:
 		shutdown(iofd, SHUT_RDWR);
 		close(iofd);
 		return -1;
+	}
+
+	if (can_replica_connected(spec, replica) == false) {
+		replica->mgmt_eventfd2 = -1;
+		replica->quorum = 0;
+
+		REPLICA_ERRLOG("Already healthy: %d degraded: %d non_quorum: %d "
+		    "replicas are connected.. disconnecting new replica(ip:%s port:%d "
+		    "guid:%lu)\n", spec->healthy_rcount, spec->degraded_rcount,
+		    get_non_quorum_replica_count(spec), replica->ip, replica->port,
+		    replica->zvol_guid);
+		goto error_out_replica;
 	}
 	MTX_UNLOCK(&replica->r_mtx);
 
@@ -2461,7 +2511,6 @@ respond_with_error_for_all_outstanding_mgmt_ios(replica_t *r)
 		rcomm_cmd->resp_list[rcmd->idx].status |= 		\
 		    (replica->state == ZVOL_STATUS_HEALTHY) ? 		\
 		    SENT_TO_HEALTHY : SENT_TO_DEGRADED;			\
-		rcmd->healthy_count = spec->healthy_rcount;		\
 		rcmd->rcommq_ptr = rcomm_cmd;				\
 		rcmd->iovcnt = rcomm_cmd->iovcnt;			\
 		for (i=1; i < rcomm_cmd->iovcnt + 1; i++) {		\
