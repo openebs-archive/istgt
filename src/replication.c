@@ -538,7 +538,7 @@ check_for_old_ios(spec_t *spec, struct timespec last)
 
 	for (i = 0; i < spec->luworkers; i++) {
 		io_time = io_queue_time[i];
-		if (!(io_time.tv_sec == 0 && io_time.tv_nsec == 0)) {\
+		if (!(io_time.tv_sec == 0 && io_time.tv_nsec == 0)) {
 			/*
 			 * Check if IO is older than `last` time
 			 */
@@ -587,11 +587,17 @@ trigger_rebuild(spec_t *spec)
 	}
 
 	if (!spec->degraded_rcount) {
-		REPLICA_NOTICELOG("No downgraded replica on volume(%s),"
-		    "healthy: %d degraded: %d, rebuild will not be attempted\n",
-		    spec->volname, spec->healthy_rcount, spec->degraded_rcount);
-		return;
+		REPLICA_NOTICELOG("No downgraded in_quorum replicas on volume"
+		    "(%s), rebuild will be attempted on non_quorum replicas\n",
+		    spec->volname);
+		if (TAILQ_EMPTY(&spec->non_quorum_rq)) {
+			REPLICA_NOTICELOG("No downgraded replicas on volume"
+			    "(%s), rebuild will not be attempted\n",
+			    spec->volname);
+			return;
+		}
 	}
+
 
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
 		/* Find healthy replica */
@@ -607,8 +613,29 @@ trigger_rebuild(spec_t *spec)
 		}
 	}
 
-	if (dw_replica == NULL)
-		return;
+	if (dw_replica == NULL) {
+		if (spec->degraded_rcount) {
+			REPLICA_ERRLOG("cannot find dw_replica even with"
+			    "(%d) degraded count", spec->degraded_rcount);
+			return;
+		}
+		if (healthy_replica == NULL) {
+			REPLICA_ERRLOG("rebuilding non_quorum needs healthy"
+			    "replica");
+			return;
+		}
+		max = 0;
+		TAILQ_FOREACH(replica, &spec->non_quorum_rq, r_next) {
+			if (max <= replica->initial_checkpointed_io_seq) {
+				max = replica->initial_checkpointed_io_seq;
+				dw_replica = replica;
+			}
+		}
+		if (dw_replica == NULL) {
+			REPLICA_ERRLOG("dw_replica can't be null");
+			return;
+		}
+	}
 
 #ifdef DEBUG
 	const char* non_zero_inflight_replica_str =
@@ -628,8 +655,8 @@ trigger_rebuild(spec_t *spec)
 	 * data connection
 	 */
 	if (check_for_old_ios(spec, dw_replica->create_time)) {
-		REPLICA_LOG("There are still some inflight IOs... "
-		    "queuing rebuild\n");
+		REPLICA_LOG("There are inflight IOs older than replica "
+		    "create time.. queuing rebuild\n");
 		return;
 	}
 
@@ -1156,10 +1183,13 @@ replica_error:
 	}
 	MTX_UNLOCK(&replica->r_mtx);
 
-	spec->degraded_rcount++;
 	TAILQ_REMOVE(&spec->rwaitq, replica, r_waitnext);
 
-	TAILQ_INSERT_TAIL(&spec->rq, replica, r_next);
+	if (replica->quorum == 1) {
+		TAILQ_INSERT_TAIL(&spec->rq, replica, r_next);
+		spec->degraded_rcount++;
+	} else
+		TAILQ_INSERT_TAIL(&spec->non_quorum_rq, replica, r_next);
 
 	/* Update the volume ready state */
 	update_volstate(spec);
@@ -1666,6 +1696,9 @@ send_replica_query(replica_t *replica, spec_t *spec, zvol_op_code_t opcode)
 	zvol_op_code_t mgmt_opcode = opcode;
 	mgmt_cmd_t *mgmt_cmd;
 
+	if ((replica->state == ZVOL_STATUS_HEALTHY) && (opcode == ZVOL_OPCODE_REPLICA_STATUS))
+		return 0;
+
 	mgmt_cmd = malloc(sizeof(mgmt_cmd_t));
 	memset(mgmt_cmd, 0, sizeof (mgmt_cmd_t));
 	data_len = strlen(spec->volname) + 1;
@@ -1685,58 +1718,36 @@ send_replica_query(replica_t *replica, spec_t *spec, zvol_op_code_t opcode)
 	return handle_write_data_event(replica);
 }
 
+#define SEND_REPLICA_ZVOL_OPCODE(RQ_LIST, OPCODE, AGAIN) 				\
+	TAILQ_FOREACH(replica, RQ_LIST, r_next) { 					\
+		ret = send_replica_query(replica, spec, OPCODE);			\
+		if (ret == -1) {							\
+			REPLICA_ERRLOG("Failed to send mgmtIO for querying "		\
+			    "status on replica(%lu) ..\n", replica->zvol_guid);		\
+			MTX_UNLOCK(&spec->rq_mtx);					\
+			handle_mgmt_conn_error(replica, 0, NULL, 0);			\
+			goto AGAIN;							\
+		}									\
+	}
+
 /*
- * get_replica_stats will send stats query to any healthy replica
+ * send_replica_opcode will send opcode to replicas on mgmt conn queue
  */
 static void
-get_replica_stats(spec_t *spec)
+send_replica_opcode(spec_t *spec, zvol_op_code_t opcode)
 {
 	int ret;
 	replica_t *replica;
 
-again:
+rq_list_start:
 	MTX_LOCK(&spec->rq_mtx);
-	TAILQ_FOREACH(replica, &spec->rq, r_next) {
-		if (replica->state != ZVOL_STATUS_HEALTHY)
-			continue;
-
-		ret = send_replica_query(replica, spec, ZVOL_OPCODE_STATS);
-		if (ret == -1) {
-			REPLICA_ERRLOG("Failed to send stats "
-			    "on replica(%lu) ..\n", replica->zvol_guid);
-			MTX_UNLOCK(&spec->rq_mtx);
-			handle_mgmt_conn_error(replica, 0, NULL, 0);
-			goto again;
-		} else
-			break;
-	}
+	SEND_REPLICA_ZVOL_OPCODE((&spec->rq), opcode, rq_list_start)
 	MTX_UNLOCK(&spec->rq_mtx);
-}
 
-/*
- * ask_replica_status will send replica_status query to all degraded replica
- */
-static void
-ask_replica_status_all(spec_t *spec)
-{
-	int ret;
-	replica_t *replica;
-
-again:
+non_quorum_rq_list_start:
 	MTX_LOCK(&spec->rq_mtx);
-	TAILQ_FOREACH(replica, &spec->rq, r_next) {
-		if (replica->state == ZVOL_STATUS_HEALTHY)
-			continue;
-
-		ret = send_replica_query(replica, spec, ZVOL_OPCODE_REPLICA_STATUS);
-		if (ret == -1) {
-			REPLICA_ERRLOG("Failed to send mgmtIO for querying "
-			    "status on replica(%lu) ..\n", replica->zvol_guid);
-			MTX_UNLOCK(&spec->rq_mtx);
-			handle_mgmt_conn_error(replica, 0, NULL, 0);
-			goto again;
-		}
-	}
+	SEND_REPLICA_ZVOL_OPCODE((&spec->non_quorum_rq), opcode,
+	    non_quorum_rq_list_start)
 	MTX_UNLOCK(&spec->rq_mtx);
 }
 
@@ -3133,8 +3144,8 @@ init_replication(void *arg __attribute__((__unused__)))
 			spec_t *spec = NULL;
 			MTX_LOCK(&specq_mtx);
 			TAILQ_FOREACH(spec, &spec_q, spec_next) {
-				ask_replica_status_all(spec);
-				get_replica_stats(spec);
+				send_replica_opcode(spec, ZVOL_OPCODE_REPLICA_STATUS);
+				send_replica_opcode(spec, ZVOL_OPCODE_STATS);
 			}
 			MTX_UNLOCK(&specq_mtx);
 			clock_gettime(CLOCK_MONOTONIC_COARSE, &last);
