@@ -623,7 +623,7 @@ trigger_rebuild(spec_t *spec)
 			return;
 		}
 		max = 0;
-		TAILQ_FOREACH(replica, &spec->non_quorum_rq, r_next) {
+		TAILQ_FOREACH(replica, &spec->non_quorum_rq, r_non_quorum_next) {
 			if (max <= replica->initial_checkpointed_io_seq) {
 				max = replica->initial_checkpointed_io_seq;
 				dw_replica = replica;
@@ -1187,7 +1187,7 @@ replica_error:
 		TAILQ_INSERT_TAIL(&spec->rq, replica, r_next);
 		spec->degraded_rcount++;
 	} else
-		TAILQ_INSERT_TAIL(&spec->non_quorum_rq, replica, r_next);
+		TAILQ_INSERT_TAIL(&spec->non_quorum_rq, replica, r_non_quorum_next);
 
 	/* Update the volume ready state */
 	update_volstate(spec);
@@ -1716,14 +1716,15 @@ send_replica_query(replica_t *replica, spec_t *spec, zvol_op_code_t opcode)
 	return handle_write_data_event(replica);
 }
 
-#define SEND_REPLICA_ZVOL_OPCODE(RQ_LIST, OPCODE, AGAIN) 				\
-	TAILQ_FOREACH(replica, RQ_LIST, r_next) { 					\
+#define SEND_REPLICA_ZVOL_OPCODE(RQ_LIST, NEXT, OPCODE, AGAIN) 				\
+	TAILQ_FOREACH(replica, RQ_LIST, NEXT) { 					\
 		ret = send_replica_query(replica, spec, OPCODE);			\
 		if (ret == -1) {							\
 			REPLICA_ERRLOG("Failed to send mgmtIO for querying "		\
 			    "status on replica(%lu) ..\n", replica->zvol_guid);		\
 			MTX_UNLOCK(&spec->rq_mtx);					\
 			handle_mgmt_conn_error(replica, 0, NULL, 0);			\
+			MTX_LOCK(&spec->rq_mtx);					\
 			goto AGAIN;							\
 		}									\
 	}
@@ -1737,14 +1738,12 @@ send_replica_opcode(spec_t *spec, zvol_op_code_t opcode)
 	int ret;
 	replica_t *replica;
 
-rq_list_start:
 	MTX_LOCK(&spec->rq_mtx);
-	SEND_REPLICA_ZVOL_OPCODE((&spec->rq), opcode, rq_list_start)
-	MTX_UNLOCK(&spec->rq_mtx);
+rq_list_start:
+	SEND_REPLICA_ZVOL_OPCODE((&spec->rq), r_next, opcode, rq_list_start)
 
 non_quorum_rq_list_start:
-	MTX_LOCK(&spec->rq_mtx);
-	SEND_REPLICA_ZVOL_OPCODE((&spec->non_quorum_rq), opcode,
+	SEND_REPLICA_ZVOL_OPCODE((&spec->non_quorum_rq), r_non_quorum_next, opcode,
 	    non_quorum_rq_list_start)
 	MTX_UNLOCK(&spec->rq_mtx);
 }
@@ -1846,6 +1845,8 @@ update_replica_status(spec_t *spec, replica_t *replica)
 {
 	zrepl_status_ack_t *repl_status;
 	replica_state_t last_state;
+	int found_in_list = 0;
+	replica_t *r1;
 
 	repl_status = (zrepl_status_ack_t *)replica->mgmt_io_resp_data;
 
@@ -1854,8 +1855,8 @@ update_replica_status(spec_t *spec, replica_t *replica)
 	    repl_status->rebuild_status);
 
 	MTX_LOCK(&spec->rq_mtx);
-	MTX_LOCK(&replica->r_mtx);
 
+	MTX_LOCK(&replica->r_mtx);
 	last_state = replica->state;
 	replica->state = (replica_state_t) repl_status->state;
 	MTX_UNLOCK(&replica->r_mtx);
@@ -1869,12 +1870,36 @@ update_replica_status(spec_t *spec, replica_t *replica)
 		    (repl_status->state == ZVOL_STATUS_HEALTHY) ? "healthy" :
 		    "degraded");
 		if (repl_status->state == ZVOL_STATUS_DEGRADED) {
+			/* This should be never possible */
+			assert(1 == 0);
 			spec->degraded_rcount++;
 			spec->healthy_rcount--;
 		} else if (repl_status->state == ZVOL_STATUS_HEALTHY) {
 			/* master_replica became healthy*/
-			spec->degraded_rcount--;
+			TAILQ_FOREACH(r1, &(spec->rq), r_next) {
+				if (r1 == replica) {
+					found_in_list = 1;
+					break;
+				}
+			}
+
+			if (r1 == NULL) {
+				TAILQ_FOREACH(r1, &(spec->non_quorum_rq), r_non_quorum_next) {
+					if (r1 == replica) {
+						found_in_list = 2;
+						break;
+					}
+				}
+			}
+
+			assert(r1 != NULL);
+			if (found_in_list == 1)
+				spec->degraded_rcount--;
 			spec->healthy_rcount++;
+			if (found_in_list == 2) {
+				TAILQ_REMOVE(&spec->non_quorum_rq, replica, r_non_quorum_next);
+				TAILQ_INSERT_TAIL(&spec->rq, replica, r_next);
+			}
 			replica->quorum = 1;
 			assert(spec->rebuild_info.dw_replica == replica);
 			spec->rebuild_info.dw_replica = NULL;
@@ -1896,6 +1921,8 @@ update_replica_status(spec_t *spec, replica_t *replica)
 		spec->rebuild_info.healthy_replica = NULL;
 	}
 
+	/* There may be chance of change due to non_quorum replica */
+	update_volstate(spec);
 	/*Trigger rebuild if possible */
 	trigger_rebuild(spec);
 	MTX_UNLOCK(&spec->rq_mtx);
@@ -2722,7 +2749,7 @@ retry_read:
 	}
 
 	if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) {
-		TAILQ_FOREACH(replica, &spec->non_quorum_rq, r_next) {
+		TAILQ_FOREACH(replica, &spec->non_quorum_rq, r_non_quorum_next) {
 			rcomm_cmd->non_quorum_copies_sent++;
 
 			build_rcmd();

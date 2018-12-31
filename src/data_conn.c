@@ -264,7 +264,7 @@ handle_data_conn_error(replica_t *r)
 	int fd, data_eventfd, mgmt_eventfd2, epollfd;
 	spec_t *spec;
 	replica_t *r1 = NULL;
-	int found_in_quorum = 0;
+	int found_in_list = 0;
 
 	if (r->iofd == -1) {
 		REPLICA_ERRLOG("repl %s %d %p\n", r->ip, r->port, r);
@@ -276,20 +276,20 @@ handle_data_conn_error(replica_t *r)
 
 	TAILQ_FOREACH(r1, &(spec->rq), r_next)
 		if (r1 == r) {
-			found_in_quorum = 1;
+			found_in_list = 1;
 			break;
 		}
 
 	if (r1 == NULL)
-		TAILQ_FOREACH(r1, &(spec->non_quorum_rq), r_next)
+		TAILQ_FOREACH(r1, &(spec->non_quorum_rq), r_non_quorum_next)
 			if (r1 == r) {
-				found_in_quorum = 2;
+				found_in_list = 2;
 				break;
 			}
 
 	if (r1 == NULL) {
 		MTX_LOCK(&r->r_mtx);
-		REPLICA_ERRLOG("replica %s %d not part of rqlist..\n",
+		REPLICA_ERRLOG("replica %s %d not part of rq and non_rq list..\n",
 		    r->ip, r->port);
 		/*
 		 * mgmt thread will check mgmt_eventfd2 fd to see if
@@ -305,7 +305,7 @@ handle_data_conn_error(replica_t *r)
 		return -1;
 	}
 
-	if (found_in_quorum == 1) {
+	if (found_in_list == 1) {
 		TAILQ_REMOVE(&spec->rq, r, r_next);
 		if (r->state == ZVOL_STATUS_HEALTHY)
 			spec->healthy_rcount--;
@@ -314,8 +314,8 @@ handle_data_conn_error(replica_t *r)
 			spec->degraded_rcount--;
 		}
 	} else {
-		ASSERT(found_in_quorum == 2);
-		TAILQ_REMOVE(&spec->non_quorum_rq, r, r_next);
+		ASSERT(found_in_list == 2);
+		TAILQ_REMOVE(&spec->non_quorum_rq, r, r_non_quorum_next);
 	}
 
 	update_volstate(r->spec);
