@@ -36,7 +36,7 @@ __thread char  tinfo[50] =  {0};
 	mgmt_ack_data->pool_guid = replica_port;\
 	mgmt_ack_data->checkpointed_io_seq = 1000;\
 	mgmt_ack_data->zvol_guid = replica_port;\
-	mgmt_ack_data->quorum = replica_quorum;\
+	mgmt_ack_data->quorum = *replica_quorum;\
 }
 
 bool degraded_mode = false;
@@ -231,7 +231,7 @@ test_read_data(int fd, uint8_t *data, uint64_t len)
 
 static int
 send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
-    int replica_port, int replica_quorum, int delay,zrepl_status_ack_t *zrepl_status,
+    int replica_port, int *replica_quorum, int delay,zrepl_status_ack_t *zrepl_status,
     int *zrepl_status_msg_cnt)
 {
 	int i, nbytes = 0;
@@ -265,6 +265,7 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 			zrepl_status->state = ZVOL_STATUS_HEALTHY;
 			zrepl_status->rebuild_status = ZVOL_REBUILDING_DONE;
 			(*zrepl_status_msg_cnt) = 0;
+			*replica_quorum=1;
 		}
 
 		if (zrepl_status->rebuild_status == ZVOL_REBUILDING_SNAP) {
@@ -290,7 +291,6 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 		build_mgmt_ack_data;
 		if(delay > 0)
 			sleep(5);
-		printf("Quorum in replica is %d\n",mgmt_ack_data->quorum);
 
 		iovec[1].iov_base = mgmt_ack_data;
 		iovec[1].iov_len = sizeof (mgmt_ack_t);
@@ -494,7 +494,6 @@ main(int argc, char **argv)
 	if(check != 63) {
 		usage();
 	}
-	printf("Quorum = %d\n",replica_quorum);
 
 	(void) signal(SIGHUP, sig_handler);
 
@@ -608,7 +607,7 @@ again:
 					}
 				}
 				opcode = mgmtio->opcode;
-				send_mgmt_ack(mgmtfd, opcode, data, replica_ip, replica_port, replica_quorum, delay,zrepl_status, &zrepl_status_msg_cnt);
+				send_mgmt_ack(mgmtfd, opcode, data, replica_ip, replica_port, &replica_quorum, delay,zrepl_status, &zrepl_status_msg_cnt);
 			} else if (events[i].data.fd == sfd) {
 				struct sockaddr saddr;
 				socklen_t slen;
