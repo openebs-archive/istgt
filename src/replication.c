@@ -1451,6 +1451,8 @@ int istgt_lu_destroy_snapshot(spec_t *spec, char *snapname)
 	replica_t *replica;
 	TAILQ_FOREACH(replica, &spec->rq, r_next)
 		send_replica_snapshot(spec, replica, 0, snapname, ZVOL_OPCODE_SNAP_DESTROY, NULL);
+	TAILQ_FOREACH(replica, &spec->non_quorum_rq, r_next)
+		send_replica_snapshot(spec, replica, 0, snapname, ZVOL_OPCODE_SNAP_DESTROY, NULL);
 	return true;
 }
 
@@ -1579,7 +1581,10 @@ get_replica_stats_json(replica_t *replica, struct json_object **jobj)
 	json_object_object_add(j_stats, "inflightSync",
 	    json_object_new_uint64(replica->replica_inflight_sync_io_cnt));
 
-	clock_gettime(CLOCK_MONOTONIC_COARSE, &now);
+	json_object_object_add(j_stats, "inQuorum",
+	    json_object_new_uint64(replica->quorum));
+
+	clock_gettime(CLOCK_MONOTONIC, &now);
 	json_object_object_add(j_stats, "upTime",
 	    json_object_new_int64(now.tv_sec - replica->create_time.tv_sec));
 
@@ -1587,14 +1592,38 @@ get_replica_stats_json(replica_t *replica, struct json_object **jobj)
 }
 
 const char *
-get_cv_status(spec_t *spec, int replica_cnt, int healthy_replica_cnt)
+get_cv_status(spec_t *spec)
 {
 	if (spec->ready == false)
 		return VOL_STATUS_OFFLINE;
-	if (healthy_replica_cnt >= spec->consistency_factor)
+	if (spec->healthy_rcount >= spec->consistency_factor)
 		return VOL_STATUS_HEALTHY;
 	return VOL_STATUS_DEGRADED;
 }
+
+#define	POPULATE_REPLICA_LIST_STATS(HEAD, NEXT)				\
+			TAILQ_FOREACH(replica, HEAD, NEXT) {		\
+				MTX_LOCK(&replica->r_mtx);		\
+				get_replica_stats_json(replica, &j_obj);\
+				MTX_UNLOCK(&replica->r_mtx);		\
+				json_object_array_add(j_replica, j_obj);\
+			}
+
+#define	POPULATE_SPEC_STATUS(SPEC)								\
+			j_spec = json_object_new_object();					\
+			j_replica = json_object_new_array();					\
+			POPULATE_REPLICA_LIST_STATS((&SPEC->rq), r_next)			\
+			POPULATE_REPLICA_LIST_STATS((&SPEC->non_quorum_rq), r_non_quorum_next)	\
+												\
+			json_object_object_add(j_spec,						\
+			    "name", json_object_new_string(spec->volname));			\
+			status = get_cv_status(spec);						\
+			MTX_UNLOCK(&spec->rq_mtx);						\
+			json_object_object_add(j_spec, "status",				\
+			    json_object_new_string(status));					\
+			json_object_object_add(j_spec,						\
+			    "replicaStatus", j_replica);					\
+			json_object_array_add(j_all_spec, j_spec);
 
 void
 istgt_lu_replica_stats(char *volname, char **resp)
@@ -1615,57 +1644,12 @@ istgt_lu_replica_stats(char *volname, char **resp)
 		MTX_LOCK(&spec->rq_mtx);
 		if (volname) {
 			if(!strncmp(spec->volname, volname, strlen(volname))) {
-				j_spec = json_object_new_object();
-				j_replica = json_object_new_array();
-
-				replica_cnt = 0;
-				healthy_replica_cnt = 0;
-				TAILQ_FOREACH(replica, &spec->rq, r_next) {
-					MTX_LOCK(&replica->r_mtx);
-					get_replica_stats_json(replica, &j_obj);
-					MTX_UNLOCK(&replica->r_mtx);
-					replica_cnt++;
-	    				if (replica->state == ZVOL_STATUS_HEALTHY)
-						healthy_replica_cnt++;
-					json_object_array_add(j_replica, j_obj);
-				}
-				json_object_object_add(j_spec,
-				    "name", json_object_new_string(spec->volname));
-				status = get_cv_status(spec, replica_cnt, healthy_replica_cnt);
-				MTX_UNLOCK(&spec->rq_mtx);
-				json_object_object_add(j_spec, "status",
-				    json_object_new_string(status));
-				json_object_object_add(j_spec,
-				    "replicaStatus", j_replica);
-				json_object_array_add(j_all_spec, j_spec);
+				POPULATE_SPEC_STATUS(spec)
 				break;
 			}
 			MTX_UNLOCK(&spec->rq_mtx);
 		} else {
-			j_spec = json_object_new_object();
-			j_replica = json_object_new_array();
-
-			replica_cnt = 0;
-			healthy_replica_cnt = 0;
-			TAILQ_FOREACH(replica, &spec->rq, r_next) {
-				MTX_LOCK(&replica->r_mtx);
-				get_replica_stats_json(replica, &j_obj);
-				MTX_UNLOCK(&replica->r_mtx);
-				replica_cnt++;
-	    			if (replica->state == ZVOL_STATUS_HEALTHY)
-					healthy_replica_cnt++;
-				json_object_array_add(j_replica, j_obj);
-			}
-
-			json_object_object_add(j_spec,
-			    "name", json_object_new_string(spec->volname));
-			status = get_cv_status(spec, replica_cnt, healthy_replica_cnt);
-			MTX_UNLOCK(&spec->rq_mtx);
-			json_object_object_add(j_spec, "status",
-			    json_object_new_string(status));
-			json_object_object_add(j_spec,
-			    "replicaStatus", j_replica);
-			json_object_array_add(j_all_spec, j_spec);
+			POPULATE_SPEC_STATUS(spec)
 		}
 	}
 
@@ -3294,6 +3278,26 @@ initialize_volume(spec_t *spec, int replication_factor, int consistency_factor)
 	return 0;
 }
 
+#define POPULATE_REPLICA_LIST_MEM_STATS(HEAD, NEXT)				\
+		TAILQ_FOREACH(r, HEAD, NEXT) {					\
+			j_replica = json_object_new_object();			\
+			json_object_object_add(j_replica, "replicaId",		\
+			    json_object_new_uint64(r->zvol_guid));		\
+			json_object_object_add(j_replica, "in-flight read",	\
+			    json_object_new_uint64(				\
+			    r->replica_inflight_read_io_cnt));			\
+			json_object_object_add(j_replica, "in-flight write",	\
+			    json_object_new_uint64(				\
+			    r->replica_inflight_write_io_cnt));			\
+			json_object_object_add(j_replica, "in-flight sync",	\
+			    json_object_new_uint64(				\
+			    r->replica_inflight_sync_io_cnt));			\
+			json_object_object_add(j_replica, "in-flight command",	\
+			    json_object_new_int64(				\
+			    get_num_entries_from_mempool(&r->cmdq)));		\
+			json_object_array_add(j_array, j_replica);		\
+		}
+
 void
 istgt_lu_mempool_stats(char **resp)
 {
@@ -3311,24 +3315,8 @@ istgt_lu_mempool_stats(char **resp)
 
 	MTX_LOCK(&specq_mtx);
 	TAILQ_FOREACH(spec, &spec_q, spec_next) {
-		TAILQ_FOREACH(r, &spec->rq, r_next) {
-			j_replica = json_object_new_object();
-			json_object_object_add(j_replica, "replicaId",
-			    json_object_new_uint64(r->zvol_guid));
-			json_object_object_add(j_replica, "in-flight read",
-			    json_object_new_uint64(
-			    r->replica_inflight_read_io_cnt));
-			json_object_object_add(j_replica, "in-flight write",
-			    json_object_new_uint64(
-			    r->replica_inflight_write_io_cnt));
-			json_object_object_add(j_replica, "in-flight sync",
-			    json_object_new_uint64(
-			    r->replica_inflight_sync_io_cnt));
-			json_object_object_add(j_replica, "in-flight command",
-			    json_object_new_int64(
-			    get_num_entries_from_mempool(&r->cmdq)));
-			json_object_array_add(j_array, j_replica);
-		}
+		POPULATE_REPLICA_LIST_MEM_STATS((&spec->rq), r_next)
+		POPULATE_REPLICA_LIST_MEM_STATS((&spec->non_quorum_rq), r_non_quorum_next)
 	}
 	MTX_UNLOCK(&specq_mtx);
 	json_object_object_add(j_obj, "replica usage", j_array);

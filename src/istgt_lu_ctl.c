@@ -3431,8 +3431,7 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 		json_object_object_add(jobj, "RevisionCounter",
 		    json_object_new_uint64(spec->io_seq));
 		json_object_object_add(jobj, "Status",
-		    json_object_new_string(get_cv_status(spec, replica_cnt,
-                        spec->healthy_rcount)));
+		    json_object_new_string(get_cv_status(spec)));
 
 		json_object *jobj_arr = json_object_new_array();
 		MTX_LOCK(&spec->rq_mtx);
