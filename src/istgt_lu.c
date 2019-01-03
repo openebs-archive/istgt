@@ -4608,10 +4608,10 @@ start:
 		clock_gettime(clockid, &sch1);
 		ind = 0;
 		MTX_LOCK(&spec->schdler_mutex);
-#ifdef REPLICATION
-		write_luworkers = spec->write_luworkers;
-#endif
 		while (ind <= (ISTGT_MAX_NUM_LUWORKERS/32)) {
+#ifdef REPLICATION
+			write_luworkers = spec->write_luworkers;
+#endif
 			found_worker = ((spec->lu_free_matrix[ind] != 0) &&
 					((lu->limit_q_size == 0) || ((ind == 0) && ((spec->lu_free_matrix[ind] & 1) == 1))))
 					? 1 : 0;
@@ -4622,7 +4622,7 @@ start:
 					if (write_luworkers > 0)
 						maxind = (write_luworkers - 1) / 32;
 #endif
-				if (ind == maxind) {
+				if (ind >= maxind) {
 					if (istgt_lu_get_state(lu) != ISTGT_STATE_RUNNING)
 					{
 						MTX_UNLOCK(&spec->schdler_mutex);
@@ -4640,7 +4640,26 @@ start:
 				} else
 					ind++;
 			} else {
+				if ((worker_id = ffs(spec->lu_free_matrix[ind])) <= 0) {
+					MTX_UNLOCK(&spec->schdler_mutex);
+					goto start;
+				}
+				worker_id--; // Bits are numbered starting at 1, the least significant bit.
+				worker_id += (ind<<5);
+#ifdef REPLICATION
+				if (need_write_luworker == 1) {
+					if ((write_luworkers > 0) && (worker_id >= write_luworkers)) {
+						spec->schdler_waiting = 1;
+						pthread_cond_wait(&spec->schdler_cond, &spec->schdler_mutex);
+						spec->schdler_waiting = 0;
+						ind = 0;
+					} else
+						break;
+				} else
+					break;
+#else
 				break;
+#endif
 			}
 		}
 		MTX_UNLOCK(&spec->schdler_mutex);
@@ -4650,11 +4669,8 @@ next_lu_worker:
 		worker_id--; // Bits are numbered starting at 1, the least significant bit.
 		worker_id += (ind<<5);
 #ifdef REPLICATION
-		if (need_write_luworker == 1) {
-			if ((write_luworkers > 0) && (worker_id >= write_luworkers)) 
-				goto start;
+		if (need_write_luworker == 1)
 			goto assign_lu_task;
-		}
 #endif
 		if (worker_id >= spec->luworkers) // worker_id can't be >= luworkers
 			goto start;
@@ -4730,7 +4746,7 @@ assign_lu_task:
 
 			if ((write_luworkers > 0) && (worker_id >= write_luworkers)) {
 				need_write_luworker = 1;
-				goto next_lu_worker;
+				goto start;
 			}
 			need_write_luworker = 0;
 		}
