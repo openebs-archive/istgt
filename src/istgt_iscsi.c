@@ -134,6 +134,7 @@ struct istgt_detail {
 #define	ISCSI_ADDVAL(PARAMS, KEY, VAL, LIST, TYPE) \
 	istgt_iscsi_param_add((PARAMS), (KEY), (VAL), (LIST), (TYPE))
 
+extern uint64_t io_max_wait_time;
 static int g_nconns;
 static int g_max_connidx;
 static CONN_Ptr *g_conns;
@@ -394,7 +395,7 @@ istgt_iscsi_read_pdu(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 	return (total);
 }
 
-static int istgt_iscsi_write_pdu_internal(CONN_Ptr conn, ISCSI_PDU_Ptr pdu);
+static int istgt_iscsi_write_pdu_internal(CONN_Ptr conn, ISCSI_PDU_Ptr pdu, ISTGT_LU_CMD_Ptr lu_cmd);
 static int istgt_iscsi_write_pdu_queue(CONN_Ptr conn, ISCSI_PDU_Ptr pdu, int req_type, int I_bit);
 
 uint8_t istgt_get_sleep_val(ISTGT_LU_DISK *spec);
@@ -589,7 +590,7 @@ istgt_iscsi_write_pdu_queue(CONN_Ptr conn, ISCSI_PDU_Ptr pdu, int req_type, int 
 }
 
 static int
-istgt_iscsi_write_pdu_internal(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
+istgt_iscsi_write_pdu_internal(CONN_Ptr conn, ISCSI_PDU_Ptr pdu, ISTGT_LU_CMD_Ptr *lu_cmd)
 {
 	struct iovec iovec[5]; /* BHS+AHS+HD+DATA+DD */
 	uint8_t *cp;
@@ -680,8 +681,8 @@ istgt_iscsi_write_pdu_internal(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 		rc = writev(conn->sock, &iovec[0], 5);
 		if (rc < 0) {
 			now = time(NULL);
-			ISTGT_ERRLOG("writev() failed (errno=%d,%s,time=%f)\n",
-				errno, conn->initiator_name, difftime(now, start));
+			ISTGT_ERRLOG("writev() failed (errno=%d,%s,time=%f) for opcode:0x%2.2x CSN:0x%x\n",
+				errno, conn->initiator_name, difftime(now, start), lu_cmd->cdb0, lu_cmd->CmdSN);
 			return (-1);
 		}
 		nbytes -= rc;
@@ -2996,7 +2997,7 @@ istgt_iscsi_transfer_in_internal(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 			DSET32(&rsp[44], 0);
 		}
 
-		rc = istgt_iscsi_write_pdu_internal(conn, &rsp_pdu);
+		rc = istgt_iscsi_write_pdu_internal(conn, &rsp_pdu, lu_cmd);
 		if (rc < 0) {
 			ISTGT_ERRLOG("iscsi_write_pdu() failed\n");
 			return (-1);
@@ -3886,7 +3887,7 @@ istgt_iscsi_task_response(CONN_Ptr conn, ISTGT_LU_TASK_Ptr lu_task)
 	DSET32(&rsp[44], residual_len);
 
 	if (lu_task->lock) {
-		rc = istgt_iscsi_write_pdu_internal(conn, &rsp_pdu);
+		rc = istgt_iscsi_write_pdu_internal(conn, &rsp_pdu, &(lu_task->lu_cmd));
 	} else {
 		rc = istgt_iscsi_write_pdu(conn, &rsp_pdu);
 	}
@@ -5673,6 +5674,19 @@ update_cummulative_rw_time(ISTGT_LU_TASK_Ptr lu_task)
 				ns += diff.tv_nsec;
 				__sync_fetch_and_add(&spec->totalreadtime, ns);
 				break;
+		default:
+				return;
+	}
+	/* Only for read/write IOs, if longest pending IO is io_max_wait_time/4,
+	   delay in responding to client by io_max_wait_time/10 for replica to catch up */
+	if (spec != NULL)
+		if ((spec->longest_pending_iotime_in_ms >> 10) >
+		    (io_max_wait_time >> 2)) {
+			ISTGT_ERRLOG("Making it sleep for %lus due to long pending IO "
+			    "for > %lus\n", io_max_wait_time/10,
+			    spec->longest_pending_iotime_in_ms / 1000);
+			sleep(io_max_wait_time/10);
+			spec->longest_pending_iotime_in_ms = 0;
 		}
 }
 #endif
@@ -5783,7 +5797,7 @@ sender(void *arg)
 				pdu = lu_task->lu_cmd.pdu;
 				/* send PDU */
 				rc = istgt_iscsi_write_pdu_internal(lu_task->conn,
-					lu_task->lu_cmd.pdu);
+					lu_task->lu_cmd.pdu, &(lu_task->lu_cmd));
 				if (rc < 0) {
 					lu_task->error = 1;
 					ISTGT_ERRLOG(

@@ -2848,6 +2848,7 @@ void *timerfn(void
 			MTX_LOCK(&specq_mtx);
 			TAILQ_FOREACH(spec, &spec_q, spec_next) {
 				MTX_LOCK(&spec->complete_queue_mutex);
+				spec->longest_pending_iotime_in_ms = 0;
 				lu_task = (ISTGT_LU_TASK_Ptr)
 				    istgt_queue_first(&spec->complete_queue);
 				if (lu_task) {
@@ -2857,6 +2858,7 @@ void *timerfn(void
 					    lu_cmd->times[0], now, diff);
 					ms = diff.tv_sec * 1000;
 					ms += diff.tv_nsec / 1000000;
+					spec->longest_pending_iotime_in_ms = ms;
 					if (ms > check_interval) {
 						ISTGT_NOTICELOG("LU:%lu "
 						    "CSN:0x%x TT:%x "

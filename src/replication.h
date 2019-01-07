@@ -196,7 +196,7 @@ void inform_mgmt_conn(replica_t *r);
 extern const char * get_cv_status(spec_t *spec, int replica_cnt, int healthy_replica_cnt);
 
 /* Replica default timeout is 200 seconds */
-#define	REPLICA_DEFAULT_TIMEOUT	200
+#define	REPLICA_DEFAULT_TIMEOUT	100
 
 // Volume status
 #define VOL_STATUS_OFFLINE "Offline"

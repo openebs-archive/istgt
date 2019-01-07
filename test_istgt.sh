@@ -386,7 +386,8 @@ run_read_consistency_test ()
 	get_scsi_disk
 	if [ "$device_name" == "" ]; then
 		echo "error happened while running read consistency test"
-		kill -9 $replica1_pid $replica2_pid $replica3_pid
+		pkill -9 -P $replica1_pid $replica2_pid $replica3_pid
+		kill -SIGKILL $replica1_pid $replica2_pid $replica3_pid
 		return
 	fi
 
@@ -396,7 +397,8 @@ run_read_consistency_test ()
 	write_data 0 10485760 4096 "/dev/$device_name" $file_name &
 	w_pid=$!
 	sleep 1
-	kill -9 $replica1_pid
+	pkill -9 -P $replica1_pid
+	kill -SIGKILL $replica1_pid
 	wait $w_pid
 	sync
 
@@ -406,7 +408,8 @@ run_read_consistency_test ()
 	write_data 13631488 10485760 4096 "/dev/$device_name" $file_name &
 	w_pid=$!
 	sleep 1
-	kill -9 $replica2_pid
+	pkill -9 -P $replica2_pid
+	kill -SIGKILL $replica2_pid
 	wait $w_pid
 	sync
 
@@ -416,7 +419,8 @@ run_read_consistency_test ()
 	write_data 31457280 10485760 4096 "/dev/$device_name" $file_name &
 	w_pid=$!
 	sleep 1
-	kill -9 $replica3_pid
+	pkill -9 -P $replica3_pid
+	kill -SIGKILL $replica3_pid
 	wait $w_pid
 	sync
 
@@ -435,7 +439,8 @@ run_read_consistency_test ()
 	fi
 
 	logout_of_volume
-	kill -9 $replica1_pid $replica2_pid $replica3_pid
+	pkill -9 -P $replica1_pid $replica2_pid $replica3_pid
+	kill -SIGKILL $replica1_pid $replica2_pid $replica3_pid
 	rm -rf ${replica1_vdev}* ${replica2_vdev}* ${replica3_vdev}*
 	rm -rf $file_name $device_file
 	stop_istgt
@@ -507,7 +512,9 @@ run_lu_rf_test ()
 
 	sleep 5
 
-	kill -9 $replica3_pid
+
+	pkill -9 -P $replica3_pid
+	kill -SIGKILL $replica3_pid
 	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$(($replica3_port + 10))" -V $replica3_vdev &
 	replica3_pid=$!
 	sleep 5
@@ -521,7 +528,8 @@ run_lu_rf_test ()
 		echo "Replica identification test passed"
 	fi
 
-	kill -9 $replica1_pid $replica2_pid $replica3_pid
+	pkill -9 -P $replica1_pid $replica2_pid $replica3_pid
+	kill -SIGKILL $replica1_pid $replica2_pid $replica3_pid
 	rm -rf ${replica1_vdev}* ${replica2_vdev}* ${replica3_vdev}*
 	stop_istgt
 }

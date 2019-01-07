@@ -119,8 +119,11 @@ int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 				    (wait_count * polling_timeout)) {	\
 					REPLICA_NOTICELOG("replica(%lu)"\
 					    " hasn't responded in last "\
-					    "%d seconds\n",		\
-					    r->zvol_guid, ms / 1000);	\
+					    "%d seconds for opcode: %d"	\
+					    " with seq: %lu\n",		\
+					    r->zvol_guid, ms / 1000,	\
+					    pending_cmd->opcode,	\
+					    pending_cmd->io_seq);	\
 				}					\
 				if (ms > (wait_count * polling_timeout))\
 					wait_count =			\

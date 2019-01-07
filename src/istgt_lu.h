@@ -867,6 +867,7 @@ typedef struct istgt_lu_disk_t {
 		uint64_t	used;
 		struct timespec	updated_stats_time;
 	} stats;
+	uint64_t longest_pending_iotime_in_ms;
 #endif
 
 	/*Queue containing all the tasks. Instead of going to separate 
