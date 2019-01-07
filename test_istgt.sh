@@ -591,7 +591,8 @@ run_rebuild_time_test_in_single_replica()
 		fi
 		sleep 10
 	done
-	kill -9 $replica1_pid
+	pkill -9 -P $replica1_pid
+	kill -SIGKILL $replica1_pid
 	stop_istgt
 	rm -rf ${replica1_vdev::-1}*
 }
@@ -740,7 +741,8 @@ run_rebuild_time_test_in_multiple_replicas()
 		fi
 	done
 
-	kill -9 $replica1_pid $replica2_pid $replica3_pid
+	pkill -9 -P $replica1_pid $replica2_pid $replica3_pid
+	kill -SIGKILL $replica1_pid $replica2_pid $replica3_pid
 	stop_istgt
 	rm -rf ${replica1_vdev::-1}*
 }
@@ -793,13 +795,15 @@ run_replication_factor_test()
 	wait $replica4_pid
 	if [ $? == 0 ]; then
 		echo "replica limit test failed"
-		kill -9 $replica4_pid
+		pkill -9 -P $replica4_pid
+		kill -SIGKILL $replica4_pid
 		ret=1
 	else
 		echo "replica limit test passed"
 	fi
 
-	kill -9 $replica1_pid $replica2_pid $replica3_pid
+	pkill -9 -P $replica1_pid $replica2_pid $replica3_pid
+	kill -SIGKILL $replica1_pid $replica2_pid $replica3_pid
 	stop_istgt
 	rm -rf ${replica1_vdev::-1}*
 
@@ -842,12 +846,15 @@ run_io_timeout_test()
 	get_scsi_disk
 	if [ "$device_name"!="" ]; then
 		# Test to verify impact of replica's delay on volume latency
-		kill -9 $replica1_pid
+		pkill -9 -P $replica1_pid
+		kill -SIGKILL $replica1_pid
 		sleep 2
 
 		$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev -t $injected_latency &
 		replica1_pid=$!
 		sleep 2 #Replica will take some time to make successful connection to target
+
+		$ISTGTCONTROL maxiowait 12
 
 		iopinglog=`mktemp`
 		$IOPING -c 1 -B -WWW /dev/$device_name > $iopinglog
@@ -877,12 +884,14 @@ run_io_timeout_test()
 		replica1_pid=$!
 		sleep 2
 
-		kill -9 $replica2_pid
+		pkill -9 -P $replica2_pid
+		kill -SIGKILL $replica2_pid
 		$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V $replica1_vdev  -t $injected_latency &
 		replica2_pid=$!
 		sleep 2
 
-		kill -9 $replica3_pid
+		pkill -9 -P $replica3_pid
+		kill -SIGKILL $replica3_pid
 		$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V $replica1_vdev -t $injected_latency&
 		replica3_pid=$!
 		sleep 2
@@ -897,7 +906,8 @@ run_io_timeout_test()
 		exit 1
 	fi
 
-	kill -9 $replica1_pid $replica2_pid $replica3_pid
+	pkill -9 -P $replica1_pid $replica2_pid $replica3_pid
+	kill -SIGKILL $replica1_pid $replica2_pid $replica3_pid
 	stop_istgt
 	rm -rf ${replica1_vdev::-1}*
 }

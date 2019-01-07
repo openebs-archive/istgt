@@ -590,7 +590,7 @@ istgt_iscsi_write_pdu_queue(CONN_Ptr conn, ISCSI_PDU_Ptr pdu, int req_type, int 
 }
 
 static int
-istgt_iscsi_write_pdu_internal(CONN_Ptr conn, ISCSI_PDU_Ptr pdu, ISTGT_LU_CMD_Ptr *lu_cmd)
+istgt_iscsi_write_pdu_internal(CONN_Ptr conn, ISCSI_PDU_Ptr pdu, ISTGT_LU_CMD_Ptr lu_cmd)
 {
 	struct iovec iovec[5]; /* BHS+AHS+HD+DATA+DD */
 	uint8_t *cp;
