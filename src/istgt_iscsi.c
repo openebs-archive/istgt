@@ -5685,7 +5685,7 @@ update_cummulative_rw_time(ISTGT_LU_TASK_Ptr lu_task)
 			ISTGT_ERRLOG("Making it sleep for %lus due to long pending IO "
 			    "for > %lus\n", io_max_wait_time/10,
 			    spec->longest_pending_iotime_in_ms / 1000);
-			sleep(io_max_wait_time/10);
+			sleep(io_max_wait_time/20);
 			spec->longest_pending_iotime_in_ms = 0;
 		}
 }
