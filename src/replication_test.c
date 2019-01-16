@@ -126,7 +126,7 @@ static uint64_t
 fetch_update_io_buf(zvol_io_hdr_t *io_hdr, uint8_t *user_data,
     uint8_t **resp_data)
 {
-	uint32_t count = 0;
+	uint32_t count = 1;
 	uint64_t len = io_hdr->len;
 	uint64_t offset = io_hdr->offset;
 	uint64_t start = offset;
@@ -137,6 +137,7 @@ fetch_update_io_buf(zvol_io_hdr_t *io_hdr, uint8_t *user_data,
 	struct zvol_io_rw_hdr *last_io_rw_hdr;
 	uint8_t *resp;
 
+	md_io_num = read_metadata(start);
 	while (start < end) {
 		if (md_io_num != read_metadata(start)) {
 			count++;
