@@ -2923,7 +2923,7 @@ retry_read:
 
 wait_for_other_responses:
 		/* wait for 500 ms(500000000 ns) */
-		clock_gettime(CLOCK_MONOTONIC_RAW, &now);
+		clock_gettime(CLOCK_REALTIME, &now);
 		nsec = SEC_IN_NS - now.tv_nsec;
 		if (nsec > 500000000) {
 			abstime.tv_sec = now.tv_sec;
