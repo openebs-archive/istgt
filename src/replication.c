@@ -749,14 +749,14 @@ get_non_quorum_replica_count(spec_t *spec)
 
 /*
  * This function checks whether given replica can be connected based on
- * the number of already connected replicas.
+ * the number of already connected replicas irrespective of their mode.
  * There is a max limit of MAXREPLICA on the number of connected replicas
  * This functions returns true if it can be allowed, else, false
  * This should also return false if replication_factor number of quorum replicas
  * are connected.
  */
 static bool
-can_replica_connected(spec_t *spec, replica_t *replica)
+can_replica_connect(spec_t *spec, replica_t *replica)
 {
 	int replica_count, non_quorum_count;
 	bool ret = true;
@@ -1165,13 +1165,13 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	}
 
 	MTX_LOCK(&spec->rq_mtx);
-	if (can_replica_connected(spec, replica) == false) {
-		MTX_UNLOCK(&spec->rq_mtx);
+	if (can_replica_connect(spec, replica) == false) {
 		REPLICA_ERRLOG("Already healthy: %d degraded: %d non_quorum: %d "
 		    "replicas are connected.. disconnecting new replica(ip:%s port:%d "
 		    "guid:%lu) before replica thread creation\n", spec->healthy_rcount,
 		    spec->degraded_rcount, get_non_quorum_replica_count(spec),
 		    replica->ip, replica->port, replica->zvol_guid);
+		MTX_UNLOCK(&spec->rq_mtx);
 		goto replica_error;
 	}
 
@@ -1221,7 +1221,14 @@ error_out_replica:
 		return -1;
 	}
 
-	if (can_replica_connected(spec, replica) == false) {
+	/*
+	 * After can_replica_connect check above, 
+         * there might be any non_quorum replicas became healthy. 
+         * If (healthy+degraded) reaches replication_factor, 
+         * this replica addition won't be required. 
+         * So, same check required here with the spec lock.
+	 */
+	if (can_replica_connect(spec, replica) == false) {
 		replica->mgmt_eventfd2 = -1;
 		replica->quorum = 0;
 
@@ -1696,7 +1703,6 @@ istgt_lu_replica_stats(char *volname, char **resp)
 	struct json_object *j_all_spec, *j_replica, *j_spec, *j_obj;
 	const char *json_string = NULL;
 	uint64_t resp_len = 0;
-	int replica_cnt = 0, healthy_replica_cnt = 0;
 	const char *status;
 
 	j_all_spec = json_object_new_array();
@@ -1741,6 +1747,10 @@ send_replica_query(replica_t *replica, spec_t *spec, zvol_op_code_t opcode)
 	zvol_op_code_t mgmt_opcode = opcode;
 	mgmt_cmd_t *mgmt_cmd;
 
+	/* 
+	 * This API sends the query to replica on its management connection. 
+         * For healthy replicas, there is no need to send status queries.
+	 */
 	if ((replica->state == ZVOL_STATUS_HEALTHY) && (opcode == ZVOL_OPCODE_REPLICA_STATUS))
 		return 0;
 
@@ -1975,6 +1985,8 @@ disconnect_all_non_quorum_replicas:
 					inform_mgmt_conn(r1);
 				}
 			}
+			/* There may be chance of change due to non_quorum replica */
+			update_volstate(spec);
 		}
 	} else if ((repl_status->state == ZVOL_STATUS_DEGRADED) &&
 	    (repl_status->rebuild_status == ZVOL_REBUILDING_FAILED) &&
@@ -1988,8 +2000,6 @@ disconnect_all_non_quorum_replicas:
 		spec->rebuild_info.healthy_replica = NULL;
 	}
 
-	/* There may be chance of change due to non_quorum replica */
-	update_volstate(spec);
 	/*Trigger rebuild if possible */
 	trigger_rebuild(spec);
 	MTX_UNLOCK(&spec->rq_mtx);
@@ -3422,11 +3432,11 @@ istgt_lu_mempool_stats(char **resp)
  * destroy response received from replica for a rcommon_cmd
  */
 static void
-destroy_resp_list(rcommon_cmd_t *rcomm_cmd)
+destroy_resp_list(rcommon_cmd_t *rcomm_cmd, int copies_sent)
 {
 	int i;
 
-	for (i = 0; i < rcomm_cmd->copies_sent; i++) {
+	for (i = 0; i < copies_sent; i++) {
 		if (rcomm_cmd->resp_list[i].data_ptr) {
 			free(rcomm_cmd->resp_list[i].data_ptr);
 		}
@@ -3460,7 +3470,7 @@ cleanup_deadlist(void *arg)
 			}
 
 			if (count == copies_sent) {
-				destroy_resp_list(rcomm_cmd);
+				destroy_resp_list(rcomm_cmd, copies_sent);
 
 				for (i=1; i<rcomm_cmd->iovcnt + 1; i++)
 					xfree(rcomm_cmd->iov[i].iov_base);

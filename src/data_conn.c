@@ -290,14 +290,14 @@ handle_data_conn_error(replica_t *r)
 			}
 
 	if (r1 == NULL) {
-		MTX_LOCK(&r->r_mtx);
 		REPLICA_ERRLOG("replica %s %d not part of rq and non_rq list..\n",
 		    r->ip, r->port);
+		MTX_LOCK(&r->r_mtx);
 		/*
 		 * mgmt thread will check mgmt_eventfd2 fd to see if
 		 * it needs to wait for replica thread or not.
 		 * At this stage, the replica hasn't been added to
-		 * spec's rqlist so we need to update mgmt_eventfd2 to -1
+		 * spec's rqlist and non_rqlist so we need to update mgmt_eventfd2 to -1
 		 * here So that mgmt_thread can skip replica thread check.
 		 */
 		if (r->mgmt_eventfd2 != -1)
