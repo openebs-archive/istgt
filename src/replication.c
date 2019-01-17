@@ -50,8 +50,6 @@ static int handle_mgmt_event_fd(replica_t *replica);
 		uint64_t blockcnt = 0;                                  \
 		rcomm_cmd = malloc(sizeof (*rcomm_cmd));		\
 		memset(rcomm_cmd, 0, sizeof (*rcomm_cmd));		\
-		rcomm_cmd->copies_sent = 0;				\
-		rcomm_cmd->total_len = 0;				\
 		rcomm_cmd->offset = offset;				\
 		rcomm_cmd->data_len = nbytes;				\
 		rcomm_cmd->state = CMD_CREATED;				\
@@ -60,7 +58,6 @@ static int handle_mgmt_event_fd(replica_t *replica);
 		    &spec->luworker_rmutex[cmd->luworkerindx];		\
 		rcomm_cmd->cond_var = 					\
 		    &spec->luworker_rcond[cmd->luworkerindx];		\
-		rcomm_cmd->healthy_count = spec->healthy_rcount;	\
 		rcomm_cmd->io_seq = ++spec->io_seq;			\
 		rcomm_cmd->replication_factor = 			\
 		    spec->replication_factor;				\
@@ -538,7 +535,7 @@ check_for_old_ios(spec_t *spec, struct timespec last)
 
 	for (i = 0; i < spec->luworkers; i++) {
 		io_time = io_queue_time[i];
-		if (!(io_time.tv_sec == 0 && io_time.tv_nsec == 0)) {\
+		if (!(io_time.tv_sec == 0 && io_time.tv_nsec == 0)) {
 			/*
 			 * Check if IO is older than `last` time
 			 */
@@ -587,11 +584,17 @@ trigger_rebuild(spec_t *spec)
 	}
 
 	if (!spec->degraded_rcount) {
-		REPLICA_NOTICELOG("No downgraded replica on volume(%s),"
-		    "healthy: %d degraded: %d, rebuild will not be attempted\n",
-		    spec->volname, spec->healthy_rcount, spec->degraded_rcount);
-		return;
+		REPLICA_NOTICELOG("No downgraded in_quorum replicas on volume"
+		    "(%s), rebuild will be attempted on non_quorum replicas\n",
+		    spec->volname);
+		if (TAILQ_EMPTY(&spec->non_quorum_rq)) {
+			REPLICA_NOTICELOG("No downgraded replicas on volume"
+			    "(%s), rebuild will not be attempted\n",
+			    spec->volname);
+			return;
+		}
 	}
+
 
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
 		/* Find healthy replica */
@@ -607,8 +610,29 @@ trigger_rebuild(spec_t *spec)
 		}
 	}
 
-	if (dw_replica == NULL)
-		return;
+	if (dw_replica == NULL) {
+		if (spec->degraded_rcount) {
+			REPLICA_ERRLOG("cannot find dw_replica even with"
+			    "(%d) degraded count", spec->degraded_rcount);
+			return;
+		}
+		if (healthy_replica == NULL) {
+			REPLICA_ERRLOG("rebuilding non_quorum needs healthy"
+			    "replica");
+			return;
+		}
+		max = 0;
+		TAILQ_FOREACH(replica, &spec->non_quorum_rq, r_non_quorum_next) {
+			if (max <= replica->initial_checkpointed_io_seq) {
+				max = replica->initial_checkpointed_io_seq;
+				dw_replica = replica;
+			}
+		}
+		if (dw_replica == NULL) {
+			REPLICA_ERRLOG("dw_replica can't be null");
+			return;
+		}
+	}
 
 #ifdef DEBUG
 	const char* non_zero_inflight_replica_str =
@@ -628,8 +652,8 @@ trigger_rebuild(spec_t *spec)
 	 * data connection
 	 */
 	if (check_for_old_ios(spec, dw_replica->create_time)) {
-		REPLICA_LOG("There are still some inflight IOs... "
-		    "queuing rebuild\n");
+		REPLICA_LOG("There are inflight IOs older than replica "
+		    "create time.. queuing rebuild\n");
 		return;
 	}
 
@@ -683,7 +707,7 @@ is_replica_newly_connected(spec_t *spec, replica_t *new_replica)
 		}
 	}
 
-	if (!found && familiar_replicas < spec->replication_factor) {
+	if (!found) {
 		kr = malloc(sizeof (known_replica_t));
 		kr->zvol_guid = new_replica->zvol_guid;
 		kr->is_connected = true;
@@ -709,25 +733,61 @@ is_replica_newly_connected(spec_t *spec, replica_t *new_replica)
 	return newly_connected;
 }
 
-static bool
-is_rf_replicas_connected(spec_t *spec, replica_t *replica)
+/*
+ * This function returns the number of connected non-quorum replicas
+ */
+static int
+get_non_quorum_replica_count(spec_t *spec)
 {
-	int replica_count;
-	bool ret = false;
+	int replica_count = 0;
+	replica_t *replica;
+	ASSERT(MTX_LOCKED(&spec->rq_mtx));
+	TAILQ_FOREACH(replica, &spec->non_quorum_rq, r_non_quorum_next)
+		replica_count++;
+	return replica_count;
+}
+
+/*
+ * This function checks whether given replica can be connected based on
+ * the number of already connected replicas irrespective of their mode.
+ * There is a max limit of MAXREPLICA on the number of connected replicas
+ * This functions returns true if it can be allowed, else, false
+ * This should also return false if replication_factor number of quorum replicas
+ * are connected.
+ */
+static bool
+can_replica_connect(spec_t *spec, replica_t *replica)
+{
+	int replica_count, non_quorum_count;
+	bool ret = true;
 
 	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 
 	replica_count = spec->healthy_rcount + spec->degraded_rcount;
 	if (replica_count >= spec->replication_factor) {
-		REPLICA_ERRLOG("removing replica(%s:%d) since max replica "
-		    "connection limit(%d) reached\n", replica->ip,
-		    replica->port, spec->replication_factor);
-		ret = true;
+		REPLICA_ERRLOG("removing replica(%s:%d) since healthy: %d"
+		    " degraded: %d connected >= (%d)", replica->ip,
+		    replica->port, spec->healthy_rcount,
+		    spec->degraded_rcount, spec->replication_factor);
+		ret = false;
+	} else {
+		non_quorum_count = get_non_quorum_replica_count(spec);
+		if ((non_quorum_count + replica_count) >= MAXREPLICA) {
+			REPLICA_ERRLOG("erroring replica(%s:%d) since "
+			    "non_quorum: %d healthy: %d degraded: %d are"
+			    " connected >= %d", replica->ip, replica->port,
+			    non_quorum_count, spec->healthy_rcount,
+			    spec->degraded_rcount, MAXREPLICA);
+			ret = false;
+		}
 	}
 
 	return ret;
 }
 
+/*
+ * Update vol state based on the connected number of replicas and their status
+ */
 void
 update_volstate(spec_t *spec)
 {
@@ -1105,12 +1165,13 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	}
 
 	MTX_LOCK(&spec->rq_mtx);
-	if (is_rf_replicas_connected(spec, replica)) {
+	if (can_replica_connect(spec, replica) == false) {
+		REPLICA_ERRLOG("Already healthy: %d degraded: %d non_quorum: %d "
+		    "replicas are connected.. disconnecting new replica(ip:%s port:%d "
+		    "guid:%lu) before replica thread creation\n", spec->healthy_rcount,
+		    spec->degraded_rcount, get_non_quorum_replica_count(spec),
+		    replica->ip, replica->port, replica->zvol_guid);
 		MTX_UNLOCK(&spec->rq_mtx);
-		REPLICA_ERRLOG("Already %d replicas are connected..."
-		    " disconnecting new replica(ip:%s port:%d "
-		    "guid:%lu)\n", spec->replication_factor, replica->ip, replica->port,
-		    replica->zvol_guid);
 		goto replica_error;
 	}
 
@@ -1145,7 +1206,12 @@ replica_error:
 
 	if (replica->mgmt_eventfd2 == -1) {
 		REPLICA_ERRLOG("unable to set mgmteventfd2 for more than 10 "
-		    "seconfs for replica(%lu)\n", replica->zvol_guid);
+		    "seconds for replica(%lu)\n", replica->zvol_guid);
+		/*
+		 * as this function doesn't run in parallel with handle_mgmt_conn
+		 * for given replica, its fine to set these values to -1 here.
+		 */
+error_out_replica:
 		replica->dont_free = 1;
 		replica->iofd = -1;
 		MTX_UNLOCK(&replica->r_mtx);
@@ -1154,12 +1220,34 @@ replica_error:
 		close(iofd);
 		return -1;
 	}
+
+	/*
+	 * After can_replica_connect check above, 
+         * there might be any non_quorum replicas became healthy. 
+         * If (healthy+degraded) reaches replication_factor, 
+         * this replica addition won't be required. 
+         * So, same check required here with the spec lock.
+	 */
+	if (can_replica_connect(spec, replica) == false) {
+		replica->mgmt_eventfd2 = -1;
+		replica->quorum = 0;
+
+		REPLICA_ERRLOG("Already healthy: %d degraded: %d non_quorum: %d "
+		    "replicas are connected.. disconnecting new replica(ip:%s port:%d "
+		    "guid:%lu)\n", spec->healthy_rcount, spec->degraded_rcount,
+		    get_non_quorum_replica_count(spec), replica->ip, replica->port,
+		    replica->zvol_guid);
+		goto error_out_replica;
+	}
 	MTX_UNLOCK(&replica->r_mtx);
 
-	spec->degraded_rcount++;
 	TAILQ_REMOVE(&spec->rwaitq, replica, r_waitnext);
 
-	TAILQ_INSERT_TAIL(&spec->rq, replica, r_next);
+	if (replica->quorum == 1) {
+		TAILQ_INSERT_TAIL(&spec->rq, replica, r_next);
+		spec->degraded_rcount++;
+	} else
+		TAILQ_INSERT_TAIL(&spec->non_quorum_rq, replica, r_non_quorum_next);
 
 	/* Update the volume ready state */
 	update_volstate(spec);
@@ -1237,8 +1325,12 @@ handle_snap_create_resp(replica_t *replica, mgmt_cmd_t *mgmt_cmd)
 		MTX_LOCK(&replica->spec->rq_mtx);
 		hr = replica->spec->rebuild_info.healthy_replica;
 		dr = replica->spec->rebuild_info.dw_replica;
-		if (replica == hr)
+		if (replica == hr) {
+			REPLICA_ERRLOG("Disconnecting dw replica (%lu) "
+			   "as its healthy replica (%lu) errored snap_create\n",
+			    dr->zvol_guid, hr->zvol_guid);
 			inform_mgmt_conn(dr);
+		}
 		MTX_UNLOCK(&replica->spec->rq_mtx);
 	}
 	MTX_LOCK(&rcomm_mgmt->mtx);
@@ -1320,8 +1412,14 @@ disconnect_nonresponding_replica(replica_t *replica, uint64_t io_seq,
 			 */
 			hr = replica->spec->rebuild_info.healthy_replica;
 			dr = replica->spec->rebuild_info.dw_replica;
-			if (replica == hr)
+			if (replica == hr) {
+				REPLICA_ERRLOG("Disconnecting dw replica (%lu) "
+				   "as its healthy replica (%lu) not responded snap_create\n",
+				    dr->zvol_guid, hr->zvol_guid);
 				inform_mgmt_conn(dr);
+			}
+			REPLICA_ERRLOG("Disconnecting replica (%lu) as its not responded for"
+			   " snap_create\n", replica->zvol_guid);
 			inform_mgmt_conn(replica);
 			break;
 		}
@@ -1422,6 +1520,8 @@ int istgt_lu_destroy_snapshot(spec_t *spec, char *snapname)
 {
 	replica_t *replica;
 	TAILQ_FOREACH(replica, &spec->rq, r_next)
+		send_replica_snapshot(spec, replica, 0, snapname, ZVOL_OPCODE_SNAP_DESTROY, NULL);
+	TAILQ_FOREACH(replica, &spec->non_quorum_rq, r_non_quorum_next)
 		send_replica_snapshot(spec, replica, 0, snapname, ZVOL_OPCODE_SNAP_DESTROY, NULL);
 	return true;
 }
@@ -1551,7 +1651,10 @@ get_replica_stats_json(replica_t *replica, struct json_object **jobj)
 	json_object_object_add(j_stats, "inflightSync",
 	    json_object_new_uint64(replica->replica_inflight_sync_io_cnt));
 
-	clock_gettime(CLOCK_MONOTONIC_COARSE, &now);
+	json_object_object_add(j_stats, "inQuorum",
+	    json_object_new_uint64(replica->quorum));
+
+	clock_gettime(CLOCK_MONOTONIC, &now);
 	json_object_object_add(j_stats, "upTime",
 	    json_object_new_int64(now.tv_sec - replica->create_time.tv_sec));
 
@@ -1559,14 +1662,38 @@ get_replica_stats_json(replica_t *replica, struct json_object **jobj)
 }
 
 const char *
-get_cv_status(spec_t *spec, int replica_cnt, int healthy_replica_cnt)
+get_cv_status(spec_t *spec)
 {
 	if (spec->ready == false)
 		return VOL_STATUS_OFFLINE;
-	if (healthy_replica_cnt >= spec->consistency_factor)
+	if (spec->healthy_rcount >= spec->consistency_factor)
 		return VOL_STATUS_HEALTHY;
 	return VOL_STATUS_DEGRADED;
 }
+
+#define	POPULATE_REPLICA_LIST_STATS(HEAD, NEXT)				\
+			TAILQ_FOREACH(replica, HEAD, NEXT) {		\
+				MTX_LOCK(&replica->r_mtx);		\
+				get_replica_stats_json(replica, &j_obj);\
+				MTX_UNLOCK(&replica->r_mtx);		\
+				json_object_array_add(j_replica, j_obj);\
+			}
+
+#define	POPULATE_SPEC_STATUS(SPEC)								\
+			j_spec = json_object_new_object();					\
+			j_replica = json_object_new_array();					\
+			POPULATE_REPLICA_LIST_STATS((&SPEC->rq), r_next)			\
+			POPULATE_REPLICA_LIST_STATS((&SPEC->non_quorum_rq), r_non_quorum_next)	\
+												\
+			json_object_object_add(j_spec,						\
+			    "name", json_object_new_string(spec->volname));			\
+			status = get_cv_status(spec);						\
+			MTX_UNLOCK(&spec->rq_mtx);						\
+			json_object_object_add(j_spec, "status",				\
+			    json_object_new_string(status));					\
+			json_object_object_add(j_spec,						\
+			    "replicaStatus", j_replica);					\
+			json_object_array_add(j_all_spec, j_spec);
 
 void
 istgt_lu_replica_stats(char *volname, char **resp)
@@ -1576,7 +1703,6 @@ istgt_lu_replica_stats(char *volname, char **resp)
 	struct json_object *j_all_spec, *j_replica, *j_spec, *j_obj;
 	const char *json_string = NULL;
 	uint64_t resp_len = 0;
-	int replica_cnt = 0, healthy_replica_cnt = 0;
 	const char *status;
 
 	j_all_spec = json_object_new_array();
@@ -1587,57 +1713,12 @@ istgt_lu_replica_stats(char *volname, char **resp)
 		MTX_LOCK(&spec->rq_mtx);
 		if (volname) {
 			if(!strncmp(spec->volname, volname, strlen(volname))) {
-				j_spec = json_object_new_object();
-				j_replica = json_object_new_array();
-
-				replica_cnt = 0;
-				healthy_replica_cnt = 0;
-				TAILQ_FOREACH(replica, &spec->rq, r_next) {
-					MTX_LOCK(&replica->r_mtx);
-					get_replica_stats_json(replica, &j_obj);
-					MTX_UNLOCK(&replica->r_mtx);
-					replica_cnt++;
-	    				if (replica->state == ZVOL_STATUS_HEALTHY)
-						healthy_replica_cnt++;
-					json_object_array_add(j_replica, j_obj);
-				}
-				json_object_object_add(j_spec,
-				    "name", json_object_new_string(spec->volname));
-				status = get_cv_status(spec, replica_cnt, healthy_replica_cnt);
-				MTX_UNLOCK(&spec->rq_mtx);
-				json_object_object_add(j_spec, "status",
-				    json_object_new_string(status));
-				json_object_object_add(j_spec,
-				    "replicaStatus", j_replica);
-				json_object_array_add(j_all_spec, j_spec);
+				POPULATE_SPEC_STATUS(spec)
 				break;
 			}
 			MTX_UNLOCK(&spec->rq_mtx);
 		} else {
-			j_spec = json_object_new_object();
-			j_replica = json_object_new_array();
-
-			replica_cnt = 0;
-			healthy_replica_cnt = 0;
-			TAILQ_FOREACH(replica, &spec->rq, r_next) {
-				MTX_LOCK(&replica->r_mtx);
-				get_replica_stats_json(replica, &j_obj);
-				MTX_UNLOCK(&replica->r_mtx);
-				replica_cnt++;
-	    			if (replica->state == ZVOL_STATUS_HEALTHY)
-					healthy_replica_cnt++;
-				json_object_array_add(j_replica, j_obj);
-			}
-
-			json_object_object_add(j_spec,
-			    "name", json_object_new_string(spec->volname));
-			status = get_cv_status(spec, replica_cnt, healthy_replica_cnt);
-			MTX_UNLOCK(&spec->rq_mtx);
-			json_object_object_add(j_spec, "status",
-			    json_object_new_string(status));
-			json_object_object_add(j_spec,
-			    "replicaStatus", j_replica);
-			json_object_array_add(j_all_spec, j_spec);
+			POPULATE_SPEC_STATUS(spec)
 		}
 	}
 
@@ -1666,6 +1747,13 @@ send_replica_query(replica_t *replica, spec_t *spec, zvol_op_code_t opcode)
 	zvol_op_code_t mgmt_opcode = opcode;
 	mgmt_cmd_t *mgmt_cmd;
 
+	/* 
+	 * This API sends the query to replica on its management connection. 
+         * For healthy replicas, there is no need to send status queries.
+	 */
+	if ((replica->state == ZVOL_STATUS_HEALTHY) && (opcode == ZVOL_OPCODE_REPLICA_STATUS))
+		return 0;
+
 	mgmt_cmd = malloc(sizeof(mgmt_cmd_t));
 	memset(mgmt_cmd, 0, sizeof (mgmt_cmd_t));
 	data_len = strlen(spec->volname) + 1;
@@ -1685,58 +1773,35 @@ send_replica_query(replica_t *replica, spec_t *spec, zvol_op_code_t opcode)
 	return handle_write_data_event(replica);
 }
 
+#define SEND_REPLICA_ZVOL_OPCODE(RQ_LIST, NEXT, OPCODE, AGAIN) 				\
+	TAILQ_FOREACH(replica, RQ_LIST, NEXT) { 					\
+		ret = send_replica_query(replica, spec, OPCODE);			\
+		if (ret == -1) {							\
+			REPLICA_ERRLOG("Failed to send mgmtIO for querying "		\
+			    "status on replica(%lu) ..\n", replica->zvol_guid);		\
+			MTX_UNLOCK(&spec->rq_mtx);					\
+			handle_mgmt_conn_error(replica, 0, NULL, 0);			\
+			MTX_LOCK(&spec->rq_mtx);					\
+			goto AGAIN;							\
+		}									\
+	}
+
 /*
- * get_replica_stats will send stats query to any healthy replica
+ * send_replica_opcode will send opcode to replicas on mgmt conn queue
  */
 static void
-get_replica_stats(spec_t *spec)
+send_replica_opcode(spec_t *spec, zvol_op_code_t opcode)
 {
 	int ret;
 	replica_t *replica;
 
-again:
 	MTX_LOCK(&spec->rq_mtx);
-	TAILQ_FOREACH(replica, &spec->rq, r_next) {
-		if (replica->state != ZVOL_STATUS_HEALTHY)
-			continue;
+rq_list_start:
+	SEND_REPLICA_ZVOL_OPCODE((&spec->rq), r_next, opcode, rq_list_start)
 
-		ret = send_replica_query(replica, spec, ZVOL_OPCODE_STATS);
-		if (ret == -1) {
-			REPLICA_ERRLOG("Failed to send stats "
-			    "on replica(%lu) ..\n", replica->zvol_guid);
-			MTX_UNLOCK(&spec->rq_mtx);
-			handle_mgmt_conn_error(replica, 0, NULL, 0);
-			goto again;
-		} else
-			break;
-	}
-	MTX_UNLOCK(&spec->rq_mtx);
-}
-
-/*
- * ask_replica_status will send replica_status query to all degraded replica
- */
-static void
-ask_replica_status_all(spec_t *spec)
-{
-	int ret;
-	replica_t *replica;
-
-again:
-	MTX_LOCK(&spec->rq_mtx);
-	TAILQ_FOREACH(replica, &spec->rq, r_next) {
-		if (replica->state == ZVOL_STATUS_HEALTHY)
-			continue;
-
-		ret = send_replica_query(replica, spec, ZVOL_OPCODE_REPLICA_STATUS);
-		if (ret == -1) {
-			REPLICA_ERRLOG("Failed to send mgmtIO for querying "
-			    "status on replica(%lu) ..\n", replica->zvol_guid);
-			MTX_UNLOCK(&spec->rq_mtx);
-			handle_mgmt_conn_error(replica, 0, NULL, 0);
-			goto again;
-		}
-	}
+non_quorum_rq_list_start:
+	SEND_REPLICA_ZVOL_OPCODE((&spec->non_quorum_rq), r_non_quorum_next, opcode,
+	    non_quorum_rq_list_start)
 	MTX_UNLOCK(&spec->rq_mtx);
 }
 
@@ -1837,6 +1902,9 @@ update_replica_status(spec_t *spec, replica_t *replica)
 {
 	zrepl_status_ack_t *repl_status;
 	replica_state_t last_state;
+	int found_in_list = 0;
+	replica_t *r1;
+	int replica_count;
 
 	repl_status = (zrepl_status_ack_t *)replica->mgmt_io_resp_data;
 
@@ -1845,8 +1913,8 @@ update_replica_status(spec_t *spec, replica_t *replica)
 	    repl_status->rebuild_status);
 
 	MTX_LOCK(&spec->rq_mtx);
-	MTX_LOCK(&replica->r_mtx);
 
+	MTX_LOCK(&replica->r_mtx);
 	last_state = replica->state;
 	replica->state = (replica_state_t) repl_status->state;
 	MTX_UNLOCK(&replica->r_mtx);
@@ -1860,20 +1928,65 @@ update_replica_status(spec_t *spec, replica_t *replica)
 		    (repl_status->state == ZVOL_STATUS_HEALTHY) ? "healthy" :
 		    "degraded");
 		if (repl_status->state == ZVOL_STATUS_DEGRADED) {
+			/* This should be never possible */
+			assert(1 == 0);
 			spec->degraded_rcount++;
 			spec->healthy_rcount--;
 		} else if (repl_status->state == ZVOL_STATUS_HEALTHY) {
 			/* master_replica became healthy*/
-			spec->degraded_rcount--;
-			spec->healthy_rcount++;
-			replica->quorum = 1;
+			TAILQ_FOREACH(r1, &(spec->rq), r_next) {
+				if (r1 == replica) {
+					assert(replica->quorum == 1);
+					found_in_list = 1;
+					break;
+				}
+			}
+
+			if (r1 == NULL) {
+				TAILQ_FOREACH(r1, &(spec->non_quorum_rq), r_non_quorum_next) {
+					if (r1 == replica) {
+						assert(replica->quorum == 0);
+						found_in_list = 2;
+						break;
+					}
+				}
+			}
+
+			assert(r1 != NULL);
 			assert(spec->rebuild_info.dw_replica == replica);
 			spec->rebuild_info.dw_replica = NULL;
 			spec->rebuild_info.healthy_replica = NULL;
 			spec->rebuild_info.rebuild_in_progress = false;
+			if (found_in_list == 2) {
+				replica_count = spec->healthy_rcount + spec->degraded_rcount;
+				/* Error our if already quorum replicas are connected */
+				if (replica_count >= spec->replication_factor)
+					goto disconnect_all_non_quorum_replicas;
+			}
+			if (found_in_list == 1)
+				spec->degraded_rcount--;
+			else {
+				TAILQ_REMOVE(&spec->non_quorum_rq, replica, r_non_quorum_next);
+				TAILQ_INSERT_TAIL(&spec->rq, replica, r_next);
+			}
+			spec->healthy_rcount++;
+			replica->quorum = 1;
 			REPLICA_ERRLOG("Replica(%lu) marked healthy,"
 		    	    " seting master_replica to NULL\n",
 			    replica->zvol_guid);
+			/* Error our if already quorum replicas are connected */
+			if (spec->healthy_rcount >= spec->replication_factor) {
+				assert(spec->degraded_rcount == 0);
+disconnect_all_non_quorum_replicas:
+				TAILQ_FOREACH(r1, &(spec->non_quorum_rq), r_non_quorum_next) {
+					REPLICA_NOTICELOG("Disconnecting non-quorum (%lu) "
+					    "as healthy: %d degraded: %d quorum replicas are available",
+					    r1->zvol_guid, spec->healthy_rcount, spec->degraded_rcount);
+					inform_mgmt_conn(r1);
+				}
+			}
+			/* There may be chance of change due to non_quorum replica */
+			update_volstate(spec);
 		}
 	} else if ((repl_status->state == ZVOL_STATUS_DEGRADED) &&
 	    (repl_status->rebuild_status == ZVOL_REBUILDING_FAILED) &&
@@ -2435,12 +2548,12 @@ respond_with_error_for_all_outstanding_mgmt_ios(replica_t *r)
 		rcmd->offset = rcomm_cmd->offset;			\
 		rcmd->data_len = rcomm_cmd->data_len;			\
 		rcmd->io_seq = rcomm_cmd->io_seq;			\
-		rcmd->idx = rcomm_cmd->copies_sent - 1;			\
+		rcmd->idx = rcomm_cmd->non_quorum_copies_sent +		\
+		    rcomm_cmd->copies_sent - 1;				\
 		rcomm_cmd->resp_list[rcmd->idx].replica = replica;	\
 		rcomm_cmd->resp_list[rcmd->idx].status |= 		\
 		    (replica->state == ZVOL_STATUS_HEALTHY) ? 		\
 		    SENT_TO_HEALTHY : SENT_TO_DEGRADED;			\
-		rcmd->healthy_count = spec->healthy_rcount;		\
 		rcmd->rcommq_ptr = rcomm_cmd;				\
 		rcmd->iovcnt = rcomm_cmd->iovcnt;			\
 		for (i=1; i < rcomm_cmd->iovcnt + 1; i++) {		\
@@ -2607,7 +2720,7 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 int64_t
 replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t nbytes)
 {
-	int rc = -1, i;
+	int rc = -1, i, copies_sent;
 	bool cmd_write = false, cmd_read = false, cmd_sync = false;
 	replica_t *replica, *last_replica = NULL, *resp_replica= NULL;
 	rcommon_cmd_t *rcomm_cmd;
@@ -2711,6 +2824,20 @@ retry_read:
 			break;
 	}
 
+	if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) {
+		TAILQ_FOREACH(replica, &spec->non_quorum_rq, r_non_quorum_next) {
+			rcomm_cmd->non_quorum_copies_sent++;
+
+			build_rcmd();
+
+			INCREMENT_INFLIGHT_REPLICA_IO_CNT(replica, rcmd->opcode);
+
+			put_to_mempool(&replica->cmdq, rcmd);
+
+			eventfd_write(replica->data_eventfd, 1);
+		}
+	}
+
 	TAILQ_INSERT_TAIL(&spec->rcommon_waitq, rcomm_cmd, wait_cmd_next);
 
 	MTX_UNLOCK(&spec->rq_mtx);
@@ -2721,7 +2848,9 @@ retry_read:
 	while (1) {
 		timesdiff(CLOCK_MONOTONIC_RAW, queued_time, now, diff);
 		count = 0;
-		for (i = 0; i < rcomm_cmd->copies_sent; i++) {
+		copies_sent = rcomm_cmd->copies_sent + rcomm_cmd->non_quorum_copies_sent;
+
+		for (i = 0; i < copies_sent; i++) {
 			resp_replica = rcomm_cmd->resp_list[i].replica;
 			if (rcomm_cmd->resp_list[i].status &
 			    (RECEIVED_OK|RECEIVED_ERR|REPLICATE_TIMED_OUT)) {
@@ -2753,7 +2882,7 @@ retry_read:
 			}
 		}
 
-		if (count != rcomm_cmd->copies_sent)
+		if (count != copies_sent)
 			goto wait_for_other_responses;
 
 		// check for status of rcomm_cmd
@@ -2764,6 +2893,7 @@ retry_read:
 			} else if (rcomm_cmd->opcode == ZVOL_OPCODE_READ &&
 			    rcomm_cmd->copies_sent == 1) {
 				rcomm_cmd->copies_sent = 0;
+				rcomm_cmd->non_quorum_copies_sent = 0;
 				memset(rcomm_cmd->resp_list, 0,
 				    sizeof (rcomm_cmd->resp_list));
 				MTX_LOCK(&spec->rq_mtx);
@@ -3133,8 +3263,8 @@ init_replication(void *arg __attribute__((__unused__)))
 			spec_t *spec = NULL;
 			MTX_LOCK(&specq_mtx);
 			TAILQ_FOREACH(spec, &spec_q, spec_next) {
-				ask_replica_status_all(spec);
-				get_replica_stats(spec);
+				send_replica_opcode(spec, ZVOL_OPCODE_REPLICA_STATUS);
+				send_replica_opcode(spec, ZVOL_OPCODE_STATS);
 			}
 			MTX_UNLOCK(&specq_mtx);
 			clock_gettime(CLOCK_MONOTONIC_COARSE, &last);
@@ -3194,6 +3324,7 @@ initialize_volume(spec_t *spec, int replication_factor, int consistency_factor)
 	spec->io_seq = 0;
 	TAILQ_INIT(&spec->rcommon_waitq);
 	TAILQ_INIT(&spec->rq);
+	TAILQ_INIT(&spec->non_quorum_rq);
 	TAILQ_INIT(&spec->rwaitq);
 	TAILQ_INIT(&spec->identified_replica);
 
@@ -3239,6 +3370,26 @@ initialize_volume(spec_t *spec, int replication_factor, int consistency_factor)
 	return 0;
 }
 
+#define POPULATE_REPLICA_LIST_MEM_STATS(HEAD, NEXT)				\
+		TAILQ_FOREACH(r, HEAD, NEXT) {					\
+			j_replica = json_object_new_object();			\
+			json_object_object_add(j_replica, "replicaId",		\
+			    json_object_new_uint64(r->zvol_guid));		\
+			json_object_object_add(j_replica, "in-flight read",	\
+			    json_object_new_uint64(				\
+			    r->replica_inflight_read_io_cnt));			\
+			json_object_object_add(j_replica, "in-flight write",	\
+			    json_object_new_uint64(				\
+			    r->replica_inflight_write_io_cnt));			\
+			json_object_object_add(j_replica, "in-flight sync",	\
+			    json_object_new_uint64(				\
+			    r->replica_inflight_sync_io_cnt));			\
+			json_object_object_add(j_replica, "in-flight command",	\
+			    json_object_new_int64(				\
+			    get_num_entries_from_mempool(&r->cmdq)));		\
+			json_object_array_add(j_array, j_replica);		\
+		}
+
 void
 istgt_lu_mempool_stats(char **resp)
 {
@@ -3256,24 +3407,8 @@ istgt_lu_mempool_stats(char **resp)
 
 	MTX_LOCK(&specq_mtx);
 	TAILQ_FOREACH(spec, &spec_q, spec_next) {
-		TAILQ_FOREACH(r, &spec->rq, r_next) {
-			j_replica = json_object_new_object();
-			json_object_object_add(j_replica, "replicaId",
-			    json_object_new_uint64(r->zvol_guid));
-			json_object_object_add(j_replica, "in-flight read",
-			    json_object_new_uint64(
-			    r->replica_inflight_read_io_cnt));
-			json_object_object_add(j_replica, "in-flight write",
-			    json_object_new_uint64(
-			    r->replica_inflight_write_io_cnt));
-			json_object_object_add(j_replica, "in-flight sync",
-			    json_object_new_uint64(
-			    r->replica_inflight_sync_io_cnt));
-			json_object_object_add(j_replica, "in-flight command",
-			    json_object_new_int64(
-			    get_num_entries_from_mempool(&r->cmdq)));
-			json_object_array_add(j_array, j_replica);
-		}
+		POPULATE_REPLICA_LIST_MEM_STATS((&spec->rq), r_next)
+		POPULATE_REPLICA_LIST_MEM_STATS((&spec->non_quorum_rq), r_non_quorum_next)
 	}
 	MTX_UNLOCK(&specq_mtx);
 	json_object_object_add(j_obj, "replica usage", j_array);
@@ -3297,11 +3432,11 @@ istgt_lu_mempool_stats(char **resp)
  * destroy response received from replica for a rcommon_cmd
  */
 static void
-destroy_resp_list(rcommon_cmd_t *rcomm_cmd)
+destroy_resp_list(rcommon_cmd_t *rcomm_cmd, int copies_sent)
 {
 	int i;
 
-	for (i = 0; i < rcomm_cmd->copies_sent; i++) {
+	for (i = 0; i < copies_sent; i++) {
 		if (rcomm_cmd->resp_list[i].data_ptr) {
 			free(rcomm_cmd->resp_list[i].data_ptr);
 		}
@@ -3317,7 +3452,7 @@ cleanup_deadlist(void *arg)
 {
 	spec_t *spec = (spec_t *)arg;
 	rcommon_cmd_t *rcomm_cmd;
-	int i, count = 0, entry_count = 0;
+	int i, count = 0, entry_count = 0, copies_sent = 0;
 
 	while (1) {
 		entry_count = get_num_entries_from_mempool(&spec->rcommon_deadlist);
@@ -3327,14 +3462,15 @@ cleanup_deadlist(void *arg)
 
 			ASSERT(rcomm_cmd->state == CMD_EXECUTION_DONE);
 
-			for (i = 0; i < rcomm_cmd->copies_sent; i++) {
+			copies_sent = rcomm_cmd->copies_sent + rcomm_cmd->non_quorum_copies_sent;
+			for (i = 0; i < copies_sent; i++) {
 				if (rcomm_cmd->resp_list[i].status &
 				    (RECEIVED_OK|RECEIVED_ERR))
 					count++;
 			}
 
-			if (count == rcomm_cmd->copies_sent) {
-				destroy_resp_list(rcomm_cmd);
+			if (count == copies_sent) {
+				destroy_resp_list(rcomm_cmd, copies_sent);
 
 				for (i=1; i<rcomm_cmd->iovcnt + 1; i++)
 					xfree(rcomm_cmd->iov[i].iov_base);

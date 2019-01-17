@@ -264,9 +264,10 @@ handle_data_conn_error(replica_t *r)
 	int fd, data_eventfd, mgmt_eventfd2, epollfd;
 	spec_t *spec;
 	replica_t *r1 = NULL;
+	int found_in_list = 0;
 
 	if (r->iofd == -1) {
-		REPLICA_ERRLOG("repl %s %d %p\n", r->ip, r->port, r);
+		REPLICA_ERRLOG("repl %s %d %p data_conn error\n", r->ip, r->port, r);
 		return -1;
 	}
 
@@ -274,31 +275,50 @@ handle_data_conn_error(replica_t *r)
 	spec = r->spec;
 
 	TAILQ_FOREACH(r1, &(spec->rq), r_next)
-		if (r1 == r)
+		if (r1 == r) {
+			assert(r->quorum == 1);
+			found_in_list = 1;
 			break;
+		}
+
+	if (r1 == NULL)
+		TAILQ_FOREACH(r1, &(spec->non_quorum_rq), r_non_quorum_next)
+			if (r1 == r) {
+				assert(r->quorum == 0);
+				found_in_list = 2;
+				break;
+			}
 
 	if (r1 == NULL) {
-		REPLICA_ERRLOG("replica %s %d not part of rqlist..\n",
+		REPLICA_ERRLOG("replica %s %d not part of rq and non_rq list..\n",
 		    r->ip, r->port);
+		MTX_LOCK(&r->r_mtx);
 		/*
 		 * mgmt thread will check mgmt_eventfd2 fd to see if
 		 * it needs to wait for replica thread or not.
 		 * At this stage, the replica hasn't been added to
-		 * spec's rqlist so we need to update mgmt_eventfd2 to -1
+		 * spec's rqlist and non_rqlist so we need to update mgmt_eventfd2 to -1
 		 * here So that mgmt_thread can skip replica thread check.
 		 */
 		if (r->mgmt_eventfd2 != -1)
 			r->mgmt_eventfd2 = -1;
+		MTX_UNLOCK(&r->r_mtx);
 		MTX_UNLOCK(&spec->rq_mtx);
 		return -1;
 	}
 
-	TAILQ_REMOVE(&spec->rq, r, r_next);
-
-	if (r->state == ZVOL_STATUS_HEALTHY)
-		spec->healthy_rcount--;
-	else if (r->state == ZVOL_STATUS_DEGRADED)
-		spec->degraded_rcount--;
+	if (found_in_list == 1) {
+		TAILQ_REMOVE(&spec->rq, r, r_next);
+		if (r->state == ZVOL_STATUS_HEALTHY)
+			spec->healthy_rcount--;
+		else {
+			ASSERT(r->state == ZVOL_STATUS_DEGRADED);
+			spec->degraded_rcount--;
+		}
+	} else {
+		ASSERT(found_in_list == 2);
+		TAILQ_REMOVE(&spec->non_quorum_rq, r, r_non_quorum_next);
+	}
 
 	update_volstate(r->spec);
 

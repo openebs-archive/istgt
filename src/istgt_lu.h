@@ -849,6 +849,7 @@ typedef struct istgt_lu_disk_t {
 	rte_smempool_t rcommon_deadlist;	// Contains completed IOs
 	TAILQ_HEAD(, replica_s) rq; //Queue of replicas connected to this spec(volume)
 	TAILQ_HEAD(, replica_s) rwaitq; //Queue of replicas completed handshake, and yet to have data connection to this spec(volume)
+	TAILQ_HEAD(, replica_s) non_quorum_rq; //Queue of non_quorum replicas connected to this spec
 	TAILQ_HEAD(, known_replica_s) identified_replica;	/* List of replicas known to spec */
 	int replication_factor;
 	int consistency_factor;
