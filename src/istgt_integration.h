@@ -31,6 +31,8 @@ typedef enum zvol_status replica_state_t;
 
 typedef struct replica_s {
 	TAILQ_ENTRY(replica_s) r_next;
+	/* For Replicas which are connected with the quorum value as 0 */
+	TAILQ_ENTRY(replica_s) r_non_quorum_next;
 	TAILQ_ENTRY(replica_s) r_waitnext;
 	/* list of IOs queued from spec to replica */
 	rte_smempool_t cmdq;
