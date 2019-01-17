@@ -433,6 +433,7 @@ send_mgmt_ack(int fd, zvol_io_hdr_t *mgmt_ack_hdr, void *buf, int *zrepl_status_
 			mgmt_ack_data.port = replica_port;
 			mgmt_ack_data.pool_guid = replica_port;
 			mgmt_ack_data.zvol_guid = replica_port;
+			mgmt_ack_data.quorum = 1;
 
 			iovec[3].iov_base = &mgmt_ack_data;
 			iovec[3].iov_len = 50;

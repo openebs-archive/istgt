@@ -83,10 +83,10 @@ typedef struct rcommon_cmd_s {
 	TAILQ_ENTRY(rcommon_cmd_s)  wait_cmd_next; /* for rcommon_waitq */
 	int luworker_id;
 	int copies_sent;
+	int non_quorum_copies_sent;
 	uint8_t replication_factor;
 	uint8_t consistency_factor;
 	zvol_op_code_t opcode;
-	int healthy_count;	/* number of healthy replica when cmd queued */
 	uint64_t io_seq;
 	uint64_t lun_id;
 	uint64_t offset;
@@ -108,7 +108,6 @@ typedef struct rcmd_s {
 	uint64_t io_seq;
 	void *rcommq_ptr;
 	uint8_t *iov_data;	/* for header to be sent to replica */
-	int healthy_count;	/* number of healthy replica when cmd queued */
 	int idx;		/* index for rcommon_cmd in resp_list */
 	int64_t iovcnt;
 	uint64_t offset;
@@ -195,7 +194,7 @@ int64_t perform_read_write_on_fd(int fd, uint8_t *data, uint64_t len,
 int initialize_volume(spec_t *spec, int, int);
 void destroy_volume(spec_t *spec);
 void inform_mgmt_conn(replica_t *r);
-extern const char * get_cv_status(spec_t *spec, int replica_cnt, int healthy_replica_cnt);
+extern const char * get_cv_status(spec_t *spec);
 extern void get_replica_stats_json(replica_t *replica, struct json_object **jobj);
 
 /* Replica default timeout is 200 seconds */

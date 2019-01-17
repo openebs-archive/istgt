@@ -78,6 +78,7 @@ start_istgt() {
 	run_istgt $* >> $LOGFILE 2>&1 &
 	SETUP_PID=$!
 	echo $SETUP_PID
+	## wait for couple of seconds to start the istgt target
 	sleep 5
 	cd ..
 }
@@ -88,8 +89,8 @@ start_replica() {
 
 stop_istgt() {
 	if [ $SETUP_PID -ne -1 ]; then
-		kill -9 $(list_descendants $SETUP_PID)
-		kill -9 $SETUP_PID
+		pkill -9 -P $(list_descendants $SETUP_PID)
+		pkill -9 -P $SETUP_PID
 	fi
 
 }
@@ -103,6 +104,10 @@ run_mempool_test()
 
 run_istgt_integration()
 {
+	sudo kill $(sudo lsof -t -i:6060)
+	pkill -9 -x istgt/src/replication_test
+	ps -aux | grep 'istgt'
+	truncate -s 5G /tmp/test_vol1 /tmp/test_vol2 /tmp/test_vol3
 	export externalIP=127.0.0.1
 	echo $externalIP
 	$ISTGT_INTEGRATION >> $INTEGRATION_TEST_LOGFILE 2>&1
@@ -151,7 +156,6 @@ run_and_verify_iostats() {
 		if [ $readReqTime -gt $readRespTime ] || [ $writeReqTime -gt $writeRespTime ]; then
 			echo "Issue in replica latency stats" && tail -20 $LOGFILE && exit 1
 		fi
-
 		sleep 5
 	else
 		echo "Unable to detect iSCSI device, login failed"; exit 1
@@ -211,7 +215,7 @@ write_data()
 setup_test_env() {
 	rm -f /tmp/test_vol*
 	mkdir -p /mnt/store
-	truncate -s 5G /tmp/test_vol1 /tmp/test_vol2 /tmp/test_vol3
+	truncate -s 5G /tmp/test_vol1 /tmp/test_vol2 /tmp/test_vol3 $1
 	logout_of_volume
 	sudo killall -9 istgt
 	sudo killall -9 replication_test
@@ -259,15 +263,15 @@ run_data_integrity_test() {
 	setup_test_env
 	$TEST_SNAPSHOT 0
 
-	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V "/tmp/test_vol1" &
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V "/tmp/test_vol1" -q  &
 	replica1_pid=$!
 	$TEST_SNAPSHOT 0
 
-	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V "/tmp/test_vol2" &
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V "/tmp/test_vol2" -q  &
 	replica2_pid=$!
 	$TEST_SNAPSHOT 0
 
-	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V "/tmp/test_vol3" &
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V "/tmp/test_vol3" -q &
 	replica3_pid=$!
 	sleep 15
 
@@ -290,7 +294,7 @@ run_data_integrity_test() {
 	ps -o pid,ppid,command
 	$TEST_SNAPSHOT 0
 
-	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V "/tmp/test_vol1" &
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V "/tmp/test_vol1" -q &
 	replica1_pid=$!
 	sleep 5
 	write_and_verify_data
@@ -305,7 +309,7 @@ run_data_integrity_test() {
 	kill -SIGKILL $replica1_pid
 
 	# test replica IO timeout
-	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V "/tmp/test_vol1" -n 500&
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V "/tmp/test_vol1" -q -n 500&
 	replica1_pid1=$!
 	sleep 5
 	write_and_verify_data
@@ -325,12 +329,13 @@ run_data_integrity_test() {
 
 	$ISTGTCONTROL -q iostats
 
-	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V "/tmp/test_vol1" &
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V "/tmp/test_vol1" -q &
 	replica1_pid=$!
 	sleep 5
 	ps aux |grep replication_test
 	verify_resize_command
 
+	pkill -9 -P $replica1_pid
 	pkill -9 -P $replica1_pid1
 	pkill -9 -P $replica2_pid
 	pkill -9 -P $replica3_pid
@@ -367,13 +372,14 @@ run_read_consistency_test ()
 	export ReplicationDelay=40
 	setup_test_env
 	sleep 2
+	ps -aux | grep 'istgt'
 	istgtcontrol status >/dev/null  2>&1
 	if [ $? -ne 0 ]; then
 		echo "ISTGTCONTROL returned error as replication module not initialized"
 	else
 		echo "ISTGTCONTROL returned success .. something went wrong"
 		stop_istgt
-		exit 1
+		return
 	fi
 
 	unset ReplicationDelay
@@ -381,13 +387,13 @@ run_read_consistency_test ()
 	sleep 60
 	rm -rf $file_name $device_file
 
-	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev &
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev -q  &
 	replica1_pid=$!
 
-	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V $replica2_vdev  &
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V $replica2_vdev  -q  &
 	replica2_pid=$!
 
-	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V $replica3_vdev &
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V $replica3_vdev -q  &
 	replica3_pid=$!
 	sleep 5
 
@@ -397,7 +403,9 @@ run_read_consistency_test ()
 	get_scsi_disk
 	if [ "$device_name" == "" ]; then
 		echo "error happened while running read consistency test"
-		kill -9 $replica1_pid $replica2_pid $replica3_pid
+		pkill -9 -P $replica1_pid
+		pkill -9 -P $replica2_pid
+		pkill -9 -P $replica3_pid
 		return
 	fi
 
@@ -407,31 +415,31 @@ run_read_consistency_test ()
 	write_data 0 10485760 4096 "/dev/$device_name" $file_name &
 	w_pid=$!
 	sleep 1
-	kill -9 $replica1_pid
+	pkill -9 -P $replica1_pid
 	wait $w_pid
 	sync
 
-	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev -d &
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev -q  -d &
 	replica1_pid=$!
 	sleep 5
 	write_data 13631488 10485760 4096 "/dev/$device_name" $file_name &
 	w_pid=$!
 	sleep 1
-	kill -9 $replica2_pid
+	pkill -9 -P $replica2_pid
 	wait $w_pid
 	sync
 
-	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V $replica2_vdev -d &
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V $replica2_vdev -q  -d &
 	replica2_pid=$!
 	sleep 5
 	write_data 31457280 10485760 4096 "/dev/$device_name" $file_name &
 	w_pid=$!
 	sleep 1
-	kill -9 $replica3_pid
+	pkill -9 -P $replica3_pid
 	wait $w_pid
 	sync
 
-	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V $replica3_vdev -d &
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V $replica3_vdev -q -d &
 	replica3_pid=$!
 	sleep 5
 
@@ -446,7 +454,9 @@ run_read_consistency_test ()
 	fi
 
 	logout_of_volume
-	kill -9 $replica1_pid $replica2_pid $replica3_pid
+	pkill -9 -P $replica1_pid
+	pkill -9 -P $replica2_pid
+	pkill -9 -P $replica3_pid
 	rm -rf ${replica1_vdev}* ${replica2_vdev}* ${replica3_vdev}*
 	rm -rf $file_name $device_file
 	stop_istgt
@@ -463,18 +473,21 @@ run_lu_rf_test ()
 	local replica1_vdev="/tmp/test_vol1"
 	local replica2_vdev="/tmp/test_vol2"
 	local replica3_vdev="/tmp/test_vol3"
+	local replica4_ip="127.0.0.1"
+	local replica4_port="6164"
+	local replica4_vdev="/tmp/test_vol4"
 
 	>$LOGFILE
 	sed -i -n '/LogicalUnit section/,$!p' src/istgt.conf
-	setup_test_env
+	setup_test_env $replica4_vdev
 
-	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev -r &
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev -q -r &
 	replica1_pid=$!
 
-	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V $replica2_vdev  -r &
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V $replica2_vdev -q  -r &
 	replica2_pid=$!
 
-	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V $replica3_vdev -r &
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V $replica3_vdev -q -r &
 	replica3_pid=$!
 	sleep 5
 
@@ -518,25 +531,447 @@ run_lu_rf_test ()
 
 	sleep 5
 
-	kill -9 $replica3_pid
-	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$(($replica3_port + 10))" -V $replica3_vdev &
+	pkill -9 -P $replica3_pid
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$(($replica3_port + 10))" -V $replica3_vdev -q &
 	replica3_pid=$!
-	sleep 5
+        sleep 5
 
-	wait $replica3_pid
-	if [ $? -eq 0 ]; then
+	## Checking whether process exist or not
+	if ps -p $replica3_pid > /dev/null 2>&1
+	then
+		echo "Replica identification test passed"
+	else
 		echo "Replica identification test failed"
 		cat $LOGFILE
 		exit 1
-	else
-		echo "Replica identification test passed"
 	fi
 
-	kill -9 $replica1_pid $replica2_pid $replica3_pid
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica4_ip" -P "$replica4_port" -V $replica4_vdev &
+	replica4_pid=$!
+	sleep 5
+
+	if ps -p $replica4_pid > /dev/null 2>&1
+	then
+		echo "Non-quorum-replica connection test failed(3 quorum + 1 non-quorum)"
+		cat $LOGFILE
+		exit 1
+	else
+		echo "Non-quorum-replica connection test passed(3 quorum + 1 non-quorum)"
+	fi
+
+	pkill -9 -P $replica1_pid
+	pkill -9 -P $replica2_pid
+	pkill -9 -P $replica3_pid
 	rm -rf ${replica1_vdev}* ${replica2_vdev}* ${replica3_vdev}*
 	stop_istgt
 }
 
+## check_healthy_replica_count is used to cross the count of the helathy replicas.
+check_healthy_replica_count()
+{
+
+	no_of_replicas=$1
+
+	cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[].Mode' | grep -w Healthy"
+	cnt=$(eval $cmd | wc -l)
+
+	if [ $cnt -ne $no_of_replicas ]
+	then
+		echo "Health check is failed expected healthy replica count $no_of_replicas but got $cnt"
+		exit 1
+	fi
+
+	echo "Health state check is passed"
+
+	check_degraded_inquorum 0 0
+}
+
+
+## check_degraded_inquorum used to check the degraded replica count and inquorum value count.
+check_degraded_inquorum()
+{
+	local expected_degraded_count=$1
+	local expected_inquorum_count=$2
+	local cnt=0
+
+	## Check the no.of degraded replicas
+	cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[].Mode'"
+	cnt=$(eval $cmd | grep -w Degraded | wc -l)
+
+	if [ $cnt -ne $expected_degraded_count ]
+	then
+		echo "Degraded replica count is not matched: expected degraded replica count $expected_rep_count and got $cnt"
+		exit 1
+	fi
+
+	## Check for inQuorum replicas. It takes approximately another 10 seconds to set inQuorum to 1 after rebuilding
+	cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[].inQuorum'"
+	cnt=$(eval $cmd | grep -w 0 | wc -l)
+
+	if [ $cnt -ne $expected_inquorum_count ]
+	then
+		echo "Inquorum test failed: expected inquorum is $expected_inquorum_count and got $cnt"
+		exit 1
+	fi
+
+	echo "Test passed for checking the count of Degraded and inQuorum count"
+}
+
+# run_quorum_test is used to test by connecting n Quorum replicas and m Non Quorum replicas
+run_quorum_test()
+{
+	local replica1_port="6161"
+	local replica2_port="6162"
+	local replica3_port="6163"
+	local replica4_port="6164"
+	local replica5_port="6165"
+	local replica6_port="6166"
+	local replica1_ip="127.0.0.1"
+	local replica2_ip="127.0.0.1"
+	local replica3_ip="127.0.0.1"
+	local replica4_ip="127.0.0.1"
+	local replica5_ip="127.0.0.1"
+	local replica6_ip="127.0.0.1"
+	local replica1_vdev="/tmp/test_vol1"
+
+	REPLICATION_FACTOR=3
+	CONSISTENCY_FACTOR=2
+
+	setup_test_env
+
+
+	## Below Test will connect 1 QUORUM REPLICA and 5 NON-QUORUM Replica
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev -q &
+	replica1_pid=$!
+	sleep 2	#Replica will take some time to make successful connection to target
+
+	# As long as we are not running any IOs we can use the same vdev file
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V $replica1_vdev &
+	replica2_pid=$!
+	sleep 2
+
+	# As long as we are not running any IOs we can use the same vdev file
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V $replica1_vdev &
+	replica3_pid=$!
+	sleep 2
+
+	# As long as we are not running any IOs we can use the same vdev file
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica4_ip" -P "$replica4_port" -V $replica1_vdev &
+	replica4_pid=$!
+	sleep 2
+
+	# As long as we are not running any IOs we can use the same vdev file
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica5_ip" -P "$replica5_port" -V $replica1_vdev &
+	replica5_pid=$!
+	sleep 2
+
+	# As long as we are not running any IOs we can use the same vdev file
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica6_ip" -P "$replica6_port" -V $replica1_vdev &
+	replica6_pid=$!
+	sleep 1
+
+	## It should fail to connect because the replica count is > MAXREPLICA
+	if ps -p $replica6_pid > /dev/null 2>&1
+	then
+		echo "Non-quorum-replica connection test is failed(1 quorum + 5 non-quorum)"
+		cat $LOGFILE
+		exit 1
+	else
+		echo "Non-quorum-replica connection test is passed(1 quorum + 5 non-quorum)"
+	fi
+
+	## After connecting it should have 5 as Degraded and 4 inquorum value as 0.
+	check_degraded_inquorum 5 4
+
+	# Status check with (1 Quorum + 4 Non Quorum replicas) should be ofline.
+	cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].status'"
+
+	rt=$(eval $cmd)
+	if [ ${rt} != "\"Offline\"" ]; then
+		$ISTGTCONTROL -q REPLICA vol1
+		echo "volume status is supposed to be Offline, but, $rt"
+		exit 1
+	fi
+
+	## Kill any one of the replica and re-connect with Quorum value as 1
+	pkill -9 -P $replica2_pid
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V $replica1_vdev -q &
+	replica2_pid=$!
+	sleep 2
+
+	rt=$(eval $cmd)
+	if [ ${rt} != "\"Degraded\"" ]; then
+		$ISTGTCONTROL -q REPLICA vol1
+		echo "volume status is supposed to be Degraded, but, $rt"
+		exit 1
+	fi
+
+	## Wait untill all the replicas are converted to healthy.
+	## It takes atleast 30 seconds for each replica to become healthy
+	sleep 100
+
+	# Pass the expected healthy replica count
+	check_healthy_replica_count 3
+
+	pkill -9 -P $replica1_pid
+	pkill -9 -P $replica2_pid
+	pkill -9 -P $replica3_pid
+	pkill -9 -P $replica4_pid
+	pkill -9 -P $replica5_pid
+	stop_istgt
+	rm -rf ${replica1_vdev::-1}*
+}
+
+check_order_of_rebuilding()
+{
+
+	local cnt=0
+	local cmd1=""
+	local cmd2=""
+	local done_status=0
+	while [ 1 ]; do
+		cnt=0
+		for (( i = 0; i < 3; i++ )) do
+			cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"["$i"].Mode'"
+			rt=$(eval $cmd)
+			if [ ${rt} == "\"Healthy\"" ]; then
+				cnt=`expr $cnt + 1`
+				if [ $cnt -eq 2 ]; then
+					## Non quorum replicas are listed last checking with last index.
+					cmd1="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[2].Mode'"
+					cmd2="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[2].inQuorum'"
+					rt1=$(eval $cmd1)
+					rt2=$(eval $cmd2)
+					if [ ${rt1} != "\"Degraded\"" -o ${rt2} != "\"0\"" ]; then
+						echo "Order of rebuild is failed"
+						exit 1
+					fi
+					done_status=1
+					break
+				fi
+			fi
+		done
+		if [ $done_status -eq 1 ]; then
+			echo "Order of rebuilding is passed"
+			break
+		fi
+		## If 2 healthy replicas are not found sleeping for 10 seconds and retrying
+		sleep 10
+	done
+}
+
+##run_non_quorum_replica_errored_test is used to kill the replica while forming management connection
+run_non_quorum_replica_errored_test()
+{
+	local replica1_port="6161"
+	local replica2_port="6162"
+	local replica3_port="6163"
+	local replica1_ip="127.0.0.1"
+	local replica2_ip="127.0.0.1"
+	local replica3_ip="127.0.0.1"
+	local replica1_vdev="/tmp/test_vol1"
+	local replica2_vdev="/tmp/test_vol2"
+	local replica3_vdev="/tmp/test_vol3"
+
+	REPLICATION_FACTOR=3
+	CONSISTENCY_FACTOR=2
+
+	setup_test_env
+
+	## Below Test will connect 1 QUORUM REPLICA and 5 NON-QUORUM Replica
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev -q  &
+	replica1_pid=$!
+	sleep 2	#Replica will take some time to make successful connection to target
+
+	# As long as we are not running any IOs we can use the same vdev file
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V $replica2_vdev -q  &
+	replica2_pid=$!
+	sleep 2
+
+	## Each replica takes approximately 35 sec to become healthy
+	sleep 75
+	check_healthy_replica_count 2
+
+	login_to_volume "$CONTROLLER_IP:3260"
+	sleep 5
+	get_scsi_disk
+
+	if [ "$device_name"!="" ]; then
+		mkfs.ext4 -F /dev/$device_name
+		[[ $? -ne 0 ]] && echo "mkfs failed for $device_name" && tail -20 $LOGFILE && exit 1
+
+		mount /dev/$device_name /mnt/store
+		[[ $? -ne 0 ]] && echo "mount for $device_name" && tail -20 $LOGFILE && exit 1
+	fi
+
+	date_log=$(eval date +%Y-%m-%d/%H:%M:%S.%s)
+
+	# As long as we are not running any IOs we can use the same vdev file
+	## Making delay in management connection
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V $replica3_vdev -s 10 &
+	replica3_pid=$!
+	sleep 5
+
+	## Introduced delay in management connection and killing the replica during mgmt_connection
+	kill_non_quorum_replica mgmt_connection
+
+	umount /mnt/store
+	logout_of_volume
+	pkill -9 -P $replica1_pid
+	pkill -9 -P $replica2_pid
+	pkill -9 -P $replica3_pid
+	stop_istgt
+	rm -f /tmp/check_sum*
+	rm -rf ${replica1_vdev::-1}*
+
+}
+
+## kill_non_quorum_replica used to kill the replica during connections
+kill_non_quorum_replica()
+{
+	state=$1
+	local val=0
+	if [ $state == "data_connection" ]
+	then
+		cmd="grep 'replica($2) connected successfully' $LOGFILE | awk -v date_logs=\"$date_log\" '\$0 > date_logs'"
+		val=$(eval $cmd |wc -l)
+		if [ $val -eq 0 ]
+		then
+			echo "Management connection is not formed"
+			exit 1
+		fi
+	elif [ $state == "mgmt_connection" ]
+	then
+		if ps -p $replica3_pid > /dev/null 2>&1
+		then
+			echo "Breaking mgmt connection"
+		else
+			echo "Replica handshake is not initiated"
+			cat $LOGFILE
+			exit 1
+		fi
+	else
+		echo "Pass valid arguments"
+		return
+	fi
+		
+	pkill -9 -P $replica3_pid
+	if [ $? -ne 0 ]
+	then
+		echo "No Non-quorum replica present to disconnect"
+	fi
+	cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[].replicaId'"
+	rt=$(eval $cmd | wc -l)
+	if [ ${rt} -ne 2 ]
+	then
+		echo "Error occured after killing the replica during $state process"
+		exit 1
+	fi
+
+	ps -aux | grep 'istgt'
+	dd if=/dev/urandom of=/mnt/store/file2 bs=4k count=100
+	if [ $? -ne 0 ]
+	then
+		echo "Error occured after killing the non-quorum and while performing writes"
+		exit 1
+	fi
+	echo "Erroring out replica done successfully"
+}
+
+data_integrity_with_non_quorum()
+{
+	local replica1_port="6161"
+	local replica2_port="6162"
+	local replica3_port="6163"
+	local replica1_ip="127.0.0.1"
+	local replica2_ip="127.0.0.1"
+	local replica3_ip="127.0.0.1"
+	local replica1_vdev="/tmp/test_vol1"
+	local replica2_vdev="/tmp/test_vol2"
+	local replica3_vdev="/tmp/test_vol3"
+
+	REPLICATION_FACTOR=3
+	CONSISTENCY_FACTOR=2
+
+	setup_test_env
+
+	## Below Test will connect 1 QUORUM REPLICA and 5 NON-QUORUM Replica
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev -q &
+	replica1_pid=$!
+	sleep 2	#Replica will take some time to make successful connection to target
+
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V $replica3_vdev &
+	replica3_pid=$!
+	sleep 2
+
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V $replica2_vdev -q &
+	replica2_pid=$!
+	sleep 2
+
+	login_to_volume "$CONTROLLER_IP:3260"
+	sleep 10
+	get_scsi_disk
+
+
+
+	## Cross check non-quorum replica shuould be in degraded state
+	## Index 2 is used because non quorum replicas are listed last
+	cmd1="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[2].Mode'"
+	cmd2="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[2].inQuorum'"
+	rt1=$(eval $cmd1)
+	rt2=$(eval $cmd2)
+	if [ ${rt1} != "\"Degraded\"" -o ${rt2} != "\"0\"" ]; then
+		echo "Non quorum replica Should be in degraded mode and inquorum value must be 0, but $rt1"
+			exit 1
+		fi
+
+	if [ "$device_name"!="" ]; then
+		sudo dd if=/dev/urandom of=$device_name bs=4k count=1000 oflag=direct
+                var1="$($ISTGTCONTROL -q iostats | jq '.TotalWriteBytes')"
+		sleep 5
+
+		hash1=$(md5sum $replica1_vdev | awk '{print $1}')
+		hash2=$(md5sum $replica3_vdev | awk '{print $1}')
+		if [ $hash1 == $hash2 ]; then echo "DI Test: PASSED"
+		else
+			echo "DI Test: FAILED Hash of quorum is $hash1 and non-quorum is $hash2 with writebytes $var1";
+			tail -20 $LOGFILE
+			exit 1
+		fi
+	fi
+
+	check_order_of_rebuilding
+
+	## Checking the read IO's with quorum and non-quorum replicas
+	sudo dd if=$device_name of=/dev/null bs=4k count=100
+	if ps -p $replica3_pid > /dev/null 2>&1
+	then
+		echo "Passed the read IO test on non-quorum"
+	else
+		echo "Read Test is failed"
+		sleep 10
+		exit 1
+	fi
+
+	pkill -9 -P $replica3_pid
+
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V $replica3_vdev &
+	replica3_pid=$!
+	date_log=$(eval date +%Y-%m-%d/%H:%M:%S.%s)
+	sleep 45
+
+	$ISTGTCONTROL -q replica | jq
+	check_healthy_replica_count 3
+
+	logout_of_volume
+	pkill -9 -P $replica1_pid
+	pkill -9 -P $replica2_pid
+	pkill -9 -P $replica3_pid
+	stop_istgt
+	rm -f /tmp/check_sum*
+	rm -rf ${replica1_vdev::-1}*
+
+}
 run_rebuild_time_test_in_single_replica()
 {
 	local replica1_port="6161"
@@ -557,7 +992,7 @@ run_rebuild_time_test_in_single_replica()
 		exit 1
 	fi
 
-	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev &
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev -q &
 	replica1_pid=$!
 	sleep 2
 
@@ -594,7 +1029,7 @@ run_rebuild_time_test_in_single_replica()
 		fi
 		sleep 10
 	done
-	kill -9 $replica1_pid
+	pkill -9 -P $replica1_pid
 	stop_istgt
 	rm -rf ${replica1_vdev::-1}*
 }
@@ -628,7 +1063,7 @@ run_rebuild_time_test_in_multiple_replicas()
 		exit 1
 	fi
 
-	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev &
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev -q &
 	replica1_pid=$!
 	sleep 2
 
@@ -640,7 +1075,7 @@ run_rebuild_time_test_in_multiple_replicas()
 	fi
 
 	# As long as we are not running any IOs we can use the same vdev file
-	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V $replica1_vdev  &
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V $replica1_vdev -q &
 	replica2_pid=$!
 	sleep 2
 
@@ -652,7 +1087,7 @@ run_rebuild_time_test_in_multiple_replicas()
 	fi
 
 	# As long as we are not running any IOs we can use the same vdev file
-	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V $replica1_vdev &
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V $replica1_vdev -q  &
 	replica3_pid=$!
 	sleep 3
 
@@ -743,7 +1178,9 @@ run_rebuild_time_test_in_multiple_replicas()
 		fi
 	done
 
-	kill -9 $replica1_pid $replica2_pid $replica3_pid
+	pkill -9 -P $replica1_pid
+	pkill -9 -P $replica2_pid
+	pkill -9 -P $replica3_pid
 	stop_istgt
 	rm -rf ${replica1_vdev::-1}*
 }
@@ -774,35 +1211,37 @@ run_replication_factor_test()
 
 	setup_test_env
 
-	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev &
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev -q  &
 	replica1_pid=$!
 	sleep 2	#Replica will take some time to make successful connection to target
 
 	# As long as we are not running any IOs we can use the same vdev file
-	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V $replica1_vdev  &
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V $replica1_vdev -q  &
 	replica2_pid=$!
 	sleep 2
 
 	# As long as we are not running any IOs we can use the same vdev file
-	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V $replica1_vdev &
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V $replica1_vdev -q  &
 	replica3_pid=$!
 	sleep 2
 
 	# As long as we are not running any IOs we can use the same vdev file
-	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica4_ip" -P "$replica4_port" -V $replica1_vdev &
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica4_ip" -P "$replica4_port" -V $replica1_vdev -q &
 	replica4_pid=$!
 	sleep 5
 
 	wait $replica4_pid
 	if [ $? == 0 ]; then
 		echo "replica limit test failed"
-		kill -9 $replica4_pid
+		pkill -9 -P $replica4_pid
 		ret=1
 	else
 		echo "replica limit test passed"
 	fi
 
-	kill -9 $replica1_pid $replica2_pid $replica3_pid
+	pkill -9 -P $replica1_pid
+	pkill -9 -P $replica2_pid
+	pkill -9 -P $replica3_pid
 	stop_istgt
 	rm -rf ${replica1_vdev::-1}*
 
@@ -827,17 +1266,17 @@ run_io_timeout_test()
 
 	setup_test_env
 
-	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev &
+	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev -q  &
 	replica1_pid=$!
 	sleep 2	#Replica will take some time to make successful connection to target
 
 	# As long as we are not running any IOs we can use the same vdev file
-	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V $replica1_vdev  &
+	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V $replica1_vdev -q  &
 	replica2_pid=$!
 	sleep 2
 
 	# As long as we are not running any IOs we can use the same vdev file
-	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V $replica1_vdev &
+	$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V $replica1_vdev -q  &
 	replica3_pid=$!
 	sleep 2
 
@@ -845,13 +1284,14 @@ run_io_timeout_test()
 	get_scsi_disk
 	if [ "$device_name"!="" ]; then
 		# Test to verify impact of replica's delay on volume latency
-		kill -9 $replica1_pid
+		sudo kill -9 $replica1_pid
 		sleep 2
 
-		$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev -t $injected_latency &
+		$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev -t $injected_latency -q &
 		replica1_pid=$!
 		sleep 2 #Replica will take some time to make successful connection to target
 
+		ps -aux | grep istgt
 		iopinglog=`mktemp`
 		$IOPING -c 1 -B -WWW /dev/$device_name > $iopinglog
 		if [ $? -ne 0 ]; then
@@ -876,17 +1316,17 @@ run_io_timeout_test()
 			exit 1
 		fi
 
-		$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev -t $injected_latency &
+		$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev -t $injected_latency -q &
 		replica1_pid=$!
 		sleep 2
 
 		kill -9 $replica2_pid
-		$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V $replica1_vdev  -t $injected_latency &
+		$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V $replica1_vdev  -t $injected_latency -q &
 		replica2_pid=$!
 		sleep 2
 
 		kill -9 $replica3_pid
-		$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V $replica1_vdev -t $injected_latency&
+		$REPLICATION_TEST -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V $replica1_vdev -t $injected_latency -q &
 		replica3_pid=$!
 		sleep 2
 
@@ -896,22 +1336,29 @@ run_io_timeout_test()
 			echo "IO timeout test failed"
 			exit 1
 		fi
+
 	else
 		exit 1
 	fi
 
-	kill -9 $replica1_pid $replica2_pid $replica3_pid
+	kill -9  $replica1_pid
+	kill -9  $replica2_pid
+	kill -9  $replica3_pid
 	stop_istgt
 	rm -rf ${replica1_vdev::-1}*
 }
 
 run_lu_rf_test
+run_quorum_test
+data_integrity_with_non_quorum
+run_non_quorum_replica_errored_test
 run_data_integrity_test
 run_mempool_test
 run_istgt_integration
 run_read_consistency_test
 run_replication_factor_test
 run_io_timeout_test
+echo "===============All Tests are passed ==============="
 tail -20 $LOGFILE
 
 exit 0

@@ -36,6 +36,7 @@ __thread char  tinfo[50] =  {0};
 	mgmt_ack_data->pool_guid = replica_port;\
 	mgmt_ack_data->checkpointed_io_seq = 1000;\
 	mgmt_ack_data->zvol_guid = replica_port;\
+	mgmt_ack_data->quorum = replica_quorum_state;\
 }
 
 bool degraded_mode = false;
@@ -45,6 +46,7 @@ int mdlist_fd = 0;
 size_t mdlist_size = 0;
 uint64_t read_ios;
 uint64_t write_ios;
+int replica_quorum_state = 0;
 
 static void
 sig_handler(int sig)
@@ -231,7 +233,7 @@ test_read_data(int fd, uint8_t *data, uint64_t len)
 
 static int
 send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
-    int replica_port, zrepl_status_ack_t *zrepl_status,
+    int replica_port, int delay_connection, zrepl_status_ack_t *zrepl_status,
     int *zrepl_status_msg_cnt)
 {
 	int i, nbytes = 0;
@@ -271,6 +273,11 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 			(*zrepl_status_msg_cnt) += 1;
 		}
 
+		// Injecting delays while sending acknowledge to target
+		if (delay_connection > 0 )
+			sleep(delay_connection);
+
+		replica_quorum_state = 1;
 		mgmt_ack_hdr->len = sizeof (zrepl_status_ack_t);
 		iovec_count = 2;
 		iovec[1].iov_base = zrepl_status;
@@ -318,6 +325,7 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 			}
 		}
 	}
+
 	ret = 0;
 out:
 	if (mgmt_ack_hdr)
@@ -395,10 +403,12 @@ usage(void)
 	printf(" -P replica port\n");
 	printf(" -r retry if failed to connect\n");
 	printf(" -V volume path\n");
+	printf(" -q replica quorum(default is set to 0)\n");
 	printf(" -n number of IOs to serve before sleeping for 60 seconds\n");
 	printf(" -d run in degraded mode only\n");
 	printf(" -e error frequency (should be <= 10, default is 0)\n");
 	printf(" -t delay in response in seconds\n");
+	printf(" -s delay while forming the management connectioin and Rebuild respone in seconds\n");
 }
 
 
@@ -434,9 +444,10 @@ main(int argc, char **argv)
 	int check = 1;
 	struct timespec now;
 	int delay = 0;
+	int delay_connection = 0;
 	bool retry = false;
 
-	while ((ch = getopt(argc, argv, "i:p:I:P:V:n:e:t:dr")) != -1) {
+	while ((ch = getopt(argc, argv, "i:p:I:P:V:n:e:s:t:drq")) != -1) {
 		switch (ch) {
 			case 'i':
 				strncpy(ctrl_ip, optarg, sizeof(ctrl_ip));
@@ -458,6 +469,9 @@ main(int argc, char **argv)
 				strncpy(test_vol, optarg, sizeof(test_vol));
 				check |= 1 << 5;
 				break;
+			case 'q':
+				replica_quorum_state = 1;
+				break;
 			case 'n':
 				io_cnt = atoi(optarg);
 				break;
@@ -473,6 +487,9 @@ main(int argc, char **argv)
 				break;
 			case 'r':
 				retry = true;
+				break;
+			case 's':
+				delay_connection = atoi(optarg);
 				break;
 			case 't':
 				delay = atoi(optarg);
@@ -599,12 +616,16 @@ again:
 					}
 				}
 				opcode = mgmtio->opcode;
-				send_mgmt_ack(mgmtfd, opcode, mgmt_data, replica_ip, replica_port, zrepl_status, &zrepl_status_msg_cnt);
+				send_mgmt_ack(mgmtfd, opcode, mgmt_data, replica_ip, replica_port, delay_connection, zrepl_status, &zrepl_status_msg_cnt);
 			} else if (events[i].data.fd == sfd) {
 				struct sockaddr saddr;
 				socklen_t slen;
 				char hbuf[NI_MAXHOST], sbuf[NI_MAXSERV];
 				slen = sizeof(saddr);
+				// Injecting delay while forming data connection to perform test
+				if (delay_connection > 0)
+					sleep(delay_connection);
+
 				iofd = accept(sfd, &saddr, &slen);
 				if (iofd == -1) {
 					if((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
@@ -751,6 +772,10 @@ execute_io:
 						usleep(sleeptime);
 						write_ios++;
 					} else if(io_hdr->opcode == ZVOL_OPCODE_READ) {
+						if ( replica_quorum_state == 0) {
+							REPLICA_ERRLOG("Received Read IO's request on non-quorum replica \n");
+							goto error;
+						}
 						uint8_t *user_data = NULL;
 						if (delay > 0)
 							sleep(delay);

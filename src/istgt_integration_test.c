@@ -392,11 +392,10 @@ handle_stats(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 	zvol_op_stat_t *stats;
 	zvol_io_hdr_t *hdr = &(zio_cmd->hdr);
 
-	if (strcmp(zio_cmd->buf, rargs->volname) != 0)
+	if (strcmp(zio_cmd->buf, rargs->volname) != 0) {
+		REPLICA_ERRLOG("%s and %s volume names are not matching\n", (char *)zio_cmd->buf, rargs->volname);
 		exit(1);
-
-	if (rargs->zrepl_status != ZVOL_STATUS_HEALTHY)
-		exit(1);
+	}
 
 	if (zio_cmd->buf)
 		free(zio_cmd->buf);
@@ -463,6 +462,7 @@ handle_handshake(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 	mgmt_ack->zvol_guid = rargs->replica_port;
 	mgmt_ack->port = rargs->replica_port;
 	mgmt_ack->checkpointed_io_seq = 10000;
+	mgmt_ack->quorum = 1;
 	strncpy(mgmt_ack->ip, rargs->replica_ip, sizeof (mgmt_ack->ip));
 	strncpy(mgmt_ack->volname, rargs->volname, sizeof (mgmt_ack->volname));
 	hdr->status = ZVOL_OP_STATUS_OK;
@@ -1017,6 +1017,7 @@ mock_repl(void *args)
 	pthread_create(&io_worker1, NULL, &mock_repl_io_worker, args);
 	pthread_create(&io_worker2, NULL, &mock_repl_io_worker, args);
 	pthread_create(&io_worker3, NULL, &mock_repl_io_worker, args);
+
 	while(1) {
 		sleep(2);
 		if (rargs->kill_replica == true || rargs->snap_error == 2) {
@@ -1101,6 +1102,7 @@ exit:
 	REPLICA_LOG("mock_repl exiting....\n");
 	if (rargs->snap_error == 2 && !rargs->kill_is_over)
 		reregister_replica(rargs->volname, rargs, rargs->replica_port);
+
 	return (NULL);
 }
 
@@ -1475,7 +1477,7 @@ main(int argc, char **argv)
 
 	shutdown_errored_replica();
 
-	/* This can be avoided by cancelling mock client threads */
+        /* This can be avoided by cancelling mock client threads */
 	wait_for_mock_clients();
 
 	create_mock_replicas(spec->replication_factor, spec->volname);
@@ -1493,7 +1495,6 @@ main(int argc, char **argv)
 	test_args->data_read_write_test_done = true;
 	pthread_cond_wait(&test_args->test_state_cv, &test_args->test_mtx);
 	MTX_UNLOCK(&test_args->test_mtx);
-
 	REPLICA_LOG("Killing all replicas\n");
 	kill_all_replicas();
 
