@@ -333,7 +333,6 @@ run_data_integrity_test() {
 	replica1_pid=$!
 	sleep 5
 	ps aux |grep replication_test
-	verify_resize_command
 
 	pkill -9 -P $replica1_pid
 	pkill -9 -P $replica1_pid1
