@@ -570,14 +570,28 @@ check_healthy_replica_count()
 {
 
 	no_of_replicas=$1
+	local i=0
 
 	cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[].Mode' | grep -w Healthy"
 	cnt=$(eval $cmd | wc -l)
 
+	## If desired count is not met, checking for desired healthy replica count for 5 minutes with an interval of 3 seconds.
 	if [ $cnt -ne $no_of_replicas ]
 	then
+		for (( i = 0; i < 100; i++ )) do
+			sleep 3
+			cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[].Mode' | grep -w Healthy"
+			cnt=$(eval $cmd | wc -l)
+			if [ $cnt -eq $no_of_replicas ]
+			then
+				break
+			fi
+		done
+	fi
+
+	if [ $cnt -ne $no_of_replicas ]; then
 		echo "Health check is failed expected healthy replica count $no_of_replicas but got $cnt"
-		exit 1
+	    	exit 1
 	fi
 
 	echo "Health state check is passed"
@@ -853,7 +867,7 @@ kill_non_quorum_replica()
 		echo "Pass valid arguments"
 		return
 	fi
-		
+
 	pkill -9 -P $replica3_pid
 	if [ $? -ne 0 ]
 	then
