@@ -565,8 +565,9 @@ run_lu_rf_test ()
 	stop_istgt
 }
 
-## check_healthy_replica_count is used to cross the count of the helathy replicas.
-check_healthy_replica_count()
+## wait_for_healthy_replicas will wait for max of 5 minutes for replicas to become healthy
+## and verifies the count of the helathy replicas with desired count.
+wait_for_healthy_replicas()
 {
 
 	no_of_replicas=$1
@@ -575,7 +576,9 @@ check_healthy_replica_count()
 	cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[].Mode' | grep -w Healthy"
 	cnt=$(eval $cmd | wc -l)
 
-	## If desired count is not met, checking for desired healthy replica count for 5 minutes with an interval of 3 seconds.
+	## Wait untill all the replicas are converted to healthy.
+	## It takes atleast 30 seconds for each replica to become healthy
+	## checking for desired healthy replica count for 5 minutes with an interval of 3 seconds.
 	if [ $cnt -ne $no_of_replicas ]
 	then
 		for (( i = 0; i < 100; i++ )) do
@@ -719,12 +722,8 @@ run_quorum_test()
 		exit 1
 	fi
 
-	## Wait untill all the replicas are converted to healthy.
-	## It takes atleast 30 seconds for each replica to become healthy
-	sleep 100
-
 	# Pass the expected healthy replica count
-	check_healthy_replica_count 3
+	wait_for_healthy_replicas 3
 
 	pkill -9 -P $replica1_pid
 	pkill -9 -P $replica2_pid
@@ -801,9 +800,7 @@ run_non_quorum_replica_errored_test()
 	replica2_pid=$!
 	sleep 2
 
-	## Each replica takes approximately 35 sec to become healthy
-	sleep 75
-	check_healthy_replica_count 2
+        wait_for_healthy_replicas 2
 
 	login_to_volume "$CONTROLLER_IP:3260"
 	sleep 5
@@ -971,10 +968,9 @@ data_integrity_with_non_quorum()
 	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V $replica3_vdev &
 	replica3_pid=$!
 	date_log=$(eval date +%Y-%m-%d/%H:%M:%S.%s)
-	sleep 45
 
 	$ISTGTCONTROL -q replica | jq
-	check_healthy_replica_count 3
+	wait_for_healthy_replicas 3
 
 	logout_of_volume
 	pkill -9 -P $replica1_pid
