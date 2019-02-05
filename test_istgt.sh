@@ -104,7 +104,9 @@ run_mempool_test()
 
 run_istgt_integration()
 {
-	sudo kill $(sudo lsof -t -i:6060)
+	local pid_istgt=$(sudo lsof -t -i:6060)
+	echo "istgt PID is $pid_istgt"
+	kill -9 $pid_istgt
 	pkill -9 -x istgt/src/replication_test
 	ps -aux | grep 'istgt'
 	truncate -s 5G /tmp/test_vol1 /tmp/test_vol2 /tmp/test_vol3
