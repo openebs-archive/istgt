@@ -601,15 +601,15 @@ wait_for_healthy_replicas()
 
 	echo "Health state check is passed"
 
-	check_degraded_inquorum 0 0
+	check_degraded_quorum 0 0
 }
 
 
-## check_degraded_inquorum used to check the degraded replica count and inquorum value count.
-check_degraded_inquorum()
+## check_degraded_quorum used to check the degraded replica count and quorum value count.
+check_degraded_quorum()
 {
 	local expected_degraded_count=$1
-	local expected_inquorum_count=$2
+	local expected_quorum_count=$2
 	local cnt=0
 
 	## Check the no.of degraded replicas
@@ -622,17 +622,17 @@ check_degraded_inquorum()
 		exit 1
 	fi
 
-	## Check for inQuorum replicas. It takes approximately another 10 seconds to set inQuorum to 1 after rebuilding
-	cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[].inQuorum'"
+	## Check for quorum replicas. It takes approximately another 10 seconds to set quorum to 1 after rebuilding
+	cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[].quorum'"
 	cnt=$(eval $cmd | grep -w 0 | wc -l)
 
-	if [ $cnt -ne $expected_inquorum_count ]
+	if [ $cnt -ne $expected_quorum_count ]
 	then
-		echo "Inquorum test failed: expected inquorum is $expected_inquorum_count and got $cnt"
+		echo "Quorum test failed: expected quorum count is $expected_quorum_count and got $cnt"
 		exit 1
 	fi
 
-	echo "Test passed for checking the count of Degraded and inQuorum count"
+	echo "Test passed for checking the count of Degraded and Quorum count"
 }
 
 # run_quorum_test is used to test by connecting n Quorum replicas and m Non Quorum replicas
@@ -698,8 +698,8 @@ run_quorum_test()
 		echo "Non-quorum-replica connection test is passed(1 quorum + 5 non-quorum)"
 	fi
 
-	## After connecting it should have 5 as Degraded and 4 inquorum value as 0.
-	check_degraded_inquorum 5 4
+	## After connecting it should have 5 as Degraded and 4 quorum value as 0.
+	check_degraded_quorum 5 4
 
 	# Status check with (1 Quorum + 4 Non Quorum replicas) should be ofline.
 	cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].status'"
@@ -753,7 +753,7 @@ check_order_of_rebuilding()
 				if [ $cnt -eq 2 ]; then
 					## Non quorum replicas are listed last checking with last index.
 					cmd1="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[2].Mode'"
-					cmd2="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[2].inQuorum'"
+					cmd2="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[2].quorum'"
 					rt1=$(eval $cmd1)
 					rt2=$(eval $cmd2)
 					if [ ${rt1} != "\"Degraded\"" -o ${rt2} != "\"0\"" ]; then
@@ -929,13 +929,13 @@ data_integrity_with_non_quorum()
 	## Cross check non-quorum replica shuould be in degraded state
 	## Index 2 is used because non quorum replicas are listed last
 	cmd1="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[2].Mode'"
-	cmd2="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[2].inQuorum'"
+	cmd2="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[2].quorum'"
 	rt1=$(eval $cmd1)
 	rt2=$(eval $cmd2)
 	if [ ${rt1} != "\"Degraded\"" -o ${rt2} != "\"0\"" ]; then
-		echo "Non quorum replica Should be in degraded mode and inquorum value must be 0, but $rt1"
-			exit 1
-		fi
+		echo "Non quorum replica Should be in degraded mode and quorum value must be 0, but $rt1"
+		exit 1
+	fi
 
 	if [ "$device_name"!="" ]; then
 		sudo dd if=/dev/urandom of=$device_name bs=4k count=1000 oflag=direct

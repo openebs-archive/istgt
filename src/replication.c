@@ -1651,7 +1651,7 @@ get_replica_stats_json(replica_t *replica, struct json_object **jobj)
 	json_object_object_add(j_stats, "inflightSync",
 	    json_object_new_uint64(replica->replica_inflight_sync_io_cnt));
 
-	json_object_object_add(j_stats, "inQuorum",
+	json_object_object_add(j_stats, "quorum",
 	    json_object_new_uint64(replica->quorum));
 
 	clock_gettime(CLOCK_MONOTONIC, &now);
