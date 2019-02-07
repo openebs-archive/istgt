@@ -65,7 +65,7 @@ export externalIP=$externalIP
 echo $externalIP
 service rsyslog start
 #setting replica timeout to 20 seconds
-/usr/local/bin/istgt -R 20 &
+/usr/local/bin/istgt -R 20
 child=$!
 echo "child PID from init script: "$child
 wait
