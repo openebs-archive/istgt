@@ -2059,7 +2059,7 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 			 * As per the issue https://github.com/openebs/openebs/issues/2382,
 			 * 5 continous discovery requests failure can cause iscsi initiator
 			 * to get into high CPU usage.
-			 * This code checks for this state of 5 continuous discovery failures
+			 * This code checks for this state of 4 continuous discovery failures
 			 * and restarts the process.
 			 */
 			if (discovery_counter > 4) {
