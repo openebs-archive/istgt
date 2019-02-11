@@ -5363,7 +5363,7 @@ wait_all_task(CONN_Ptr conn)
 		conn->id, conn->running_tasks);
 }
 
-
+#if 0
 static void
 snd_cleanup(void *arg)
 {
@@ -5448,6 +5448,7 @@ worker_cleanup(void *arg)
 	MTX_UNLOCK(&g_conns_mutex);
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "cancel cleanup UNLOCK\n");
 }
+#endif
 
 const char lu_task_typ[4][12] = {
 	"RESPONSE",
