@@ -249,7 +249,7 @@ istgt_iscsi_read_pdu(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 		return (-1);
 	}
 	if (rc == 0) {
-		ISTGT_TRACELOG(ISTGT_TRACE_NET, "recv() EOF (%s)\n",
+		ISTGT_ERRLOG("recv() EOF (%s)\n",
 			conn->initiator_name);
 		conn->state = CONN_STATE_EXITING;
 		return (-1);
@@ -680,8 +680,8 @@ istgt_iscsi_write_pdu_internal(CONN_Ptr conn, ISCSI_PDU_Ptr pdu, ISTGT_LU_CMD_Pt
 		rc = writev(conn->sock, &iovec[0], 5);
 		if (rc < 0) {
 			now = time(NULL);
-			ISTGT_ERRLOG("writev() failed (errno=%d,%s,time=%f) for opcode:0x%2.2x CSN:0x%x\n",
-				errno, conn->initiator_name, difftime(now, start), lu_cmd->cdb0, lu_cmd->CmdSN);
+			ISTGT_ERRLOG("writev() failed (errno=%d,%s,time=%f) for opcode:%d 0x%2.2x CSN:0x%x\n",
+				errno, conn->initiator_name, difftime(now, start), opcode, lu_cmd->cdb0, lu_cmd->CmdSN);
 			return (-1);
 		}
 		nbytes -= rc;
@@ -1744,6 +1744,8 @@ istgt_iscsi_check_values(CONN_Ptr conn)
 	return (0);
 }
 
+uint64_t discovery_counter = 0;
+
 static int
 istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 {
@@ -1897,6 +1899,8 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 				StatusDetail = 0x07;
 				goto response;
 			}
+			discovery_counter = 0;
+
 			snprintf(conn->target_name, sizeof (conn->target_name),
 				"%s", val);
 			snprintf(conn->target_port, sizeof (conn->target_port),
@@ -2048,6 +2052,15 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 				"%s" ",t,0x" "%4.4x", "dummy", conn->portal.tag);
 			lu = NULL;
 			tsih = 0;
+
+			__sync_add_and_fetch(&discovery_counter, 1);
+
+			if (discovery_counter > 4) {
+				ISTGT_ERRLOG("discovery counter %lu retry limit exceeded\n",
+				    discovery_counter);
+				sleep(1);
+				abort();
+			}
 
 			/* force target flags */
 			MTX_LOCK(&conn->istgt->mutex);
@@ -5724,7 +5737,7 @@ sender(void *arg)
 	pthread_set_name_np(slf, tinfo);
 #endif
 
-	pthread_cleanup_push(snd_cleanup, (void *)conn);
+//	pthread_cleanup_push(snd_cleanup, (void *)conn);
 	memset(&abstime, 0, sizeof (abstime));
 	/* handle DATA-IN/SCSI status */
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "sender loop start (%d)\n", conn->id);
@@ -5748,6 +5761,7 @@ sender(void *arg)
 				/* nothing */
 			}
 			if (conn->state != CONN_STATE_RUNNING) {
+				ISTGT_LOG("conn state not running\n");
 				MTX_UNLOCK(&conn->result_queue_mutex);
 				break;
 			} else {
@@ -5882,7 +5896,7 @@ sender(void *arg)
 //		MTX_UNLOCK(&conn->wpdu_mutex);
 	}
 	// MTX_UNLOCK(&conn->sender_mutex);
-	pthread_cleanup_pop(0);
+//	pthread_cleanup_pop(0);
 	ISTGT_NOTICELOG("sender loop ended (%d:%d:%d)\n", conn->id, conn->epfd, ntohs(conn->iport));
 	return (NULL);
 }
@@ -5929,21 +5943,21 @@ worker(void *arg)
 // #endif
 
 	events.data.fd = conn->sock;
-		events.events = EPOLLIN;
-		rc = epoll_ctl(epfd, EPOLL_CTL_ADD, conn->sock, &events);
-		if (rc == -1) {
+	events.events = EPOLLIN;
+	rc = epoll_ctl(epfd, EPOLL_CTL_ADD, conn->sock, &events);
+	if (rc == -1) {
 		ISTGT_ERRLOG("epoll_ctl() failed\n");
 		close(epfd);
 		return (NULL);
-		}
+	}
 	events.data.fd = conn->task_pipe[0];
-		events.events = EPOLLIN;
-		rc = epoll_ctl(epfd, EPOLL_CTL_ADD, conn->task_pipe[0], &events);
-		if (rc == -1) {
+	events.events = EPOLLIN;
+	rc = epoll_ctl(epfd, EPOLL_CTL_ADD, conn->task_pipe[0], &events);
+	if (rc == -1) {
 		ISTGT_ERRLOG("epoll_ctl() failed\n");
 		close(epfd);
 		return (NULL);
-		}
+	}
 
 
 	// TODO
@@ -6019,7 +6033,7 @@ worker(void *arg)
 	conn->exec_lu_task = NULL;
 	lu_task = NULL;
 
-	pthread_cleanup_push(worker_cleanup, conn);
+//	pthread_cleanup_push(worker_cleanup, conn);
 	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
 
 	/* create sender thread */
@@ -6094,16 +6108,15 @@ worker(void *arg)
 
 		/* on socket */
 		if (events.data.fd == conn->sock) {
-			if ((events.events & EPOLLERR) ||
-					(events.events & EPOLLHUP) ||
-					(!(events.events & EPOLLIN))) {
-				ISTGT_ERRLOG("close conn %d\n", errno);
+			if (events.events != EPOLLIN) {
+				ISTGT_ERRLOG("close conn events: %d\n", events.events);
 				break;
 			}
 
 			rc = istgt_iscsi_read_pdu(conn, &conn->pdu);
 			if (rc < 0) {
 				if (errno == EAGAIN) {
+					ISTGT_ERRLOG("iscsi_read_pdu shouldn't get EAGAIN");
 					break;
 				}
 				if (conn->state != CONN_STATE_EXITING) {
@@ -6111,8 +6124,8 @@ worker(void *arg)
 				}
 				if (conn->state != CONN_STATE_RUNNING) {
 					if (errno == EINPROGRESS) {
-						sleep(1);
-						continue;
+						ISTGT_ERRLOG("iscsi_read_pdu shouldn't get EINPROGRESS");
+						break;
 					}
 					if (errno == ECONNRESET
 						|| errno == ETIMEDOUT) {
@@ -6273,7 +6286,7 @@ worker(void *arg)
 
 	cleanup_exit:
 ;
-	pthread_cleanup_pop(0);
+//	pthread_cleanup_pop(0);
 	conn->state = CONN_STATE_EXITING;
 	if (conn->sess != NULL) {
 		lu = conn->sess->lu;
