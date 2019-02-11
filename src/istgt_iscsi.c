@@ -2055,6 +2055,13 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 
 			__sync_add_and_fetch(&discovery_counter, 1);
 
+			/*
+			 * As per the issue https://github.com/openebs/openebs/issues/2382,
+			 * 5 continous discovery requests failure can cause iscsi initiator
+			 * to get into high CPU usage.
+			 * This code checks for this state of 5 continuous discovery failures
+			 * and restarts the process.
+			 */
 			if (discovery_counter > 4) {
 				ISTGT_ERRLOG("discovery counter %lu retry limit exceeded\n",
 				    discovery_counter);
