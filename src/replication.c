@@ -3072,6 +3072,8 @@ handle_mgmt_event_fd(replica_t *replica)
 	MTX_LOCK(&replica->r_mtx);
 	if (replica->disconnect_conn == 1) {
 		MTX_UNLOCK(&replica->r_mtx);
+		REPLICA_ERRLOG("Got disconnect from data connection for "
+		    "replica(%lu)\n",  replica->zvol_guid);
 		return rc;
 	}
 	MTX_UNLOCK(&replica->r_mtx);
