@@ -359,6 +359,8 @@ handle_data_conn_error(replica_t *r)
 	MTX_LOCK(&r->r_mtx);
 	r->conn_closed++;
 	if (r->conn_closed != 2) {
+		REPLICA_NOTICELOG("Informing mgmt connection for error in "
+		    "replica(%lu)\n", r->zvol_guid);
 		inform_mgmt_conn(r);
 		pthread_cond_wait(&r->r_cond, &r->r_mtx);
 	}
