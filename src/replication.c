@@ -2983,8 +2983,11 @@ handle_mgmt_conn_error(replica_t *r, int sfd, struct epoll_event *events, int ev
 				}
 			}
 		}
-		if (r->mgmt_eventfd2 != -1)
+		if (r->mgmt_eventfd2 != -1) {
+			REPLICA_NOTICELOG("Informing data connection for error "
+			    "in replica(%lu)\n", r->zvol_guid);
 			inform_data_conn(r);
+		}
 	} else {
 		pthread_cond_signal(&r->r_cond);
 	}
@@ -3072,6 +3075,8 @@ handle_mgmt_event_fd(replica_t *replica)
 	MTX_LOCK(&replica->r_mtx);
 	if (replica->disconnect_conn == 1) {
 		MTX_UNLOCK(&replica->r_mtx);
+		REPLICA_ERRLOG("Got disconnect from data connection for "
+		    "replica(%lu)\n",  replica->zvol_guid);
 		return rc;
 	}
 	MTX_UNLOCK(&replica->r_mtx);
