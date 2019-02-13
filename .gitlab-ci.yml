@@ -32,8 +32,8 @@ build-istgt:
     - ./configure --enable-debug --enable-replication
     - make
     # run ztest and test supported zio backends
-#    - sudo bash ./print_debug_info.sh &
-#    - sudo bash ./test_istgt.sh
+    - sudo bash ./print_debug_info.sh &
+    - sudo bash ./test_istgt.sh
     - pwd
     - ./build_image.sh
 
@@ -44,6 +44,8 @@ baseline-image:
      - pwd
      - apt-get update
      - apt-get install --yes git-core
+     - git config --global user.name "OpenEBS CI Bot"
+     - git config --global user.email openebscibot@openebs.io
      - export BRANCH=${CI_COMMIT_REF_NAME}
      - echo $BRANCH
      - export COMMIT=${CI_COMMIT_SHA:0:8}
