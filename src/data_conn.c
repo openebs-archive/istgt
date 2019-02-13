@@ -359,6 +359,8 @@ handle_data_conn_error(replica_t *r)
 	MTX_LOCK(&r->r_mtx);
 	r->conn_closed++;
 	if (r->conn_closed != 2) {
+		REPLICA_NOTICELOG("Informing mgmt connection for error in "
+		    "replica(%lu)\n", r->zvol_guid);
 		inform_mgmt_conn(r);
 		pthread_cond_wait(&r->r_cond, &r->r_mtx);
 	}
@@ -390,7 +392,8 @@ find_replica_cmd(replica_t *r, uint64_t ioseq)
 		if (cmd->io_seq == ioseq)
 			return cmd;
 	}
-
+	REPLICA_ERRLOG("Failed to find seq number(%lu) in "
+	    "replica(%lu)'s waitq\n", ioseq, r->zvol_guid);
 	return NULL;
 }
 
@@ -420,8 +423,12 @@ read_cmd(replica_t *r)
 			if (count != (ssize_t)reqlen)
 				return READ_PARTIAL;
 
-			if (resp_hdr->status != ZVOL_OP_STATUS_OK)
+			if (resp_hdr->status != ZVOL_OP_STATUS_OK) {
+				REPLICA_ERRLOG("Received status(%d) for opcode(%d) "
+				    "and seq number(%lu) for replica(%lu)\n", resp_hdr->status,
+				    resp_hdr->opcode, resp_hdr->io_seq, r->zvol_guid);
 				return -1;
+			}
 
 			cmd = find_replica_cmd(r, resp_hdr->io_seq);
 			if (cmd == NULL)
@@ -478,8 +485,10 @@ start:
 	if (rc < 0) {
 		if (err == EINTR)
 			goto start;
-		if ((err != EAGAIN) && (err != EWOULDBLOCK))
+		if ((err != EAGAIN) && (err != EWOULDBLOCK)) {
+			REPLICA_ERRLOG("Failed to write to data connection.. fd(%d) err(%d)\n", fd, err);
 			return -1;
+		}
 		return WRITE_PARTIAL;
 	}
 
@@ -516,11 +525,14 @@ do_drainfd(int data_eventfd)
 		if (rc < 0) {
 			if (err == EINTR)
 				continue;
-			if (err != EAGAIN && err != EWOULDBLOCK)
+			if (err != EAGAIN && err != EWOULDBLOCK) {
+				REPLICA_ERRLOG("Failed to drain fd(%d).. err(%d)\n", data_eventfd, err);
 				return -1;
+			}
 			break;
 		}
 		if (rc == 0) {
+			REPLICA_ERRLOG("mgmt/data fd(%d) closed!\n", data_eventfd);
 			return -1;
 		}
 	}
@@ -643,8 +655,10 @@ static int
 handle_mgmt_eventfd(void *arg)
 {
 	replica_t *r = (replica_t *) arg;
-	if (r->disconnect_conn > 0)
+	if (r->disconnect_conn > 0) {
+		REPLICA_ERRLOG("Disconnecting data connection for replica(%lu)\n", r->zvol_guid);
 		return -1;
+	}
 	return 0;
 }
 
@@ -778,11 +792,18 @@ initialize_error:
 
 			ret = -1;
 			ptr = events[i].data.ptr;
-			if (ptr != NULL)
+			if (ptr != NULL) {
+				REPLICA_ERRLOG("event.data.ptr != NULL.. This "
+				    "should not happen.. r(%lu)!\n", r->zvol_guid);
 				goto exit;
+			}
 
-			if (events[i].events & (EPOLLERR | EPOLLRDHUP | EPOLLHUP))
+			if (events[i].events & (EPOLLERR | EPOLLRDHUP | EPOLLHUP)) {
+				REPLICA_ERRLOG("Received event(%d) on fd(%d) "
+				    "for replica(%lu)\n", events[i].events,
+				    events[i].data.fd, r->zvol_guid);
 				goto exit;
+			}
 
 			ret = 0;
 			if (events[i].events & EPOLLIN)
