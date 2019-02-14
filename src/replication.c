@@ -44,6 +44,7 @@ static void respond_with_error_for_all_outstanding_mgmt_ios(replica_t *r);
 static void inform_data_conn(replica_t *r);
 static void free_replica(replica_t *r);
 static int handle_mgmt_event_fd(replica_t *replica);
+static int get_non_quorum_replica_count(spec_t *spec);
 
 #define build_rcomm_cmd(rcomm_cmd, cmd, offset, nbytes) 						\
 	do {								\
@@ -230,6 +231,15 @@ do {									\
 		}							\
 	}								\
 } while (0)
+
+/* PRINT_ALL_REPLICA_COUNT macro can be used only
+ * when the spec->rq_mtx lock is available
+ */
+#define PRINT_ALL_REPLICA_COUNT					\
+	REPLICA_NOTICELOG("Healthy count:(%d) Degraded count:(%d)"	\
+		"Non-quorum-replica count:(%d)\n", spec->healthy_rcount,\
+		spec->degraded_rcount, 					\
+		get_non_quorum_replica_count(spec));			\
 
 static rcommon_mgmt_cmd_t *
 allocate_rcommon_mgmt_cmd(uint64_t buf_size)
@@ -572,6 +582,7 @@ trigger_rebuild(spec_t *spec)
 	if (spec->ready != true) {
 		REPLICA_NOTICELOG("Volume(%s) is not ready to accept IOs\n",
 		    spec->volname);
+		PRINT_ALL_REPLICA_COUNT
 		return;
 	}
 
@@ -587,6 +598,7 @@ trigger_rebuild(spec_t *spec)
 		REPLICA_NOTICELOG("No downgraded in_quorum replicas on volume"
 		    "(%s), rebuild will be attempted on non_quorum replicas\n",
 		    spec->volname);
+		PRINT_ALL_REPLICA_COUNT
 		if (TAILQ_EMPTY(&spec->non_quorum_rq)) {
 			REPLICA_NOTICELOG("No downgraded replicas on volume"
 			    "(%s), rebuild will not be attempted\n",
