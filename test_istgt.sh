@@ -1113,7 +1113,7 @@ run_rebuild_time_test_in_multiple_replicas()
 	done_test=0
 	while [ 1 ]; do
 		# We have started istgt with 20 second replica timeout
-		# and rf=2, cf=3. so, it will take around 2 minutes for the
+		# and rf=3, cf=2. so, it will take around 2 minutes for the
 		# replica to become healthy. So on safe side, we will
 		# check replica status after 130 seconds.
 		for (( i = 0; i < 3; i++ )) do
