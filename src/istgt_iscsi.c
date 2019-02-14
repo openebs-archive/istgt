@@ -2519,7 +2519,7 @@ istgt_iscsi_op_text(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 	memset(data, 0, alloc_len);
 
 	cp = (uint8_t *) &pdu->bhs;
-	I_bit = BGET8(&cp[0], 7);
+	I_bit = BGET8(&cp[0], 6);
 	F_bit = BGET8(&cp[1], 7);
 	C_bit = BGET8(&cp[1], 6);
 
@@ -2673,11 +2673,11 @@ istgt_iscsi_op_text(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 	SESS_MTX_LOCK(conn);
 	DSET32(&rsp[24], conn->StatSN);
 	conn->StatSN++;
-//	if (I_bit == 0) {
-//		conn->sess->ExpCmdSN++;
-//		conn->sess->MaxCmdSN++;
-//		conn->sess->MaxCmdSN_local++;
-//	}
+	if (I_bit == 0) {
+		conn->sess->ExpCmdSN++;
+		conn->sess->MaxCmdSN++;
+		conn->sess->MaxCmdSN_local++;
+	}
 	DSET32(&rsp[28], conn->sess->ExpCmdSN);
 	DSET32(&rsp[32], conn->sess->MaxCmdSN);
 	SESS_MTX_UNLOCK(conn);
