@@ -1262,6 +1262,28 @@ run_replication_factor_test()
 	fi
 }
 
+run_login_test() {
+	local replica1_port="6161"
+	local replica1_ip="127.0.0.1"
+	local replica1_vdev="/tmp/test_vol1"
+
+	REPLICATION_FACTOR=1
+	CONSISTENCY_FACTOR=1
+	setup_test_env
+
+	echo "Running login test.."
+	LIBISCSI=$DIR/test-tools/login-test/libiscsi LD_LIBRARY_PATH=$LIBISCSI/lib/.libs $DIR/test-tools/login-test/login_test -h iscsi://127.0.0.1:3260 -t 5
+	if [ $? -eq 0 ]; then
+		echo "login test passed"
+	else
+		echo "login test failed"
+		tail -20 $LOGFILE
+		exit 1
+	fi
+
+	stop_istgt
+}
+
 run_io_timeout_test()
 {
 	local replica1_port="6161"
@@ -1370,6 +1392,7 @@ run_istgt_integration
 run_read_consistency_test
 run_replication_factor_test
 run_io_timeout_test
+run_login_test
 echo "===============All Tests are passed ==============="
 tail -20 $LOGFILE
 

@@ -23,6 +23,17 @@ install:
     - make clean
     - ./configure --enable-debug --enable-replication
     - make
+
+    # compile libiscsi and iscsi based test tools
+    - cd test-tools/login-test
+    - git clone https://github.com/openebs/libiscsi
+    - cd libiscsi
+    - ./autogen.sh
+    - ./configure
+    - make
+    - cd ..
+    - LIBISCSI=./libiscsi make clean
+    - LIBISCSI=./libiscsi make
 script:
     # run ztest and test supported zio backends
     - sudo bash ./print_debug_info.sh &
