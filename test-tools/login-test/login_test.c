@@ -130,4 +130,5 @@ int main(int argc, char **argv)
 		if ((iter_count % 100 == 0) && verbose == 0)
 			printf("%d  discoveries succesfull\n", iter_count);
 	}
+	return 0;
 }
