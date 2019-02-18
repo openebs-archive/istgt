@@ -1,7 +1,7 @@
 TARGET = login_test
 LIBS = -liscsi
 CC = gcc
-CFLAGS = -O2 -g -Wall -I /usr/include/iscsi
+CFLAGS = -O2 -g -Wall -I $(LIBISCSI)/include
 
 .PHONY: default all clean
 

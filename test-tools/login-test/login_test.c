@@ -17,7 +17,6 @@ int main(int argc, char **argv)
 	int opt;
 	int verbose = 0;
 	int err = 0;
-	int count = 0;
 	int iter_count = 0;
 	int timeout = 5;
 	const char *target = NULL;
@@ -56,7 +55,7 @@ int main(int argc, char **argv)
 	printf("Running test against: %s with timeout set to %d seconds\n",
 	       target, timeout);
 
-	while(iter_count < 400) {
+	while (iter_count < 400) {
 		if ((iscsi_ctx =
 			     iscsi_create_context("iqn.2019-2.io.openebs:test"))
 		    == NULL) {
