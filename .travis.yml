@@ -25,6 +25,7 @@ install:
     - make
 
     # compile libiscsi and iscsi based test tools
+    - pushd .
     - cd test-tools/login-test
     - git clone https://github.com/openebs/libiscsi
     - cd libiscsi
@@ -34,6 +35,7 @@ install:
     - cd ..
     - LIBISCSI=./libiscsi make clean
     - LIBISCSI=./libiscsi make
+    - popd
 script:
     # run ztest and test supported zio backends
     - sudo bash ./print_debug_info.sh &
