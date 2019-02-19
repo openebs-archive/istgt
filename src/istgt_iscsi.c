@@ -394,7 +394,7 @@ istgt_iscsi_read_pdu(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 	return (total);
 }
 
-static int istgt_iscsi_write_pdu_internal(CONN_Ptr conn, ISCSI_PDU_Ptr pdu);
+static int istgt_iscsi_write_pdu_internal(CONN_Ptr conn, ISCSI_PDU_Ptr pdu, ISTGT_LU_CMD_Ptr lu_cmd);
 static int istgt_iscsi_write_pdu_queue(CONN_Ptr conn, ISCSI_PDU_Ptr pdu, int req_type, int I_bit);
 
 uint8_t istgt_get_sleep_val(ISTGT_LU_DISK *spec);
@@ -588,8 +588,16 @@ istgt_iscsi_write_pdu_queue(CONN_Ptr conn, ISCSI_PDU_Ptr pdu, int req_type, int 
 	return (rc);
 }
 
+/*
+ * This is related to issue https://github.com/openebs/openebs/issues/2382.
+ * This variable is currently global, and need to be made LUN specific
+ * when single istgt process supports multiple LUNs
+ */
+uint64_t discovery_counter = 0;
+extern uint64_t discovery_retry_limit;
+
 static int
-istgt_iscsi_write_pdu_internal(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
+istgt_iscsi_write_pdu_internal(CONN_Ptr conn, ISCSI_PDU_Ptr pdu, ISTGT_LU_CMD_Ptr lu_cmd)
 {
 	struct iovec iovec[5]; /* BHS+AHS+HD+DATA+DD */
 	uint8_t *cp;
@@ -680,8 +688,8 @@ istgt_iscsi_write_pdu_internal(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 		rc = writev(conn->sock, &iovec[0], 5);
 		if (rc < 0) {
 			now = time(NULL);
-			ISTGT_ERRLOG("writev() failed (errno=%d,%s,time=%f)\n",
-				errno, conn->initiator_name, difftime(now, start));
+			ISTGT_ERRLOG("writev() failed (errno=%d,%s,time=%f) for opcode:%d 0x%2.2x CSN:0x%x\n",
+				errno, conn->initiator_name, difftime(now, start), opcode, lu_cmd->cdb0, lu_cmd->CmdSN);
 			return (-1);
 		}
 		nbytes -= rc;
@@ -1897,6 +1905,7 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 				StatusDetail = 0x07;
 				goto response;
 			}
+			discovery_counter = 0;
 			snprintf(conn->target_name, sizeof (conn->target_name),
 				"%s", val);
 			snprintf(conn->target_port, sizeof (conn->target_port),
@@ -2049,6 +2058,20 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 			lu = NULL;
 			tsih = 0;
 
+			__sync_add_and_fetch(&discovery_counter, 1);
+			/*
+			 * As per the issue https://github.com/openebs/openebs/issues/2382,
+			 * 5 continous discovery requests failure can cause iscsi initiator
+			 * to get into high CPU usage.
+			 * This code checks for this state of 4(default retry limit) continuous
+			 * discovery failures and restarts the process.
+			 */
+			if (discovery_counter > discovery_retry_limit) {
+				ISTGT_ERRLOG("discovery counter %lu retry limit exceeded %lu\n",
+				    discovery_counter, discovery_retry_limit);
+				fflush(stderr);
+				abort();
+			}
 			/* force target flags */
 			MTX_LOCK(&conn->istgt->mutex);
 			if (conn->istgt->no_discovery_auth) {
@@ -2508,6 +2531,8 @@ istgt_iscsi_op_text(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 	uint32_t sMaxCmdSN = 0;
 	uint32_t cStatSN = 0;
 	int  step = 0;
+	int8_t sendtargets_discovery = 0;
+	int8_t sendtargets_nondiscovery = 0;
 	if (!conn->full_feature) {
 		ISTGT_ERRLOG("before Full Feature\n");
 		return (-1);
@@ -2623,6 +2648,7 @@ istgt_iscsi_op_text(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 				conn->initiator_name,
 				conn->initiator_addr,
 				val, data, alloc_len, data_len);
+			sendtargets_discovery = 1;
 			SESS_MTX_LOCK(conn);
 		} else {
 			if (strcasecmp(val, "ALL") == 0) {
@@ -2635,6 +2661,7 @@ istgt_iscsi_op_text(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 					conn->initiator_name,
 					conn->initiator_addr,
 					val, data, alloc_len, data_len);
+				sendtargets_nondiscovery = 1;
 				SESS_MTX_LOCK(conn);
 			}
 		}
@@ -2688,6 +2715,8 @@ istgt_iscsi_op_text(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 		istgt_iscsi_param_free(params);
 		return (-1);
 	}
+	ISTGT_NOTICELOG("queued op_text response: %s %s", (sendtargets_discovery ? "SENDTARGET_DISCOVERY" : ""),
+	    (sendtargets_nondiscovery ? "SENDTARGET_NONDISCOVERY" : ""));
 
 	/* update internal variables */
 	istgt_iscsi_copy_param2var(conn);
@@ -2996,7 +3025,7 @@ istgt_iscsi_transfer_in_internal(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 			DSET32(&rsp[44], 0);
 		}
 
-		rc = istgt_iscsi_write_pdu_internal(conn, &rsp_pdu);
+		rc = istgt_iscsi_write_pdu_internal(conn, &rsp_pdu, lu_cmd);
 		if (rc < 0) {
 			ISTGT_ERRLOG("iscsi_write_pdu() failed\n");
 			return (-1);
@@ -3886,7 +3915,7 @@ istgt_iscsi_task_response(CONN_Ptr conn, ISTGT_LU_TASK_Ptr lu_task)
 	DSET32(&rsp[44], residual_len);
 
 	if (lu_task->lock) {
-		rc = istgt_iscsi_write_pdu_internal(conn, &rsp_pdu);
+		rc = istgt_iscsi_write_pdu_internal(conn, &rsp_pdu, &(lu_task->lu_cmd));
 	} else {
 		rc = istgt_iscsi_write_pdu(conn, &rsp_pdu);
 	}
@@ -5343,7 +5372,7 @@ wait_all_task(CONN_Ptr conn)
 		conn->id, conn->running_tasks);
 }
 
-
+#if 0
 static void
 snd_cleanup(void *arg)
 {
@@ -5428,6 +5457,7 @@ worker_cleanup(void *arg)
 	MTX_UNLOCK(&g_conns_mutex);
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "cancel cleanup UNLOCK\n");
 }
+#endif
 
 const char lu_task_typ[4][12] = {
 	"RESPONSE",
@@ -5692,7 +5722,7 @@ sender(void *arg)
 	pthread_set_name_np(slf, tinfo);
 #endif
 
-	pthread_cleanup_push(snd_cleanup, (void *)conn);
+//	pthread_cleanup_push(snd_cleanup, (void *)conn);
 	memset(&abstime, 0, sizeof (abstime));
 	/* handle DATA-IN/SCSI status */
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "sender loop start (%d)\n", conn->id);
@@ -5783,7 +5813,7 @@ sender(void *arg)
 				pdu = lu_task->lu_cmd.pdu;
 				/* send PDU */
 				rc = istgt_iscsi_write_pdu_internal(lu_task->conn,
-					lu_task->lu_cmd.pdu);
+					lu_task->lu_cmd.pdu, &(lu_task->lu_cmd));
 				if (rc < 0) {
 					lu_task->error = 1;
 					ISTGT_ERRLOG(
@@ -5848,7 +5878,7 @@ sender(void *arg)
 //		MTX_UNLOCK(&conn->wpdu_mutex);
 	}
 	// MTX_UNLOCK(&conn->sender_mutex);
-	pthread_cleanup_pop(0);
+//	pthread_cleanup_pop(0);
 	ISTGT_NOTICELOG("sender loop ended (%d:%d:%d)\n", conn->id, conn->epfd, ntohs(conn->iport));
 	return (NULL);
 }
@@ -5895,21 +5925,21 @@ worker(void *arg)
 // #endif
 
 	events.data.fd = conn->sock;
-		events.events = EPOLLIN;
-		rc = epoll_ctl(epfd, EPOLL_CTL_ADD, conn->sock, &events);
-		if (rc == -1) {
+	events.events = EPOLLIN;
+	rc = epoll_ctl(epfd, EPOLL_CTL_ADD, conn->sock, &events);
+	if (rc == -1) {
 		ISTGT_ERRLOG("epoll_ctl() failed\n");
 		close(epfd);
 		return (NULL);
-		}
+	}
 	events.data.fd = conn->task_pipe[0];
-		events.events = EPOLLIN;
-		rc = epoll_ctl(epfd, EPOLL_CTL_ADD, conn->task_pipe[0], &events);
-		if (rc == -1) {
+	events.events = EPOLLIN;
+	rc = epoll_ctl(epfd, EPOLL_CTL_ADD, conn->task_pipe[0], &events);
+	if (rc == -1) {
 		ISTGT_ERRLOG("epoll_ctl() failed\n");
 		close(epfd);
 		return (NULL);
-		}
+	}
 
 
 	// TODO
@@ -5985,7 +6015,7 @@ worker(void *arg)
 	conn->exec_lu_task = NULL;
 	lu_task = NULL;
 
-	pthread_cleanup_push(worker_cleanup, conn);
+//	pthread_cleanup_push(worker_cleanup, conn);
 	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
 
 	/* create sender thread */
@@ -6060,16 +6090,15 @@ worker(void *arg)
 
 		/* on socket */
 		if (events.data.fd == conn->sock) {
-			if ((events.events & EPOLLERR) ||
-					(events.events & EPOLLHUP) ||
-					(!(events.events & EPOLLIN))) {
-				ISTGT_ERRLOG("close conn %d\n", errno);
+			if (events.events != EPOLLIN) {
+				ISTGT_ERRLOG("close conn events %d\n", events.events);
 				break;
 			}
 
 			rc = istgt_iscsi_read_pdu(conn, &conn->pdu);
 			if (rc < 0) {
 				if (errno == EAGAIN) {
+					ISTGT_ERRLOG("close conn %d\n", errno);
 					break;
 				}
 				if (conn->state != CONN_STATE_EXITING) {
@@ -6077,8 +6106,8 @@ worker(void *arg)
 				}
 				if (conn->state != CONN_STATE_RUNNING) {
 					if (errno == EINPROGRESS) {
-						sleep(1);
-						continue;
+						ISTGT_ERRLOG("iscsi_read_pdu shouldn't get EINPROGRESS\n");
+						break;
 					}
 					if (errno == ECONNRESET
 						|| errno == ETIMEDOUT) {
@@ -6239,7 +6268,7 @@ worker(void *arg)
 
 	cleanup_exit:
 ;
-	pthread_cleanup_pop(0);
+//	pthread_cleanup_pop(0);
 	conn->state = CONN_STATE_EXITING;
 	if (conn->sess != NULL) {
 		lu = conn->sess->lu;
