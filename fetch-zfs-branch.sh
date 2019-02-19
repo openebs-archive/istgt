@@ -21,6 +21,6 @@ set -e
 #
 #For the moment, we will go with making sure the correct
 # branch name is provided as part of the release process.
-ZFS_BUILD_BRANCH="zfs-0.7-release"
+ZFS_BUILD_BRANCH="0.8.0"
 export ZFS_BUILD_BRANCH
 
