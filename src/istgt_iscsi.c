@@ -279,11 +279,12 @@ istgt_iscsi_read_pdu(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 	iovec[0].iov_len = 4 * pdu->total_ahs_len;
 
 	/* Header Digest */
-	iovec[1].iov_base = pdu->header_digest;
 	if (conn->header_digest) {
+		iovec[1].iov_base = pdu->header_digest;
 		iovec[1].iov_len = ISCSI_DIGEST_LEN;
 		total += ISCSI_DIGEST_LEN;
 	} else {
+		iovec[1].iov_base = NULL;
 		iovec[1].iov_len = 0;
 	}
 
@@ -313,11 +314,12 @@ istgt_iscsi_read_pdu(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 	iovec[2].iov_len = ISCSI_ALIGN(pdu->data_segment_len);
 
 	/* Data Digest */
-	iovec[3].iov_base = pdu->data_digest;
 	if (conn->data_digest && data_len != 0) {
+		iovec[3].iov_base = pdu->data_digest;
 		iovec[3].iov_len = ISCSI_DIGEST_LEN;
 		total += ISCSI_DIGEST_LEN;
 	} else {
+		iovec[3].iov_base = NULL;
 		iovec[3].iov_len = 0;
 	}
 
@@ -342,6 +344,7 @@ istgt_iscsi_read_pdu(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 			conn->state = CONN_STATE_EXITING;
 			return (-1);
 		}
+		ISTGT_TRACELOG(ISTGT_TRACE_NET, "read data %d of %d\n", rc, nbytes);
 		nbytes -= rc;
 		if (nbytes == 0)
 			break;
@@ -349,7 +352,7 @@ istgt_iscsi_read_pdu(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 		for (i = 0; i < 4; i++) {
 			if (iovec[i].iov_len != 0 && iovec[i].iov_len > (size_t)rc) {
 				iovec[i].iov_base
-					= (void *) (((uintptr_t)iovec[i].iov_base) + rc);
+					= (void *) (((char *)iovec[i].iov_base) + rc);
 				iovec[i].iov_len -= rc;
 				break;
 			} else {
@@ -6477,7 +6480,7 @@ istgt_create_conn(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock, struct sockaddr 
 	}
 #if defined(ISTGT_USE_IOVEC)
 	/* set low water mark */
-	rc = istgt_set_recvlowat(conn->sock, ISCSI_BHS_LEN);
+	rc = istgt_set_recvlowat(conn->sock, 1);
 	if (rc != 0) {
 		ISTGT_ERRLOG("istgt_set_recvlowat() failed\n");
 		goto error_return;
