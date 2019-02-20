@@ -2547,7 +2547,7 @@ istgt_iscsi_op_text(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 	memset(data, 0, alloc_len);
 
 	cp = (uint8_t *) &pdu->bhs;
-	I_bit = BGET8(&cp[0], 7);
+	I_bit = BGET8(&cp[0], 6);
 	F_bit = BGET8(&cp[1], 7);
 	C_bit = BGET8(&cp[1], 6);
 
@@ -6137,7 +6137,6 @@ worker(void *arg)
 				break;
 			} else if (rc == 1) { // means successful logout ISCSI_OP_LOGOUT
 				ISTGT_TRACELOG(ISTGT_TRACE_ISCSI, "logout received\n");
-				break;
 			}
 
 			if (conn->pdu.ahs != NULL) {
