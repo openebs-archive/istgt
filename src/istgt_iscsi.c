@@ -6102,7 +6102,9 @@ worker(void *arg)
 
 		/* on socket */
 		if (events.data.fd == conn->sock) {
-			if(events.events != EPOLLIN) {
+			if ((events.events & EPOLLERR) ||
+					(events.events & EPOLLHUP) ||
+					(!(events.events & EPOLLIN))) {
 				ISTGT_ERRLOG("close conn events %d\n", events.events);
 				break;
 			}
