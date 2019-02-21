@@ -104,6 +104,7 @@ run_mempool_test()
 
 run_istgt_integration()
 {
+	echo "===================run_istgt_integration start: " $(date)
 	local pid_istgt=$(sudo lsof -t -i:6060)
 	echo "istgt PID is $pid_istgt"
 	kill -9 $pid_istgt
@@ -116,6 +117,7 @@ run_istgt_integration()
 	[[ $? -ne 0 ]] && echo "istgt integration test failed" && tail -30 $INTEGRATION_TEST_LOGFILE && exit 1
 	rm -f /tmp/test_vol*
 	rm $INTEGRATION_TEST_LOGFILE
+	echo "===================run_istgt_integration end: " $(date)
 	return 0
 }
 
@@ -255,6 +257,7 @@ list_descendants ()
 }
 
 run_data_integrity_test() {
+	echo "===================run_data_integrity_test start: " $(date)
 	local replica1_port="6161"
 	local replica2_port="6162"
 	local replica3_port="6163"
@@ -351,11 +354,12 @@ run_data_integrity_test() {
 
 	ps -auxwww
 	ps -o pid,ppid,command
-
+	echo "===================run_data_integrity_test end: " $(date)
 }
 
 run_read_consistency_test ()
 {
+	echo "===================run_read_consistency_test start: " $(date)
 	local replica1_port="6161"
 	local replica2_port="6162"
 	local replica3_port="6163"
@@ -462,10 +466,12 @@ run_read_consistency_test ()
 	rm -rf ${replica1_vdev}* ${replica2_vdev}* ${replica3_vdev}*
 	rm -rf $file_name $device_file
 	stop_istgt
+	echo "===================run_read_consistency_test end: " $(date)
 }
 
 run_lu_rf_test ()
 {
+	echo "===================run_lu_rf_test start: " $(date)
 	local replica1_port="6161"
 	local replica2_port="6162"
 	local replica3_port="6163"
@@ -481,7 +487,7 @@ run_lu_rf_test ()
 
 	>$LOGFILE
 	sed -i -n '/LogicalUnit section/,$!p' src/istgt.conf
-	setup_test_env $replica4_vdev
+	setup_test_env
 
 	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev -q -r &
 	replica1_pid=$!
@@ -566,6 +572,7 @@ run_lu_rf_test ()
 	pkill -9 -P $replica3_pid
 	rm -rf ${replica1_vdev}* ${replica2_vdev}* ${replica3_vdev}*
 	stop_istgt
+	echo "====================run_lu_rf_test end: " $(date)
 }
 
 ## wait_for_healthy_replicas will wait for max of 5 minutes for replicas to become healthy
@@ -639,6 +646,7 @@ check_degraded_quorum()
 # run_quorum_test is used to test by connecting n Quorum replicas and m Non Quorum replicas
 run_quorum_test()
 {
+	echo "===================run_quorum_test start: " $(date)
 	local replica1_port="6161"
 	local replica2_port="6162"
 	local replica3_port="6163"
@@ -735,6 +743,7 @@ run_quorum_test()
 	pkill -9 -P $replica5_pid
 	stop_istgt
 	rm -rf ${replica1_vdev::-1}*
+	echo "===================run_quorum_test end: " $(date)
 }
 
 check_order_of_rebuilding()
@@ -778,6 +787,7 @@ check_order_of_rebuilding()
 ##run_non_quorum_replica_errored_test is used to kill the replica while forming management connection
 run_non_quorum_replica_errored_test()
 {
+	echo "===================run_non_quorum_replica_errored_test start: " $(date)
 	local replica1_port="6161"
 	local replica2_port="6162"
 	local replica3_port="6163"
@@ -836,7 +846,7 @@ run_non_quorum_replica_errored_test()
 	stop_istgt
 	rm -f /tmp/check_sum*
 	rm -rf ${replica1_vdev::-1}*
-
+	echo "===================run_non_quorum_replica_errored_test end: " $(date)
 }
 
 ## kill_non_quorum_replica used to kill the replica during connections
@@ -893,6 +903,7 @@ kill_non_quorum_replica()
 
 data_integrity_with_non_quorum()
 {
+	echo "===================data_integrity_with_non_quorum start: " $(date)
 	local replica1_port="6161"
 	local replica2_port="6162"
 	local replica3_port="6163"
@@ -982,7 +993,7 @@ data_integrity_with_non_quorum()
 	stop_istgt
 	rm -f /tmp/check_sum*
 	rm -rf ${replica1_vdev::-1}*
-
+	echo "===================data_integrity_with_non_quorum end: " $(date)
 }
 run_rebuild_time_test_in_single_replica()
 {
@@ -1199,6 +1210,7 @@ run_rebuild_time_test_in_multiple_replicas()
 
 run_replication_factor_test()
 {
+	echo "===================run_replication_factor_test start: " $(date)
 	local replica1_port="6161"
 	local replica2_port="6162"
 	local replica3_port="6163"
@@ -1257,12 +1269,14 @@ run_replication_factor_test()
 	stop_istgt
 	rm -rf ${replica1_vdev::-1}*
 
+	echo "===================run_replication_factor_test end: " $(date)
 	if [ $ret == 1 ]; then
 		exit 1
 	fi
 }
 
 run_login_test() {
+	echo "Running login test.." $(date)
 	local replica1_port="6161"
 	local replica1_ip="127.0.0.1"
 	local replica1_vdev="/tmp/test_vol1"
@@ -1271,7 +1285,6 @@ run_login_test() {
 	CONSISTENCY_FACTOR=1
 	setup_test_env
 
-	echo "Running login test.."
 	LIBISCSI=$DIR/test-tools/login-test/libiscsi LD_LIBRARY_PATH=$LIBISCSI/lib/.libs $DIR/test-tools/login-test/login_test -h iscsi://127.0.0.1:3260 -t 5
 	if [ $? -eq 0 ]; then
 		echo "login test passed"
@@ -1286,6 +1299,7 @@ run_login_test() {
 
 run_io_timeout_test()
 {
+	echo "===================run_iotimeout_test start: " $(date)
 	local replica1_port="6161"
 	local replica2_port="6162"
 	local replica3_port="6163"
@@ -1380,6 +1394,7 @@ run_io_timeout_test()
 	kill -9  $replica3_pid
 	stop_istgt
 	rm -rf ${replica1_vdev::-1}*
+	echo "===================run_io_timeout_test end: " $(date)
 }
 
 run_lu_rf_test
