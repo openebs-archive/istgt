@@ -591,14 +591,6 @@ istgt_iscsi_write_pdu_queue(CONN_Ptr conn, ISCSI_PDU_Ptr pdu, int req_type, int 
 	return (rc);
 }
 
-/*
- * This is related to issue https://github.com/openebs/openebs/issues/2382.
- * This variable is currently global, and need to be made LUN specific
- * when single istgt process supports multiple LUNs
- */
-uint64_t discovery_counter = 0;
-extern uint64_t discovery_retry_limit;
-
 static int
 istgt_iscsi_write_pdu_internal(CONN_Ptr conn, ISCSI_PDU_Ptr pdu, ISTGT_LU_CMD_Ptr lu_cmd)
 {
@@ -1908,7 +1900,6 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 				StatusDetail = 0x07;
 				goto response;
 			}
-			discovery_counter = 0;
 			snprintf(conn->target_name, sizeof (conn->target_name),
 				"%s", val);
 			snprintf(conn->target_port, sizeof (conn->target_port),
@@ -2061,20 +2052,6 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 			lu = NULL;
 			tsih = 0;
 
-			__sync_add_and_fetch(&discovery_counter, 1);
-			/*
-			 * As per the issue https://github.com/openebs/openebs/issues/2382,
-			 * 5 continous discovery requests failure can cause iscsi initiator
-			 * to get into high CPU usage.
-			 * This code checks for this state of 4(default retry limit) continuous
-			 * discovery failures and restarts the process.
-			 */
-			if (discovery_counter > discovery_retry_limit) {
-				ISTGT_ERRLOG("discovery counter %lu retry limit exceeded %lu\n",
-				    discovery_counter, discovery_retry_limit);
-				fflush(stderr);
-				abort();
-			}
 			/* force target flags */
 			MTX_LOCK(&conn->istgt->mutex);
 			if (conn->istgt->no_discovery_auth) {
