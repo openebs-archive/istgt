@@ -93,7 +93,6 @@
 #define	PORTNUMLEN    32
 
 ISTGT g_istgt;
-uint64_t discovery_retry_limit = 4;
 #ifdef	REPLICATION
 extern int replica_timeout;
 extern int extraWait;
@@ -3102,12 +3101,6 @@ main(int argc, char **argv)
 #ifndef	REPLICATION
 	poolinit();
 #endif
-
-	const char *s_discovery_retry_limit = getenv("DiscoveryRetryLimit");
-	if (s_discovery_retry_limit) {
-		discovery_retry_limit = (unsigned int)strtol(s_discovery_retry_limit, NULL, 10);
-		ISTGT_NOTICELOG("Setting discovery retry limit at %lu\n", discovery_retry_limit);
-	}
 
 	/* read config files */
 	config = istgt_allocate_config();
