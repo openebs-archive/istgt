@@ -5351,7 +5351,7 @@ wait_all_task(CONN_Ptr conn)
 		conn->id, conn->running_tasks);
 }
 
-#if f0
+#if 0
 static void
 snd_cleanup(void *arg)
 {
