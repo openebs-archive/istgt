@@ -1016,11 +1016,15 @@ run_rebuild_time_test_in_single_replica()
 
 	while [ 1 ]; do
 		# With replica poll timeout as 10, volume should become
-		# healthy in less than 40 seconds.
+		# healthy in ~ 55 seconds
+		# 10 seconds to send the mesh rebuild
+		# replication_test sends REBUILD_DONE status in 3rd try.. so, 30 more seconds
+		# 10 more seconds due to the timing where initial status request
+		# might be sent after 20 seconds rather than 10 seconds
 		cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[0].\"upTime\"'"
 		rt=$(eval $cmd)
 		echo "replica start time $rt"
-		if [ $rt -gt 40 ]; then
+		if [ $rt -gt 55 ]; then
 			cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[0].Mode'"
 			rstatus=$(eval $cmd)
 			echo "replica status $rstatus"

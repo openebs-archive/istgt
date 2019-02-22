@@ -6102,6 +6102,7 @@ worker(void *arg)
 
 		/* on socket */
 		if (events.data.fd == conn->sock) {
+			/* considered the half-close case i.e., (EPOLLRDHUP | EPOLLIN) */
 			if ((events.events & EPOLLERR) ||
 					(events.events & EPOLLHUP) ||
 					(!(events.events & EPOLLIN))) {
