@@ -90,7 +90,9 @@ start_replica() {
 stop_istgt() {
 	if [ $SETUP_PID -ne -1 ]; then
 		pkill -9 -P $(list_descendants $SETUP_PID)
+		kill -9 $(list_descendants $SETUP_PID)
 		pkill -9 -P $SETUP_PID
+		kill -9 $SETUP_PID
 	fi
 
 }
@@ -1262,6 +1264,34 @@ run_replication_factor_test()
 	fi
 }
 
+run_test_env()
+{
+	REPLICATION_FACTOR=3
+	CONSISTENCY_FACTOR=2
+	TEST_ENV=1
+	setup_test_env
+
+	cnt=$(eval $ISTGTCONTROL dump -a | grep "Luworkers:9" | wc -l)
+	if [ $? -ne 0 ] || [ $cnt -ne 1 ]
+	then
+		echo "test env failed"
+		exit 1
+	fi
+	cleanup_test_env
+
+	unset TEST_ENV
+	setup_test_env
+
+	cnt=$(eval $ISTGTCONTROL dump -a | grep "Luworkers:6" | wc -l)
+	if [ $? -ne 0 ] || [ $cnt -ne 1 ]
+	then
+		echo "test env failed"
+		exit 1
+	fi
+	cleanup_test_env
+}
+
+
 run_io_timeout_test()
 {
 	local replica1_port="6161"
@@ -1370,6 +1400,7 @@ run_istgt_integration
 run_read_consistency_test
 run_replication_factor_test
 run_io_timeout_test
+run_test_env
 echo "===============All Tests are passed ==============="
 tail -20 $LOGFILE
 

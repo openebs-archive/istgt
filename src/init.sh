@@ -21,6 +21,7 @@ do
 		externalIP)		externalIP=${VALUE} ;;
 		replication_factor)	replication_factor=${VALUE} ;;
 		consistency_factor)	consistency_factor=${VALUE} ;;
+		test_env)		test_env=${VALUE} ;;
 		*)
 	esac
 done
@@ -65,7 +66,14 @@ export externalIP=$externalIP
 echo $externalIP
 service rsyslog start
 #setting replica timeout to 20 seconds
-/usr/local/bin/istgt -R 20
+
+if [ -z $test_env ]
+then
+	/usr/local/bin/istgt -R 20
+else
+	QueueDepth=5 Luworkers=9 /usr/local/bin/istgt -R 20
+fi
+
 child=$!
 echo "child PID from init script: "$child
 wait
