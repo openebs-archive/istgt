@@ -1367,6 +1367,67 @@ istgt_lu_set_local_settings(ISTGT_Ptr istgt, CF_SECTION *sp, ISTGT_LU_Ptr lu)
 
 extern int g_num_luworkers;
 
+static void set_queue_depth(CF_SECTION *sp, ISTGT_LU_Ptr lu)
+{
+	const char* val = getenv("QueueDepth");
+	if (val)
+		ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "setting queuedepth from env to %s\n", val);
+	else
+		val = istgt_get_val(sp, "QueueDepth");
+
+	if (val == NULL) {
+		switch (lu->type) {
+		case ISTGT_LU_TYPE_DISK:
+			lu->queue_depth = DEFAULT_LU_QUEUE_DEPTH;
+			// lu->queue_depth = 0;
+			break;
+		case ISTGT_LU_TYPE_DVD:
+		case ISTGT_LU_TYPE_TAPE:
+		default:
+			lu->queue_depth = 0;
+			break;
+		}
+	} else {
+		lu->queue_depth = (int) strtol(val, NULL, 10);
+	}
+	if (lu->queue_depth < 0 || lu->queue_depth >= MAX_LU_QUEUE_DEPTH) {
+		ISTGT_ERRLOG("LU%d: queue depth %d is not in range, resetting to %d\n", lu->num, lu->queue_depth, DEFAULT_LU_QUEUE_DEPTH);
+		lu->queue_depth = DEFAULT_LU_QUEUE_DEPTH;
+	}
+}
+
+static void set_luworkers(CF_SECTION *sp, ISTGT_LU_Ptr lu)
+{
+	const char* val = getenv("Luworkers");
+	if (val)
+		ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "setting luworkers from env to %s\n", val);
+	else
+		val = istgt_get_val(sp, "Luworkers");
+
+	if (val == NULL) {
+		switch (lu->type) {
+		case ISTGT_LU_TYPE_DISK:
+			lu->luworkers = g_num_luworkers;
+			break;
+		case ISTGT_LU_TYPE_DVD:
+		case ISTGT_LU_TYPE_TAPE:
+		default:
+			lu->luworkers = 0;
+			break;
+		}
+	} else {
+		lu->luworkers = (int) strtol(val, NULL, 10);
+		if (lu->luworkers > (ISTGT_MAX_NUM_LUWORKERS - 1)) {
+			ISTGT_ERRLOG("LU%d: luworkers %d is not in range, resetting to %d\n", lu->num, lu->luworkers, ISTGT_MAX_NUM_LUWORKERS - 1);
+			lu->luworkers = (ISTGT_MAX_NUM_LUWORKERS - 1);
+		}
+		else if (lu->luworkers < 1) {
+			ISTGT_ERRLOG("LU%d: luworkers %d is not in range, resetting to %d\n", lu->num, lu->luworkers, 1);
+			lu->luworkers = 1;
+		}
+	}
+}
+
 static int
 istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 {
@@ -1799,27 +1860,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 		}
 	}
 
-	val = istgt_get_val(sp, "QueueDepth");
-	if (val == NULL) {
-		switch (lu->type) {
-		case ISTGT_LU_TYPE_DISK:
-			lu->queue_depth = DEFAULT_LU_QUEUE_DEPTH;
-			// lu->queue_depth = 0;
-			break;
-		case ISTGT_LU_TYPE_DVD:
-		case ISTGT_LU_TYPE_TAPE:
-		default:
-			lu->queue_depth = 0;
-			break;
-		}
-	} else {
-		lu->queue_depth = (int) strtol(val, NULL, 10);
-	}
-	if (lu->queue_depth < 0 || lu->queue_depth >= MAX_LU_QUEUE_DEPTH) {
-		ISTGT_ERRLOG("LU%d: queue depth %d is not in range, resetting to %d\n", lu->num, lu->queue_depth, DEFAULT_LU_QUEUE_DEPTH);
-		lu->queue_depth = DEFAULT_LU_QUEUE_DEPTH;
-		goto error_return;
-	}
+	set_queue_depth(sp, lu);
 
 	lu->luworkers = 0;
 	lu->luworkersActive = 0;
@@ -1829,25 +1870,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "BlockLength %d, PhysRecordLength %d, QueueDepth %d\n",
 		lu->blocklen, lu->recordsize, lu->queue_depth);
 
-	val = istgt_get_val(sp, "Luworkers");
-	if (val == NULL) {
-		switch (lu->type) {
-		case ISTGT_LU_TYPE_DISK:
-			lu->luworkers = g_num_luworkers;
-			break;
-		case ISTGT_LU_TYPE_DVD:
-		case ISTGT_LU_TYPE_TAPE:
-		default:
-			lu->luworkers = 0;
-			break;
-		}
-	} else {
-		lu->luworkers = (int) strtol(val, NULL, 10);
-		if (lu->luworkers > (ISTGT_MAX_NUM_LUWORKERS - 1))
-			lu->luworkers = (ISTGT_MAX_NUM_LUWORKERS - 1);
-		else if (lu->luworkers < 1)
-			lu->luworkers = 1;
-	}
+	set_luworkers(sp, lu);
 
 	lu->maxlun = 0;
 	for (i = 0; i < MAX_LU_LUN; i++) {

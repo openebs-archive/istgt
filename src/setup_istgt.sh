@@ -1,5 +1,5 @@
 #!/bin/bash
-
+set -x
 run_istgt ()
 {
 	local volume_size
@@ -24,7 +24,7 @@ run_istgt ()
 	cp istgt /usr/local/bin/istgt
 	cp istgtcontrol /usr/local/bin/istgtcontrol
 	ps -aux | grep "\./istgt" | grep -v grep | sudo kill -9 `awk '{print $2}'`
-	./init.sh volname=vol1 portal=127.0.0.1 size=$volume_size externalIP=127.0.0.1 replication_factor=$rf consistency_factor=$cf
+	./init.sh volname=vol1 portal=127.0.0.1 size=$volume_size externalIP=127.0.0.1 replication_factor=$rf consistency_factor=$cf test_env=$TEST_ENV
 }
 
 parent_file=$( basename $0 )
