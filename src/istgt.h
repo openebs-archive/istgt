@@ -329,6 +329,8 @@ char *istgt_get_val(CF_SECTION *sp, const char *key);
 int istgt_get_nintval(CF_SECTION *sp, const char *key, int idx);
 int istgt_get_intval(CF_SECTION *sp, const char *key);
 int istgt_reload(ISTGT *istgt);
+CF_SECTION *istgt_get_section(CONFIG *config, CF_SECTION_TYPE section_type);
+char *istgt_get_lun_values(CF_SECTION *sp, const char *key, int pos);
 
 #ifdef USE_ATOMIC
 static inline __attribute__((__always_inline__)) int

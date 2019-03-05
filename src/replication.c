@@ -317,6 +317,7 @@ check_header_sanity(zvol_io_hdr_t *resp_hdr)
 		case ZVOL_OPCODE_SNAP_PREPARE:
 		case ZVOL_OPCODE_START_REBUILD:
 		case ZVOL_OPCODE_SNAP_DESTROY:
+		case ZVOL_OPCODE_RESIZE:
 			exp_len = 0;
 			break;
 		default:
@@ -1284,20 +1285,29 @@ send_replica_handshake_query(replica_t *replica, spec_t *spec)
 	zvol_io_hdr_t *rmgmtio = NULL;
 	size_t data_len = 0;
 	uint8_t *data;
+//	void *data;
 	uint64_t num = 1;
 	zvol_op_code_t mgmt_opcode = ZVOL_OPCODE_HANDSHAKE;
 	mgmt_cmd_t *mgmt_cmd;
 	int ret = 0;
+//	zvol_op_handshake_resp_t *handshake_data;
 
+//	data_len = sizeof(zvol_op_handshake_resp_t);
+//	handshake_data = malloc(data_len);
+	data_len = strlen(spec->volname) + 1;
+//	memset(handshake_data, 0, data_len);
 	mgmt_cmd = malloc(sizeof(mgmt_cmd_t));
 	memset(mgmt_cmd, 0, sizeof (mgmt_cmd_t));
 
-	data_len = strlen(spec->volname) + 1;
 
 	BUILD_REPLICA_MGMT_HDR(rmgmtio, mgmt_opcode, data_len);
 
 	data = (uint8_t *)malloc(data_len);
 	snprintf((char *)data, data_len, "%s", spec->volname);
+//	strncpy(handshake_data->volname, spec->volname, MAX_NAME_LEN);
+//	handshake_data->size = spec->size;
+//	data = (struct zvol_op_handshake_resp *)malloc(data_len);
+//	data = handshake_data;
 
 	mgmt_cmd->io_hdr = rmgmtio;
 	mgmt_cmd->data = data;
@@ -1446,6 +1456,89 @@ send_replica_snapshot(spec_t *spec, replica_t *replica, uint64_t io_seq,
 }
 
 static void
+handle_resize_resp(replica_t *replica, mgmt_cmd_t *mgmt_cmd)
+{
+	zvol_io_hdr_t *hdr = replica->mgmt_io_resp_hdr;
+	rcommon_mgmt_cmd_t *rcomm_mgmt = mgmt_cmd->rcomm_mgmt;
+	bool delete = false;
+
+	ASSERT(rcomm_mgmt);
+
+	MTX_LOCK(&rcomm_mgmt->mtx);
+
+	if (hdr->status != ZVOL_OP_STATUS_OK)
+		rcomm_mgmt->cmds_failed++;
+	else
+		rcomm_mgmt->cmds_succeeded++;
+
+	if ((rcomm_mgmt->caller_gone == 1) &&
+	    (rcomm_mgmt->cmds_sent ==
+	    (rcomm_mgmt->cmds_failed + rcomm_mgmt->cmds_succeeded)))
+                delete = true;
+
+        MTX_UNLOCK(&rcomm_mgmt->mtx);
+
+        if (delete == true)
+                free(rcomm_mgmt);
+}
+
+static int
+send_replica_resize(spec_t *spec, replica_t *replica, uint64_t io_seq,
+		uint64_t size, zvol_op_code_t opcode, rcommon_mgmt_cmd_t *rcomm_mgmt)
+{
+	zvol_io_hdr_t *rmgmtio = NULL;
+	size_t data_len;
+	zvol_op_code_t mgmt_opcode = opcode;
+	mgmt_cmd_t *mgmt_cmd, *tmp_mgmt_cmd;
+	void *data;
+	uint64_t num = 1;
+        int ret = 0;
+	zvol_op_resize_data_t *resize_cmd;
+
+	data_len = sizeof(zvol_op_resize_data_t);
+	resize_cmd = malloc(data_len);
+	memset(resize_cmd, 0, data_len);
+	mgmt_cmd = malloc(sizeof(mgmt_cmd_t));
+	memset(mgmt_cmd, 0, sizeof(mgmt_cmd_t));
+	mgmt_cmd->rcomm_mgmt = rcomm_mgmt;
+
+	ASSERT(MTX_LOCKED(&spec->rq_mtx));
+	BUILD_REPLICA_MGMT_HDR(rmgmtio, mgmt_opcode, data_len);
+
+	strncpy(resize_cmd->volname, spec->volname, MAX_NAME_LEN);
+	resize_cmd->size = size;
+	data = (struct zvol_op_resize_data *)malloc(data_len);
+	data = resize_cmd;
+
+	rmgmtio->io_seq = io_seq;
+	mgmt_cmd->io_hdr = rmgmtio;
+	mgmt_cmd->data = data;
+	mgmt_cmd->mgmt_cmd_state = WRITE_IO_SEND_HDR;
+
+	MTX_LOCK(&replica->r_mtx);
+	// Adding as second IO in mgmt_cmd queue if queue contains items
+	tmp_mgmt_cmd = TAILQ_FIRST(&replica->mgmt_cmd_queue);
+	if (tmp_mgmt_cmd != NULL) {
+		TAILQ_INSERT_AFTER(&replica->mgmt_cmd_queue, tmp_mgmt_cmd, mgmt_cmd, mgmt_cmd_next);
+	} else {
+		TAILQ_INSERT_TAIL(&replica->mgmt_cmd_queue, mgmt_cmd, mgmt_cmd_next);
+	}
+	MTX_UNLOCK(&replica->r_mtx);
+
+	if (rcomm_mgmt != NULL)
+		rcomm_mgmt->cmds_sent++;
+
+	if (write(replica->mgmt_eventfd1, &num, sizeof (num)) != sizeof (num)) {
+		REPLICA_ERRLOG("Failed to inform to mgmt_eventfd for "
+		    "replica(%lu)\n", replica->zvol_guid);
+		ret = -1;
+	}
+
+	return ret;
+
+}
+
+static void
 disconnect_nonresponding_replica(replica_t *replica, uint64_t io_seq,
     zvol_op_code_t opcode)
 {
@@ -1460,7 +1553,7 @@ disconnect_nonresponding_replica(replica_t *replica, uint64_t io_seq,
 			if (opcode == ZVOL_OPCODE_SNAP_CREATE) {
 				/*
 				 * If replica that is healthy and in rebuild process
-				 * doesn't respond for SNAP_CREATE, dw replica that is
+				 * doesn't respond for SNAP_CREATE Or RESIZE dw replica that is
 				 * involved in rebuild process need to be disconnected.
 				 * After reconnection, both of them will get this snap
 				 * if it is successful
@@ -1512,7 +1605,7 @@ any_ongoing_snapshot_command(spec_t *spec)
 */
 
 static int
-can_take_snapshot(spec_t *spec)
+is_volume_healthy(spec_t *spec)
 {
 	if (spec->healthy_rcount < spec->consistency_factor)
 		return false;
@@ -1542,7 +1635,7 @@ pause_and_timed_wait_for_ongoing_ios(spec_t *spec, int sec)
 	clock_gettime(CLOCK_MONOTONIC_COARSE, &last);
 	timesdiff(CLOCK_MONOTONIC_COARSE, last, now, diff);
 
-	while ((diff.tv_sec < sec) && (can_take_snapshot(spec) == true)) {
+	while ((diff.tv_sec < sec) && (is_volume_healthy(spec) == true)) {
 		io_found = false;
 		if (spec->inflight_write_io_cnt != 0 ||
 		    spec->inflight_sync_io_cnt != 0)
@@ -1651,7 +1744,7 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 		MTX_LOCK(&spec->rq_mtx);
 	}
 
-	if (can_take_snapshot(spec) == false) {
+	if (is_volume_healthy(spec) == false) {
 		MTX_UNLOCK(&spec->rq_mtx);
 		REPLICA_ERRLOG("volume is not healthy to take snapshots..\n");
 		return false;
@@ -1725,6 +1818,109 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	if (r == false)
 		REPLICA_ERRLOG("snap create ioseq: %lu resp: %d\n", io_seq, r);
 	return (ret);
+}
+
+int istgt_lu_resize_volume(spec_t *spec, uint64_t new_size, uint64_t old_size, int io_wait_time, int wait_time)
+{
+	bool r;
+	replica_t *replica;
+	int free_rcomm_mgmt = 0;
+	struct timespec last, now, diff;
+	rcommon_mgmt_cmd_t *rcomm_mgmt;
+	uint64_t io_seq;
+
+	rcomm_mgmt = allocate_rcommon_mgmt_cmd(0);
+
+	ASSERT(spec);
+	ASSERT(rcomm_mgmt);
+
+	clock_gettime(CLOCK_MONOTONIC_COARSE, &last);
+	MTX_LOCK(&spec->rq_mtx);
+
+	r = false;
+	/* Wait for any ongoing commands which colud block IOs */
+	while (spec->quiesce == 1) {
+		MTX_UNLOCK(&spec->rq_mtx);
+		sleep(1);
+		MTX_LOCK(&spec->rq_mtx);
+	}
+
+	/* If consistency factor of replicas are not connected to the target then return */
+	if (is_volume_healthy(spec) == false) {
+		MTX_UNLOCK(&spec->rq_mtx);
+		REPLICA_ERRLOG("volume is not healthy to perform resize\n");
+		return r;
+	}
+
+	r = pause_and_timed_wait_for_ongoing_ios(spec, io_wait_time);
+	if (r == false) {
+		MTX_UNLOCK(&spec->rq_mtx);
+		REPLICA_ERRLOG("pausing failed..\n");
+		return false;
+	}
+
+	free_rcomm_mgmt = 0;
+
+	io_seq = ++spec->io_seq;
+	TAILQ_FOREACH(replica, &spec->rq, r_next)
+		(void) send_replica_resize(spec, replica, io_seq, new_size, ZVOL_OPCODE_RESIZE, rcomm_mgmt);
+
+	TAILQ_FOREACH(replica, &spec->non_quorum_rq, r_non_quorum_next) 
+		(void) send_replica_resize(spec, replica, io_seq, new_size, ZVOL_OPCODE_RESIZE, rcomm_mgmt);
+	
+	uint8_t cf = spec->consistency_factor;
+
+	timesdiff(CLOCK_MONOTONIC_COARSE, last, now, diff);
+	MTX_LOCK(&rcomm_mgmt->mtx);
+
+	while (diff.tv_sec < wait_time) {
+		if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed))
+			break;
+		MTX_UNLOCK(&rcomm_mgmt->mtx);
+		MTX_UNLOCK(&spec->rq_mtx);
+		sleep(1);
+		MTX_LOCK(&spec->rq_mtx);
+		MTX_LOCK(&rcomm_mgmt->mtx);
+		timesdiff(CLOCK_MONOTONIC_COARSE, last, now, diff);
+	}
+	rcomm_mgmt->caller_gone = 1;
+	ISTGT_LOG("Success(%d) and failure(%d) count of resize command\n", rcomm_mgmt->cmds_succeeded, rcomm_mgmt->cmds_failed);
+	if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed)) {
+		free_rcomm_mgmt = 1;
+	}
+	if (rcomm_mgmt->cmds_succeeded >= cf) {
+		r = true;
+	}
+	MTX_UNLOCK(&rcomm_mgmt->mtx);
+
+	if (r == false) {
+		TAILQ_FOREACH(replica, &spec->rq, r_next)
+			(void) send_replica_resize(spec, replica, io_seq, old_size, ZVOL_OPCODE_RESIZE, rcomm_mgmt);
+
+		TAILQ_FOREACH(replica, &spec->non_quorum_rq, r_non_quorum_next) 
+			(void) send_replica_resize(spec, replica, io_seq, old_size, ZVOL_OPCODE_RESIZE, rcomm_mgmt);
+	} else {
+		/*
+		 * disconnect the replica from which we have
+		 * not received the response yet. As a part of the
+		 * management handshake, zrepl will resize the volume
+		 * if it is necessary.
+		 */
+		TAILQ_FOREACH(replica, &spec->rq, r_next)
+			disconnect_nonresponding_replica(replica, io_seq,
+			    ZVOL_OPCODE_RESIZE);
+		
+		TAILQ_FOREACH(replica, &spec->non_quorum_rq, r_non_quorum_next) 
+			disconnect_nonresponding_replica(replica, io_seq,
+			    ZVOL_OPCODE_RESIZE);
+	}
+	spec->quiesce = 0;
+	MTX_UNLOCK(&spec->rq_mtx);
+	if (r == false)
+		REPLICA_ERRLOG("volume resize ioseq: %lu resp: %d\n", io_seq, r);
+	if (free_rcomm_mgmt == 1)
+		free(rcomm_mgmt);
+	return r;
 }
 
 void
@@ -2483,7 +2679,10 @@ read_io_resp_hdr:
 					assert(fd != replica->iofd);
 					handle_start_rebuild_resp(spec, resp_hdr);
 					break;
-
+				case ZVOL_OPCODE_RESIZE:
+					assert(fd != replica->iofd);
+					handle_resize_resp(replica, mgmt_cmd);
+					break;
 				case ZVOL_OPCODE_SNAP_DESTROY:
 					break;
 
@@ -3444,6 +3643,7 @@ destroy_volume(spec_t *spec)
 	MTX_LOCK(&specq_mtx);
 	TAILQ_REMOVE(&spec_q, spec, spec_next);
 	MTX_UNLOCK(&specq_mtx);
+
 
 	return;
 }
