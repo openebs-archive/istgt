@@ -1390,7 +1390,7 @@ static void set_queue_depth(CF_SECTION *sp, ISTGT_LU_Ptr lu)
 	} else {
 		lu->queue_depth = (int) strtol(val, NULL, 10);
 	}
-	if (lu->queue_depth < 0 || lu->queue_depth >= MAX_LU_QUEUE_DEPTH) {
+	if (lu->queue_depth < 1 || lu->queue_depth >= MAX_LU_QUEUE_DEPTH) {
 		ISTGT_ERRLOG("LU%d: queue depth %d is not in range, resetting to %d\n", lu->num, lu->queue_depth, DEFAULT_LU_QUEUE_DEPTH);
 		lu->queue_depth = DEFAULT_LU_QUEUE_DEPTH;
 	}
@@ -1423,7 +1423,7 @@ static void set_luworkers(CF_SECTION *sp, ISTGT_LU_Ptr lu)
 		}
 		else if (lu->luworkers < 1) {
 			ISTGT_ERRLOG("LU%d: luworkers %d is not in range, resetting to %d\n", lu->num, lu->luworkers, 1);
-			lu->luworkers = 1;
+			lu->luworkers = ISTGT_NUM_LUWORKERS_DEFAULT;
 		}
 	}
 }
