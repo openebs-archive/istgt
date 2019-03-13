@@ -3387,8 +3387,12 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 		    json_object_new_string(spec->lu->name));
 		json_object_object_add(jobj, "WriteIOPS",
 		    json_object_new_uint64(spec->writes));
+		json_object_object_add(jobj, "QueueDepth",
+		    json_object_new_int(spec->lu->queue_depth));
+	        json_object_object_add(jobj, "Luworkers",
+		    json_object_new_int(spec->lu->luworkers));
 		json_object_object_add(jobj, "ReadIOPS",
-		    json_object_new_uint64(spec->reads));
+	            json_object_new_uint64(spec->reads));
 		json_object_object_add(jobj, "TotalWriteBytes",
 		    json_object_new_uint64(spec->writebytes));
 		json_object_object_add(jobj, "TotalReadBytes",
