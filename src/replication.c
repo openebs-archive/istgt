@@ -1285,17 +1285,12 @@ send_replica_handshake_query(replica_t *replica, spec_t *spec)
 	zvol_io_hdr_t *rmgmtio = NULL;
 	size_t data_len = 0;
 	uint8_t *data;
-//	void *data;
 	uint64_t num = 1;
 	zvol_op_code_t mgmt_opcode = ZVOL_OPCODE_HANDSHAKE;
 	mgmt_cmd_t *mgmt_cmd;
 	int ret = 0;
-//	zvol_op_handshake_resp_t *handshake_data;
 
-//	data_len = sizeof(zvol_op_handshake_resp_t);
-//	handshake_data = malloc(data_len);
 	data_len = strlen(spec->volname) + 1;
-//	memset(handshake_data, 0, data_len);
 	mgmt_cmd = malloc(sizeof(mgmt_cmd_t));
 	memset(mgmt_cmd, 0, sizeof (mgmt_cmd_t));
 
@@ -1304,10 +1299,6 @@ send_replica_handshake_query(replica_t *replica, spec_t *spec)
 
 	data = (uint8_t *)malloc(data_len);
 	snprintf((char *)data, data_len, "%s", spec->volname);
-//	strncpy(handshake_data->volname, spec->volname, MAX_NAME_LEN);
-//	handshake_data->size = spec->size;
-//	data = (struct zvol_op_handshake_resp *)malloc(data_len);
-//	data = handshake_data;
 
 	mgmt_cmd->io_hdr = rmgmtio;
 	mgmt_cmd->data = data;
