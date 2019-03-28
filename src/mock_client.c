@@ -293,8 +293,8 @@ snapshot_thread(void *args)
 		wait_time = random() % 2 + 4;
 
 		clock_gettime(CLOCK_MONOTONIC_RAW, &cmd_start);
-		ret = istgt_lu_create_snapshot(spec, snapname, io_wait_time,
-		    wait_time);
+		ret = istgt_execute_volume_operation(spec, ZVOL_OPCODE_SNAP_CREATE,
+		    snapname, 0, io_wait_time, wait_time);
 		timesdiff(CLOCK_MONOTONIC_RAW, cmd_start, now, cmd_time);
 
 		VERIFY(cmd_time.tv_sec <= (wait_time + 1));

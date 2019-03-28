@@ -590,8 +590,8 @@ istgt_uctl_cmd_snap(UCTL_Ptr uctl)
 	}
 	spec = lu->lun[0].spec;
 	if (strcmp(uctl->cmd, "SNAPCREATE") == 0)
-		r = istgt_lu_create_snapshot(spec, snapname, io_wait_time,
-		    wait_time);
+		r = istgt_execute_volume_operation(spec, ZVOL_OPCODE_SNAP_CREATE, snapname,
+		    0, io_wait_time, wait_time);
 	else
 		r = istgt_lu_destroy_snapshot(spec, snapname);
 	if (r) {
@@ -605,6 +605,7 @@ error_return:
 	if (rc != UCTL_CMD_OK) {
 		return (rc);
 	}
+
 	return (ret);
 }
 
@@ -652,7 +653,7 @@ istgt_uctl_cmd_resize(UCTL_Ptr uctl)
 		istgt_uctl_snprintf(uctl, "invalid size\n");
 		goto error_return;
 	}
-	ISTGT_LOG("volume(%s) resize(%s) requested\n", volname, size_str);
+	ISTGT_LOG("volume(%s) requested to resize %s\n", volname, size_str);
 
 	lu = istgt_lu_find_target_by_volname(uctl->istgt, volname);
 	if (lu == NULL) {
@@ -667,8 +668,9 @@ istgt_uctl_cmd_resize(UCTL_Ptr uctl)
 		istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
 		ret = UCTL_CMD_OK;
 	} else {
-		r = istgt_lu_resize_volume(spec, new_size, old_size, io_wait_time,
-					wait_time);
+		r = istgt_execute_volume_operation(spec, ZVOL_OPCODE_RESIZE, NULL, new_size,
+			     io_wait_time, wait_time);
+
 		if (r == true) {
 			istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
 			ret = UCTL_CMD_OK;

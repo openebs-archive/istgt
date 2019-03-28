@@ -919,6 +919,7 @@ verify_resize_command()
 		echo "LUN resize failed"
 		exit 1
 	fi
+	echo "Resize passed"
 	sleep 2
 }
 
