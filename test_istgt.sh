@@ -1022,7 +1022,7 @@ run_rebuild_time_test_in_single_replica()
 		cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[0].\"upTime\"'"
 		rt=$(eval $cmd)
 		echo "replica start time $rt"
-		if [ $rt -gt 40 ]; then
+		if [ $rt -gt 20 ]; then
 			cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[0].Mode'"
 			rstatus=$(eval $cmd)
 			echo "replica status $rstatus"

@@ -251,7 +251,6 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 	iovec[0].iov_len = sizeof (zvol_io_hdr_t);
 
 	if (opcode == ZVOL_OPCODE_SNAP_DESTROY) {
-
 		iovec_count = 1;
 		mgmt_ack_hdr->status = (random() % 2) ? ZVOL_OP_STATUS_FAILED : ZVOL_OP_STATUS_OK;
 		mgmt_ack_hdr->len = 0;
@@ -283,6 +282,11 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 		iovec[1].iov_base = zrepl_status;
 		iovec[1].iov_len = sizeof (zrepl_status_ack_t);
 	} else if (opcode == ZVOL_OPCODE_START_REBUILD) {
+		if (zrepl_status->state != ZVOL_STATUS_DEGRADED) {
+			REPLICA_ERRLOG("START_REBUILD is on invalid repl "
+			    "status %d\n", zrepl_status->state);
+			exit(1);
+		}
 		zrepl_status->rebuild_status = ZVOL_REBUILDING_SNAP;
 		mgmt_ack_hdr->len = 0;
 		iovec_count = 1;
@@ -727,6 +731,10 @@ again:
 
 					if (io_hdr->opcode == ZVOL_OPCODE_OPEN) {
 						open_ptr = (zvol_op_open_data_t *)data;
+						if (open_ptr->replication_factor == 1) {
+							zrepl_status->state = ZVOL_STATUS_HEALTHY;
+							zrepl_status->rebuild_status = ZVOL_REBUILDING_DONE;
+						}
 						io_hdr->status = ZVOL_OP_STATUS_OK;
 						REPLICA_LOG("Volume name:%s blocksize:%d timeout:%d.. replica(%d)\n",
 						    open_ptr->volname, open_ptr->tgt_block_size, open_ptr->timeout, ctrl_port);

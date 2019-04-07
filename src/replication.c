@@ -1131,6 +1131,7 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	rio_payload->tgt_block_size = spec->blocklen;
 	strncpy(rio_payload->volname, spec->volname,
 	    sizeof (rio_payload->volname));
+	rio_payload->replication_factor = spec->replication_factor;
 
 	REPLICA_LOG("replica(%lu) connected successfully from %s:%d\n",
 	    replica->zvol_guid, replica->ip, replica->port);
