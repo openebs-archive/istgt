@@ -1127,14 +1127,16 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 
 	rio_payload = (zvol_op_open_data_t *) malloc(
 	    sizeof (zvol_op_open_data_t));
+	memset(rio_payload, 0, sizeof (zvol_op_open_data_t));
 	rio_payload->timeout = (3 * replica_timeout);
 	rio_payload->tgt_block_size = spec->blocklen;
 	strncpy(rio_payload->volname, spec->volname,
 	    sizeof (rio_payload->volname));
 	rio_payload->replication_factor = spec->replication_factor;
 
-	REPLICA_LOG("replica(%lu) connected successfully from %s:%d\n",
-	    replica->zvol_guid, replica->ip, replica->port);
+	REPLICA_LOG("replica(%lu) connected successfully from %s:%d rep: %d\n",
+	    replica->zvol_guid, replica->ip, replica->port,
+	    rio_payload->replication_factor);
 
 	if (write(replica->iofd, rio_hdr, sizeof (*rio_hdr)) !=
 	    sizeof (*rio_hdr)) {
