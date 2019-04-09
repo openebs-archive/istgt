@@ -1966,7 +1966,7 @@ update_replica_status(spec_t *spec, replica_t *replica)
 			}
 
 			assert(r1 != NULL);
-			assert(spec->rebuild_info.dw_replica == replica);
+			assert((spec->rebuild_info.dw_replica == replica) || (spec->replication_factor == 1));
 			spec->rebuild_info.dw_replica = NULL;
 			spec->rebuild_info.healthy_replica = NULL;
 			spec->rebuild_info.rebuild_in_progress = false;

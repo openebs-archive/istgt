@@ -610,6 +610,8 @@ again:
 					mgmt_data = malloc(mgmtio->len);
 					count = test_read_data(events[i].data.fd, (uint8_t *)mgmt_data, mgmtio->len);
 					if (count < 0) {
+						REPLICA_ERRLOG("Failed to read from %d for len %lu and opcode %d\n",
+						    events[i].data.fd, mgmtio->len, mgmtio->opcode);
 						rc = -1;
 						goto error;
 					} else if ((uint64_t)count != mgmtio->len) {
@@ -666,6 +668,8 @@ again:
 					if (read_rem_data) {
 						count = test_read_data(events[i].data.fd, (uint8_t *)data + recv_len, total_len - recv_len);
 						if (count < 0) {
+							REPLICA_ERRLOG("Failed to read from datafd %d with rem_data for opcode: %d\n",
+							    iofd, io_hdr->opcode);
 							rc = -1;
 							goto error;
 						} else if ((uint64_t)count < (total_len - recv_len)) {
@@ -682,6 +686,7 @@ again:
 					} else if (read_rem_hdr) {
 						count = test_read_data(events[i].data.fd, (uint8_t *)io_hdr + recv_len, total_len - recv_len);
 						if (count < 0) {
+							REPLICA_ERRLOG("Failed to read from datafd %d with rem_hdr\n", iofd);
 							rc = -1;
 							goto error;
 						} else if ((uint64_t)count < (total_len - recv_len)) {
@@ -696,6 +701,7 @@ again:
 					} else {
 						count = test_read_data(events[i].data.fd, (uint8_t *)io_hdr, io_hdr_len);
 						if (count < 0) {
+							REPLICA_ERRLOG("Failed to read from datafd %d\n", iofd);
 							rc = -1;
 							goto error;
 						} else if ((uint64_t)count < io_hdr_len) {
@@ -717,6 +723,8 @@ again:
 							nbytes = 0;
 							count = test_read_data(events[i].data.fd, (uint8_t *)data, io_hdr->len);
 							if (count < 0) {
+								REPLICA_ERRLOG("Failed to read from datafd %d with opcode %d\n",
+								    iofd, io_hdr->opcode);
 								rc = -1;
 								goto error;
 							} else if ((uint64_t)count < io_hdr->len) {
