@@ -1146,6 +1146,7 @@ run_rebuild_time_test_in_multiple_replicas()
 						break
 					fi
 				elif [ $rt -le 40 ]; then
+					: # This kind of checks are required when eval cmd fails
 				else
 					echo "replication factor(5) test failed"
 					exit 1
