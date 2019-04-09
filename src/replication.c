@@ -1131,6 +1131,7 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	rio_payload->tgt_block_size = spec->blocklen;
 	strncpy(rio_payload->volname, spec->volname,
 	    sizeof (rio_payload->volname));
+	rio_payload->replication_factor = spec->replication_factor;
 
 	REPLICA_LOG("replica(%lu) connected successfully from %s:%d\n",
 	    replica->zvol_guid, replica->ip, replica->port);
@@ -1965,7 +1966,7 @@ update_replica_status(spec_t *spec, replica_t *replica)
 			}
 
 			assert(r1 != NULL);
-			assert(spec->rebuild_info.dw_replica == replica);
+			assert((spec->rebuild_info.dw_replica == replica) || (spec->replication_factor == 1));
 			spec->rebuild_info.dw_replica = NULL;
 			spec->rebuild_info.healthy_replica = NULL;
 			spec->rebuild_info.rebuild_in_progress = false;

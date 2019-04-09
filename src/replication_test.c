@@ -251,7 +251,6 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 	iovec[0].iov_len = sizeof (zvol_io_hdr_t);
 
 	if (opcode == ZVOL_OPCODE_SNAP_DESTROY) {
-
 		iovec_count = 1;
 		mgmt_ack_hdr->status = (random() % 2) ? ZVOL_OP_STATUS_FAILED : ZVOL_OP_STATUS_OK;
 		mgmt_ack_hdr->len = 0;
@@ -283,6 +282,11 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 		iovec[1].iov_base = zrepl_status;
 		iovec[1].iov_len = sizeof (zrepl_status_ack_t);
 	} else if (opcode == ZVOL_OPCODE_START_REBUILD) {
+		if (zrepl_status->state != ZVOL_STATUS_DEGRADED) {
+			REPLICA_ERRLOG("START_REBUILD is on invalid repl "
+			    "status %d\n", zrepl_status->state);
+			exit(1);
+		}
 		zrepl_status->rebuild_status = ZVOL_REBUILDING_SNAP;
 		mgmt_ack_hdr->len = 0;
 		iovec_count = 1;
@@ -606,6 +610,8 @@ again:
 					mgmt_data = malloc(mgmtio->len);
 					count = test_read_data(events[i].data.fd, (uint8_t *)mgmt_data, mgmtio->len);
 					if (count < 0) {
+						REPLICA_ERRLOG("Failed to read from %d for len %lu and opcode %d\n",
+						    events[i].data.fd, mgmtio->len, mgmtio->opcode);
 						rc = -1;
 						goto error;
 					} else if ((uint64_t)count != mgmtio->len) {
@@ -662,6 +668,8 @@ again:
 					if (read_rem_data) {
 						count = test_read_data(events[i].data.fd, (uint8_t *)data + recv_len, total_len - recv_len);
 						if (count < 0) {
+							REPLICA_ERRLOG("Failed to read from datafd %d with rem_data for opcode: %d\n",
+							    iofd, io_hdr->opcode);
 							rc = -1;
 							goto error;
 						} else if ((uint64_t)count < (total_len - recv_len)) {
@@ -678,6 +686,7 @@ again:
 					} else if (read_rem_hdr) {
 						count = test_read_data(events[i].data.fd, (uint8_t *)io_hdr + recv_len, total_len - recv_len);
 						if (count < 0) {
+							REPLICA_ERRLOG("Failed to read from datafd %d with rem_hdr\n", iofd);
 							rc = -1;
 							goto error;
 						} else if ((uint64_t)count < (total_len - recv_len)) {
@@ -692,6 +701,7 @@ again:
 					} else {
 						count = test_read_data(events[i].data.fd, (uint8_t *)io_hdr, io_hdr_len);
 						if (count < 0) {
+							REPLICA_ERRLOG("Failed to read from datafd %d\n", iofd);
 							rc = -1;
 							goto error;
 						} else if ((uint64_t)count < io_hdr_len) {
@@ -713,6 +723,8 @@ again:
 							nbytes = 0;
 							count = test_read_data(events[i].data.fd, (uint8_t *)data, io_hdr->len);
 							if (count < 0) {
+								REPLICA_ERRLOG("Failed to read from datafd %d with opcode %d\n",
+								    iofd, io_hdr->opcode);
 								rc = -1;
 								goto error;
 							} else if ((uint64_t)count < io_hdr->len) {
@@ -727,6 +739,10 @@ again:
 
 					if (io_hdr->opcode == ZVOL_OPCODE_OPEN) {
 						open_ptr = (zvol_op_open_data_t *)data;
+						if (open_ptr->replication_factor == 1) {
+							zrepl_status->state = ZVOL_STATUS_HEALTHY;
+							zrepl_status->rebuild_status = ZVOL_REBUILDING_DONE;
+						}
 						io_hdr->status = ZVOL_OP_STATUS_OK;
 						REPLICA_LOG("Volume name:%s blocksize:%d timeout:%d.. replica(%d)\n",
 						    open_ptr->volname, open_ptr->tgt_block_size, open_ptr->timeout, ctrl_port);
