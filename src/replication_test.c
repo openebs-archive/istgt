@@ -736,7 +736,7 @@ again:
 							read_rem_data = false;
 						}
 					}
-
+execute_io:
 					if (io_hdr->opcode == ZVOL_OPCODE_OPEN) {
 						open_ptr = (zvol_op_open_data_t *)data;
 						if (open_ptr->replication_factor == 1) {
@@ -744,10 +744,10 @@ again:
 							zrepl_status->rebuild_status = ZVOL_REBUILDING_DONE;
 						}
 						io_hdr->status = ZVOL_OP_STATUS_OK;
-						REPLICA_LOG("Volume name:%s blocksize:%d timeout:%d.. replica(%d)\n",
-						    open_ptr->volname, open_ptr->tgt_block_size, open_ptr->timeout, ctrl_port);
+						REPLICA_LOG("Volume name:%s blocksize:%d timeout:%d.. replica(%d) state: %d\n",
+						    open_ptr->volname, open_ptr->tgt_block_size, open_ptr->timeout, ctrl_port,
+						    zrepl_status->state);
 					}
-execute_io:
 					if ((io_cnt > 0) && (io_hdr->opcode == ZVOL_OPCODE_WRITE ||
 							io_hdr->opcode == ZVOL_OPCODE_READ)) {
 						io_cnt --;

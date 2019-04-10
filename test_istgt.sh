@@ -1209,6 +1209,7 @@ run_rebuild_time_test_in_multiple_replicas()
 				exit 1
 			fi
 		fi
+		sleep 2
 	done
 
 	pkill -9 -P $replica1_pid
