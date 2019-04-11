@@ -975,7 +975,7 @@ mock_repl(void *args)
 			32, 0)) < 0) {
 		REPLICA_ERRLOG("conn_listen() failed, errorno:%d", errno);
 		abort();
-		}
+	}
 
 	// Connect to controller to start handshake and connect to epoll
 	while ((rargs->mgmtfd = mgmtfd =
@@ -1481,8 +1481,7 @@ main(int argc, char **argv)
 	wait_for_mock_clients();
 
 	create_mock_replicas(spec->replication_factor, spec->volname);
-	pthread_create(&rebuild_test_thread, NULL,
-	&rebuild_test, (void *)test_args);
+	pthread_create(&rebuild_test_thread, NULL, &rebuild_test, (void *)test_args);
 
 	MTX_LOCK(&test_args->test_mtx);
 	pthread_cond_wait(&test_args->test_state_cv, &test_args->test_mtx);

@@ -1212,6 +1212,7 @@ write_open_opcode(spec_t *spec, uint64_t io_seq, replica_t *replica)
 		goto replica_error;
 	}
 
+	REPLICA_ERRLOG("reading open for %d %p\n", replica->port, replica);
 	if (read(replica->iofd, rio_hdr, sizeof (*rio_hdr)) !=
 	    sizeof (*rio_hdr)) {
 		REPLICA_ERRLOG("failed to read data-open response from "
@@ -1366,10 +1367,13 @@ send_open_opcode(spec_t *spec, uint64_t io_seq)
 
 	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 
+	REPLICA_ERRLOG("doing again..");
 	TAILQ_FOREACH_SAFE(replica, &spec->rwaitq, r_waitnext, treplica) {
 		if (replica->ip == NULL)
 			continue;
 		if (replica->quorum == 0)
+			continue;
+		if (replica->disconnect_conn == 1)
 			continue;
 		rc = send_replica_open_opcode(spec, io_seq, replica);
 		if (rc != 0) {
@@ -1389,6 +1393,8 @@ send_open_opcode(spec_t *spec, uint64_t io_seq)
 		return 0;
 	TAILQ_FOREACH_SAFE(replica, &spec->rwaitq, r_waitnext, treplica) {
 		if (replica->ip == NULL)
+			continue;
+		if (replica->disconnect_conn == 1)
 			continue;
 		rc = send_replica_open_opcode(spec, io_seq, replica);
 		if (rc != 0) {

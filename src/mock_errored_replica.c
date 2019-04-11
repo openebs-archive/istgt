@@ -709,6 +709,7 @@ try_again:
 					rdata->replica_status = ZVOL_STATUS_HEALTHY;
 			} else if (events[i].data.fd == sfd) {
 				iofd = accept(sfd, NULL, 0);
+				REPLICA_ERRLOG("iofd %d for replica %d", iofd, replica_port);
 				if (iofd == -1) {
 					if((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
 						break;
@@ -879,12 +880,15 @@ error:
 
 	if (mgmtfd != -1) {
 		(void) epoll_ctl(epfd, EPOLL_CTL_DEL, mgmtfd, NULL);
+		shutdown(mgmtfd, SHUT_RDWR);
 		close(mgmtfd);
 		mgmtfd = -1;
 	}
 
 	if (iofd != -1) {
 		(void) epoll_ctl(epfd, EPOLL_CTL_DEL, iofd, NULL);
+		REPLICA_ERRLOG("shutdown iofd of port %d\n", replica_port);
+		shutdown(iofd, SHUT_RDWR);
 		close(iofd);
 		iofd = -1;
 	}
