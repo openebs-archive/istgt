@@ -6480,14 +6480,6 @@ istgt_create_conn(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock, struct sockaddr 
 		ISTGT_ERRLOG("istgt_set_sendtimeo() failed\n");
 		goto error_return;
 	}
-#if defined(ISTGT_USE_IOVEC)
-	/* set low water mark */
-	rc = istgt_set_recvlowat(conn->sock, ISCSI_BHS_LEN);
-	if (rc != 0) {
-		ISTGT_ERRLOG("istgt_set_recvlowat() failed\n");
-		goto error_return;
-	}
-#endif
 
 	rc = pipe(conn->task_pipe);
 	if (rc != 0) {
