@@ -487,7 +487,7 @@ run_lu_rf_test ()
 	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev -q -r &
 	replica1_pid=$!
 
-	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V $replica2_vdev -q  -r &
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V $replica2_vdev -q -r &
 	replica2_pid=$!
 
 	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V $replica3_vdev -q -r &
@@ -586,26 +586,46 @@ wait_for_healthy_replicas()
 	if [ $cnt -ne $no_of_replicas ]
 	then
 		for (( i = 0; i < 100; i++ )) do
-			sleep 3
 			cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[].Mode' | grep -w Healthy"
 			cnt=$(eval $cmd | wc -l)
 			if [ $cnt -eq $no_of_replicas ]
 			then
 				break
 			fi
+			sleep 3
 		done
 	fi
 
 	if [ $cnt -ne $no_of_replicas ]; then
+		$ISTGTCONTROL -q REPLICA vol1
 		echo "Health check is failed expected healthy replica count $no_of_replicas but got $cnt"
 	    	exit 1
 	fi
 
 	echo "Health state check is passed"
 
-	check_degraded_quorum 0 0
+	check_degraded_quorum 0 $no_of_replicas
 }
 
+## waits for volume to be degraded for 5 mins
+wait_for_degraded_vol()
+{
+	cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].status'"
+
+	for (( i = 0; i < 100; i++ )) do
+		rt=$(eval $cmd)
+		if [ ${rt} == "\"Degraded\"" ]; then
+			break
+		fi
+		sleep 3
+	done
+
+	if [ ${rt} != "\"Degraded\"" ]; then
+		$ISTGTCONTROL -q REPLICA vol1
+		echo "volume is not turned to degraded"
+	    	exit 1
+	fi
+}
 
 ## check_degraded_quorum used to check the degraded replica count and quorum value count.
 check_degraded_quorum()
@@ -615,21 +635,25 @@ check_degraded_quorum()
 	local cnt=0
 
 	## Check the no.of degraded replicas
+	$ISTGTCONTROL -q REPLICA vol1
 	cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[].Mode'"
 	cnt=$(eval $cmd | grep -w Degraded | wc -l)
 
 	if [ $cnt -ne $expected_degraded_count ]
 	then
+		$ISTGTCONTROL -q REPLICA vol1
 		echo "Degraded replica count is not matched: expected degraded replica count $expected_rep_count and got $cnt"
 		exit 1
 	fi
 
 	## Check for quorum replicas. It takes approximately another 10 seconds to set quorum to 1 after rebuilding
 	cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[].quorum'"
-	cnt=$(eval $cmd | grep -w 0 | wc -l)
+	cnt=$(eval $cmd | grep -vw 0 | wc -l)
 
 	if [ $cnt -ne $expected_quorum_count ]
 	then
+		$ISTGTCONTROL -q REPLICA vol1
+		eval $cmd
 		echo "Quorum test failed: expected quorum count is $expected_quorum_count and got $cnt"
 		exit 1
 	fi
@@ -654,8 +678,8 @@ run_quorum_test()
 	local replica6_ip="127.0.0.1"
 	local replica1_vdev="/tmp/test_vol1"
 
-	REPLICATION_FACTOR=3
-	CONSISTENCY_FACTOR=2
+	REPLICATION_FACTOR=4
+	CONSISTENCY_FACTOR=3
 
 	setup_test_env
 
@@ -681,7 +705,7 @@ run_quorum_test()
 	sleep 2
 
 	# As long as we are not running any IOs we can use the same vdev file
-	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica5_ip" -P "$replica5_port" -V $replica1_vdev &
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica5_ip" -P "$replica5_port" -V $replica1_vdev -q &
 	replica5_pid=$!
 	sleep 2
 
@@ -690,20 +714,7 @@ run_quorum_test()
 	replica6_pid=$!
 	sleep 1
 
-	## It should fail to connect because the replica count is > MAXREPLICA
-	if ps -p $replica6_pid > /dev/null 2>&1
-	then
-		echo "Non-quorum-replica connection test is failed(1 quorum + 5 non-quorum)"
-		cat $LOGFILE
-		exit 1
-	else
-		echo "Non-quorum-replica connection test is passed(1 quorum + 5 non-quorum)"
-	fi
-
-	## After connecting it should have 5 as Degraded and 4 quorum value as 0.
-	check_degraded_quorum 5 4
-
-	# Status check with (1 Quorum + 4 Non Quorum replicas) should be ofline.
+	# Status check with (2 Quorum + 3 Non Quorum replicas) should be ofline.
 	cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].status'"
 
 	rt=$(eval $cmd)
@@ -719,6 +730,21 @@ run_quorum_test()
 	replica2_pid=$!
 	sleep 2
 
+	wait_for_degraded_vol
+
+	## After connecting it should have 5 as Degraded and 3 quorum value
+	check_degraded_quorum 5 3
+
+	## 6th should fail to make data connect because the replica count is > MAXREPLICA
+	if ps -p $replica6_pid > /dev/null 2>&1
+	then
+		echo "Non-quorum-replica connection test is failed(3 quorum + 3 non-quorum)"
+		cat $LOGFILE
+		exit 1
+	else
+		echo "Non-quorum-replica connection test is passed(3 quorum + 3 non-quorum)"
+	fi
+
 	rt=$(eval $cmd)
 	if [ ${rt} != "\"Degraded\"" ]; then
 		$ISTGTCONTROL -q REPLICA vol1
@@ -727,7 +753,7 @@ run_quorum_test()
 	fi
 
 	# Pass the expected healthy replica count
-	wait_for_healthy_replicas 3
+	wait_for_healthy_replicas 4
 
 	pkill -9 -P $replica1_pid
 	pkill -9 -P $replica2_pid

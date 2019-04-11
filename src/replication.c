@@ -220,11 +220,11 @@ do {									\
 	}								\
 }
 
-#define	CHECK_FOR_REPLICA_PRESENCE(_repl, _spec, _res)			\
+#define	CHECK_FOR_REPLICA_PRESENCE(_repl, _spec, _rlist, _res)		\
 do {									\
 	replica_t *t_r;							\
 	_res = FALSE;							\
-	TAILQ_FOREACH(t_r, &_spec->rq, r_next) {			\
+	TAILQ_FOREACH(t_r, &_spec->_rlist, r_next) {			\
 		if (t_r == _repl) {					\
 			_res = TRUE;					\
 			break;						\
@@ -797,6 +797,7 @@ can_replica_connect(spec_t *spec, replica_t *replica)
 	return ret;
 }
 
+#define	INITIAL_IOSEQ_NUM	10
 /*
  * Update vol state based on the connected number of replicas and their status
  */
@@ -824,7 +825,7 @@ update_volstate(spec_t *spec)
 		 * is online very first time or boot-back after crash.
 		 */
 		if (spec->io_seq == 0) {
-			max = (max == 0) ? 10 : max + (1<<20);
+			max = (max == 0) ? INITIAL_IOSEQ_NUM : max + (1<<20);
 			spec->io_seq = max;
 		}
 		spec->ready = true;
@@ -1061,18 +1062,12 @@ error:
 
 /*
  * update_replica_entry updates replica entry with IP/port,
- * perform handshake on data connection
- * starts replica thread to send/receive IOs to/from replica
- * removes replica from spec's rwaitq and adds it to spec's rq
  */
-int
+static int
 update_replica_entry(spec_t *spec, replica_t *replica)
 {
-	int rc;
-	pthread_t r_thread;
 	zvol_io_hdr_t *ack_hdr;
 	mgmt_ack_t *ack_data;
-	int i;
 	replica_t *rep = NULL;
 
 	ack_hdr = replica->mgmt_io_resp_hdr;	
@@ -1127,14 +1122,20 @@ update_replica_entry(spec_t *spec, replica_t *replica)
 	memset(replica->io_resp_hdr, 0, sizeof (zvol_io_hdr_t));
 	replica->io_state = READ_IO_RESP_HDR;
 	replica->io_read = 0;
+	clock_gettime(CLOCK_MONOTONIC_COARSE, &replica->create_time);
 	return (0);
 }
 
+/*
+ * returns true if req number of quorum replicas are connected.
+ * Fills max of all replica's checkpointed_io_seq in io_seq
+ */
 static bool
 can_send_open_opcode(spec_t *spec, uint64_t *io_seq)
 {
 	uint64_t max = 0;
 	int quorum_count = 0;
+	replica_t *replica;
 
 	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 
@@ -1164,6 +1165,9 @@ can_send_open_opcode(spec_t *spec, uint64_t *io_seq)
 	return false;
 }
 
+/*
+ * perform handshake on data connection
+ */
 static int
 write_open_opcode(spec_t *spec, uint64_t io_seq, replica_t *replica)
 {
@@ -1230,11 +1234,15 @@ replica_error:
 
 /*
  * spec rq_mtx lock is required for later can_add_replica checks atleast
+ * starts replica thread to send/receive IOs to/from replica
+ * removes replica from spec's rwaitq and adds it to spec's rq
  */
 static int
 send_replica_open_opcode(spec_t *spec, uint64_t io_seq, replica_t *replica)
 {
-
+	int iofd;
+	int rc, i;
+	pthread_t r_thread;
 	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 
 	if((iofd = cstor_ops.conn_connect(replica->ip, replica->port)) < 0) {
@@ -1249,17 +1257,17 @@ send_replica_open_opcode(spec_t *spec, uint64_t io_seq, replica_t *replica)
 	if (rc != 0)
 		goto replica_error;
 
-	if (init_mempool(&replica->cmdq, rcmd_mempool_count, 0, 0,
-	    "replica_cmd_mempool", NULL, NULL, NULL, false)) {
-		REPLICA_ERRLOG("Failed to initialize replica(%lu) cmdq\n",
-		    replica->zvol_guid);
-		goto replica_error;
-	}
-
 	rc = make_socket_non_blocking(iofd);
 	if (rc == -1) {
 		REPLICA_ERRLOG("make_socket_non_blocking() failed for"
-		    " replica(%lu)\n", replica->zvol_guid);
+		    " replica(%lu) err: %d\n", replica->zvol_guid, rc);
+		goto replica_error;
+	}
+
+	if ((rc = init_mempool(&replica->cmdq, rcmd_mempool_count, 0, 0,
+	    "replica_cmd_mempool", NULL, NULL, NULL, false)) != 0) {
+		REPLICA_ERRLOG("Failed to initialize replica(%lu) cmdq err: %d\n",
+		    replica->zvol_guid, rc);
 		goto replica_error;
 	}
 
@@ -1273,8 +1281,7 @@ send_replica_open_opcode(spec_t *spec, uint64_t io_seq, replica_t *replica)
 	}
 
 
-	rc = pthread_create(&r_thread, NULL, &replica_thread,
-			(void *)replica);
+	rc = pthread_create(&r_thread, NULL, &replica_thread, (void *)replica);
 	if (rc != 0) {
 		REPLICA_ERRLOG("pthread_create(r_thread) failed for "
 		    "replica(%lu)\n", replica->zvol_guid);
@@ -1299,7 +1306,7 @@ replica_error:
 		 * as this function doesn't run in parallel with handle_mgmt_conn
 		 * for given replica, its fine to set these values to -1 here.
 		 */
-error_out_replica:
+//error_out_replica:
 		replica->dont_free = 1;
 		replica->iofd = -1;
 		MTX_UNLOCK(&replica->r_mtx);
@@ -1308,6 +1315,15 @@ error_out_replica:
 		return -1;
 	}
 
+	/*
+	 * As above can_replica_connect check is done with lock,
+	 * below code is not required.
+	 * But, in first place, non_quorum becomes healthy in same thread.
+	 * So, no need of lock, correct? TODO
+	 * Ok, lock is required because remove is happening in data conn thread?
+	 * But, removal can happen only if it is added right?
+	 */
+#if 0
 	/*
 	 * After can_replica_connect check above, 
          * there might be any non_quorum replicas became healthy. 
@@ -1326,22 +1342,56 @@ error_out_replica:
 		    replica->zvol_guid);
 		goto error_out_replica;
 	}
+#endif
 	MTX_UNLOCK(&replica->r_mtx);
 	return 0;
 }
 
-
-int
-send_initial_open_opcode(spec_t *spec, uint64_t io_seq)
+/*
+ * spec's rq_mtx is required atleast when open_opcode is sent for third replica
+ * as already IOs might have got started.
+ * So, basically, lock is required here as luworkers, snap mgmt threads,
+ * stats threads access rq list.
+ * But, for initial open opcode, do we need lock? Correct?
+ * Accessing rq list needs lock as data thread might be deleting.
+ * But, no need of lock for accessing rwaitq right?
+ */
+static int
+send_open_opcode(spec_t *spec, uint64_t io_seq)
 {
-	replica_t *replica;
+	replica_t *replica, *treplica;
+	int rc;
 
 	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 
-	TAILQ_FOREACH(replica, &spec->rwaitq, r_waitnext) {
+	TAILQ_FOREACH_SAFE(replica, &spec->rwaitq, r_waitnext, treplica) {
+		if (replica->ip == NULL)
+			continue;
+		if (replica->quorum == 0)
+			continue;
 		rc = send_replica_open_opcode(spec, io_seq, replica);
 		if (rc != 0) {
-			revert in case of NOT maxof(consistency_factor, ...) met;
+			inform_mgmt_conn(replica);
+			continue;
+		}
+		TAILQ_REMOVE(&spec->rwaitq, replica, r_waitnext);
+
+		TAILQ_INSERT_TAIL(&spec->rq, replica, r_next);
+		spec->degraded_rcount++;
+
+		/* Update the volume ready state */
+		update_volstate(spec);
+	}
+
+	if (spec->ready == false)
+		return 0;
+	TAILQ_FOREACH_SAFE(replica, &spec->rwaitq, r_waitnext, treplica) {
+		if (replica->ip == NULL)
+			continue;
+		rc = send_replica_open_opcode(spec, io_seq, replica);
+		if (rc != 0) {
+			inform_mgmt_conn(replica);
+			continue;
 		}
 		TAILQ_REMOVE(&spec->rwaitq, replica, r_waitnext);
 
@@ -1350,11 +1400,11 @@ send_initial_open_opcode(spec_t *spec, uint64_t io_seq)
 			spec->degraded_rcount++;
 		} else
 			TAILQ_INSERT_TAIL(&spec->non_quorum_rq, replica, r_non_quorum_next);
+
+		/* Update the volume ready state */
+		update_volstate(spec);
 	}
 
-	/* Update the volume ready state */
-	update_volstate(spec);
-	clock_gettime(CLOCK_MONOTONIC_COARSE, &replica->create_time);
 	return 0;
 }
 
@@ -2114,7 +2164,7 @@ disconnect_all_non_quorum_replicas:
 int
 zvol_handshake(spec_t *spec, replica_t *replica)
 {
-	int rc, iofd;
+	int rc;
 	zvol_io_hdr_t *ack_hdr;
 	mgmt_ack_t *ack_data;
 	bool ret;
@@ -2143,12 +2193,21 @@ zvol_handshake(spec_t *spec, replica_t *replica)
 	MTX_LOCK(&spec->rq_mtx);
 	ret = can_send_open_opcode(spec, &io_seq);
 	if (ret == false) {
+		/* Not enough quorum replicas are connected */
 		MTX_UNLOCK(&spec->rq_mtx);
 		return 0;
 	}
 
-	rc = send_open_opcode(spec, io_seq);
+	send_open_opcode(spec, io_seq);
+	rc = 0;
+	CHECK_FOR_REPLICA_PRESENCE(replica, spec, rwaitq, ret);
 	MTX_UNLOCK(&spec->rq_mtx);
+
+	/*
+	 * for failure, replica will be part of rwaitq
+	 */
+	if (ret == true)
+		rc = -1;
 
 	return rc;
 }
@@ -2973,7 +3032,7 @@ retry_read:
 
 				MTX_LOCK(&spec->rq_mtx);
 				CHECK_FOR_REPLICA_PRESENCE(resp_replica, spec,
-				    replica_exists);
+				    rq, replica_exists);
 				if (replica_exists) {
 					inform_mgmt_conn(resp_replica);
 					REPLICA_ERRLOG("Disconnecting "
@@ -3473,7 +3532,7 @@ initialize_volume(spec_t *spec, int replication_factor, int consistency_factor)
 	rc = pthread_create(&deadlist_cleanup_thread, NULL, &cleanup_deadlist,
 			(void *)spec);
 	if (rc != 0) {
-		REPLICA_ERRLOG("pthread_create(replicator_thread) failed "
+		REPLICA_ERRLOG("pthread_create(deadlist_cleanup_thread) failed "
 		    "err(%d)\n", rc);
 		return -1;
 	}

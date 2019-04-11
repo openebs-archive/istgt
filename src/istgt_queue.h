@@ -80,6 +80,6 @@ void * istgt_queue_reverse_walk(ISTGT_QUEUE_Ptr head, void ** cookie);
 #ifdef __linux__
 #define	TAILQ_FOREACH_SAFE(var, head, field, tvar)                      \
 	for ((var) = TAILQ_FIRST((head));                               \
-		(var) && ((tvar) = TAILQ_NEXT((var), field), 1);            \
+		(var) && ((tvar) = TAILQ_NEXT((var), field), 1);        \
 		(var) = (tvar))
 #endif

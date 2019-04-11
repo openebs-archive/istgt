@@ -139,7 +139,6 @@ int handle_write_resp(spec_t *, replica_t *);
 int handle_read_resp(spec_t *, replica_t *);
 int update_replica_list(int, spec_t *, int);
 replica_t *create_replica_entry(spec_t *, int, int);
-int update_replica_entry(spec_t *, replica_t *, int);
 int handle_read_data_event(replica_t *);
 int handle_write_data_event(replica_t *replica);
 void update_volstate(spec_t *);

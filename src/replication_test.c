@@ -717,6 +717,7 @@ again:
 							nbytes = 0;
 							count = test_read_data(events[i].data.fd, (uint8_t *)data, io_hdr->len);
 							if (count < 0) {
+								REPLICA_LOG("failed to read for opcode: %d\n", io_hdr->opcode);
 								rc = -1;
 								goto error;
 							} else if ((uint64_t)count < io_hdr->len) {
