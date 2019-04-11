@@ -279,11 +279,12 @@ istgt_iscsi_read_pdu(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 	iovec[0].iov_len = 4 * pdu->total_ahs_len;
 
 	/* Header Digest */
-	iovec[1].iov_base = pdu->header_digest;
 	if (conn->header_digest) {
+		iovec[1].iov_base = pdu->header_digest;
 		iovec[1].iov_len = ISCSI_DIGEST_LEN;
 		total += ISCSI_DIGEST_LEN;
 	} else {
+		iovec[1].iov_base = NULL;
 		iovec[1].iov_len = 0;
 	}
 
@@ -313,11 +314,12 @@ istgt_iscsi_read_pdu(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 	iovec[2].iov_len = ISCSI_ALIGN(pdu->data_segment_len);
 
 	/* Data Digest */
-	iovec[3].iov_base = pdu->data_digest;
 	if (conn->data_digest && data_len != 0) {
+		iovec[3].iov_base = pdu->data_digest;
 		iovec[3].iov_len = ISCSI_DIGEST_LEN;
 		total += ISCSI_DIGEST_LEN;
 	} else {
+		iovec[3].iov_base = NULL;
 		iovec[3].iov_len = 0;
 	}
 
@@ -349,7 +351,7 @@ istgt_iscsi_read_pdu(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 		for (i = 0; i < 4; i++) {
 			if (iovec[i].iov_len != 0 && iovec[i].iov_len > (size_t)rc) {
 				iovec[i].iov_base
-					= (void *) (((uintptr_t)iovec[i].iov_base) + rc);
+					= (void *) (((char *)iovec[i].iov_base) + rc);
 				iovec[i].iov_len -= rc;
 				break;
 			} else {
@@ -680,8 +682,8 @@ istgt_iscsi_write_pdu_internal(CONN_Ptr conn, ISCSI_PDU_Ptr pdu, ISTGT_LU_CMD_Pt
 		rc = writev(conn->sock, &iovec[0], 5);
 		if (rc < 0) {
 			now = time(NULL);
-			ISTGT_ERRLOG("writev() failed (errno=%d,%s,time=%f) for opcode:0x%2.2x CSN:0x%x\n",
-				errno, conn->initiator_name, difftime(now, start), lu_cmd->cdb0, lu_cmd->CmdSN);
+			ISTGT_ERRLOG("writev() failed (errno=%d,%s,time=%f) for opcode:%d cdb:0x%2.2x CSN:0x%x\n",
+				errno, conn->initiator_name, difftime(now, start), opcode, lu_cmd->cdb0, lu_cmd->CmdSN);
 			return (-1);
 		}
 		nbytes -= rc;
@@ -5350,6 +5352,7 @@ snd_cleanup(void *arg)
 	ISTGT_WARNLOG("snd:%p thread_exit\n", arg);
 }
 
+#if 0
 static void
 worker_cleanup(void *arg)
 {
@@ -5428,6 +5431,7 @@ worker_cleanup(void *arg)
 	MTX_UNLOCK(&g_conns_mutex);
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "cancel cleanup UNLOCK\n");
 }
+#endif
 
 const char lu_task_typ[4][12] = {
 	"RESPONSE",
@@ -5724,7 +5728,7 @@ sender(void *arg)
 	pthread_set_name_np(slf, tinfo);
 #endif
 
-	pthread_cleanup_push(snd_cleanup, (void *)conn);
+//	pthread_cleanup_push(snd_cleanup, (void *)conn);
 	memset(&abstime, 0, sizeof (abstime));
 	/* handle DATA-IN/SCSI status */
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "sender loop start (%d)\n", conn->id);
@@ -5882,7 +5886,7 @@ sender(void *arg)
 //		MTX_UNLOCK(&conn->wpdu_mutex);
 	}
 	// MTX_UNLOCK(&conn->sender_mutex);
-	pthread_cleanup_pop(0);
+//	pthread_cleanup_pop(0);
 	ISTGT_NOTICELOG("sender loop ended (%d:%d:%d)\n", conn->id, conn->epfd, ntohs(conn->iport));
 	return (NULL);
 }
@@ -5929,22 +5933,21 @@ worker(void *arg)
 // #endif
 
 	events.data.fd = conn->sock;
-		events.events = EPOLLIN;
-		rc = epoll_ctl(epfd, EPOLL_CTL_ADD, conn->sock, &events);
-		if (rc == -1) {
+	events.events = EPOLLIN;
+	rc = epoll_ctl(epfd, EPOLL_CTL_ADD, conn->sock, &events);
+	if (rc == -1) {
 		ISTGT_ERRLOG("epoll_ctl() failed\n");
 		close(epfd);
 		return (NULL);
-		}
+	}
 	events.data.fd = conn->task_pipe[0];
-		events.events = EPOLLIN;
-		rc = epoll_ctl(epfd, EPOLL_CTL_ADD, conn->task_pipe[0], &events);
-		if (rc == -1) {
+	events.events = EPOLLIN;
+	rc = epoll_ctl(epfd, EPOLL_CTL_ADD, conn->task_pipe[0], &events);
+	if (rc == -1) {
 		ISTGT_ERRLOG("epoll_ctl() failed\n");
 		close(epfd);
 		return (NULL);
-		}
-
+	}
 
 	// TODO
 	// if (!conn->istgt->daemon) {
@@ -6019,7 +6022,7 @@ worker(void *arg)
 	conn->exec_lu_task = NULL;
 	lu_task = NULL;
 
-	pthread_cleanup_push(worker_cleanup, conn);
+//	pthread_cleanup_push(worker_cleanup, conn);
 	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
 
 	/* create sender thread */
@@ -6094,16 +6097,18 @@ worker(void *arg)
 
 		/* on socket */
 		if (events.data.fd == conn->sock) {
+			/* considered the half-close case i.e., (EPOLLRDHUP | EPOLLIN) */
 			if ((events.events & EPOLLERR) ||
 					(events.events & EPOLLHUP) ||
 					(!(events.events & EPOLLIN))) {
-				ISTGT_ERRLOG("close conn %d\n", errno);
+				ISTGT_ERRLOG("close conn events %d\n", events.events);
 				break;
 			}
 
 			rc = istgt_iscsi_read_pdu(conn, &conn->pdu);
 			if (rc < 0) {
 				if (errno == EAGAIN) {
+					ISTGT_ERRLOG("close conn %d %d", errno, events.events);
 					break;
 				}
 				if (conn->state != CONN_STATE_EXITING) {
@@ -6111,8 +6116,8 @@ worker(void *arg)
 				}
 				if (conn->state != CONN_STATE_RUNNING) {
 					if (errno == EINPROGRESS) {
-						sleep(1);
-						continue;
+						ISTGT_ERRLOG("iscsi_read_pdu shouldn't get EINPROGRESS");
+						break;
 					}
 					if (errno == ECONNRESET
 						|| errno == ETIMEDOUT) {
@@ -6139,7 +6144,6 @@ worker(void *arg)
 				break;
 			} else if (rc == 1) { // means successful logout ISCSI_OP_LOGOUT
 				ISTGT_TRACELOG(ISTGT_TRACE_ISCSI, "logout received\n");
-				break;
 			}
 
 			if (conn->pdu.ahs != NULL) {
@@ -6273,7 +6277,7 @@ worker(void *arg)
 
 	cleanup_exit:
 ;
-	pthread_cleanup_pop(0);
+//	pthread_cleanup_pop(0);
 	conn->state = CONN_STATE_EXITING;
 	if (conn->sess != NULL) {
 		lu = conn->sess->lu;
