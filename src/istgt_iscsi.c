@@ -5345,14 +5345,13 @@ wait_all_task(CONN_Ptr conn)
 		conn->id, conn->running_tasks);
 }
 
-
+#if 0
 static void
 snd_cleanup(void *arg)
 {
 	ISTGT_WARNLOG("snd:%p thread_exit\n", arg);
 }
 
-#if 0
 static void
 worker_cleanup(void *arg)
 {
