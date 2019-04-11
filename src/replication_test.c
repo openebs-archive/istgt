@@ -610,6 +610,8 @@ again:
 					mgmt_data = malloc(mgmtio->len);
 					count = test_read_data(events[i].data.fd, (uint8_t *)mgmt_data, mgmtio->len);
 					if (count < 0) {
+						REPLICA_ERRLOG("Failed to read from %d for len %lu and opcode %d\n",
+						    events[i].data.fd, mgmtio->len, mgmtio->opcode);
 						rc = -1;
 						goto error;
 					} else if ((uint64_t)count != mgmtio->len) {
@@ -666,6 +668,8 @@ again:
 					if (read_rem_data) {
 						count = test_read_data(events[i].data.fd, (uint8_t *)data + recv_len, total_len - recv_len);
 						if (count < 0) {
+							REPLICA_ERRLOG("Failed to read from datafd %d with rem_data for opcode: %d\n",
+							    iofd, io_hdr->opcode);
 							rc = -1;
 							goto error;
 						} else if ((uint64_t)count < (total_len - recv_len)) {
@@ -682,6 +686,7 @@ again:
 					} else if (read_rem_hdr) {
 						count = test_read_data(events[i].data.fd, (uint8_t *)io_hdr + recv_len, total_len - recv_len);
 						if (count < 0) {
+							REPLICA_ERRLOG("Failed to read from datafd %d with rem_hdr\n", iofd);
 							rc = -1;
 							goto error;
 						} else if ((uint64_t)count < (total_len - recv_len)) {
@@ -696,6 +701,7 @@ again:
 					} else {
 						count = test_read_data(events[i].data.fd, (uint8_t *)io_hdr, io_hdr_len);
 						if (count < 0) {
+							REPLICA_ERRLOG("Failed to read from datafd %d\n", iofd);
 							rc = -1;
 							goto error;
 						} else if ((uint64_t)count < io_hdr_len) {
@@ -717,7 +723,8 @@ again:
 							nbytes = 0;
 							count = test_read_data(events[i].data.fd, (uint8_t *)data, io_hdr->len);
 							if (count < 0) {
-								REPLICA_LOG("failed to read for opcode: %d\n", io_hdr->opcode);
+								REPLICA_ERRLOG("Failed to read from datafd %d with opcode %d\n",
+								    iofd, io_hdr->opcode);
 								rc = -1;
 								goto error;
 							} else if ((uint64_t)count < io_hdr->len) {
@@ -729,7 +736,7 @@ again:
 							read_rem_data = false;
 						}
 					}
-
+execute_io:
 					if (io_hdr->opcode == ZVOL_OPCODE_OPEN) {
 						open_ptr = (zvol_op_open_data_t *)data;
 						if (open_ptr->replication_factor == 1) {
@@ -737,10 +744,10 @@ again:
 							zrepl_status->rebuild_status = ZVOL_REBUILDING_DONE;
 						}
 						io_hdr->status = ZVOL_OP_STATUS_OK;
-						REPLICA_LOG("Volume name:%s blocksize:%d timeout:%d.. replica(%d)\n",
-						    open_ptr->volname, open_ptr->tgt_block_size, open_ptr->timeout, ctrl_port);
+						REPLICA_LOG("Volume name:%s blocksize:%d timeout:%d.. replica(%d) state: %d\n",
+						    open_ptr->volname, open_ptr->tgt_block_size, open_ptr->timeout, ctrl_port,
+						    zrepl_status->state);
 					}
-execute_io:
 					if ((io_cnt > 0) && (io_hdr->opcode == ZVOL_OPCODE_WRITE ||
 							io_hdr->opcode == ZVOL_OPCODE_READ)) {
 						io_cnt --;

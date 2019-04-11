@@ -1062,11 +1062,19 @@ run_rebuild_time_test_in_single_replica()
 					$ISTGTCONTROL -q REPLICA vol1
 					echo "volume status is supposed to be 4"
 					exit 1
+				elif [ ${rt} == "\"Healthy\"" ]; then
+					break
+				else
+					echo "volume status is not proper"
+					exit 1
 				fi
-				break
 			fi
+		elif [ $rt -le 20 ]; then
+			sleep 10
+		else
+			echo "replication factor(4) test failed"
+			exit 1
 		fi
-		sleep 10
 	done
 	pkill -9 -P $replica1_pid
 	stop_istgt
@@ -1163,6 +1171,11 @@ run_rebuild_time_test_in_multiple_replicas()
 						done_test=1
 						break
 					fi
+				elif [ $rt -le 40 ]; then
+					: # This kind of checks are required when eval cmd fails
+				else
+					echo "replication factor(5) test failed"
+					exit 1
 				fi
 			else
 				if [ $rt -le 30 ]; then
@@ -1173,9 +1186,12 @@ run_rebuild_time_test_in_multiple_replicas()
 						echo "replication factor(3) test failed"
 						exit 1
 					fi
-				else
+				elif [ $rt -gt 30 ]; then
 					done_test=1
 					break
+				else
+					echo "replication factor(6) test failed"
+					exit 1
 				fi
 			fi
 		done
@@ -1212,9 +1228,14 @@ run_rebuild_time_test_in_multiple_replicas()
 				$ISTGTCONTROL -q REPLICA vol1
 				echo "volume status is supposed to be 3"
 				exit 1
+			elif [ ${rstatus} == "\"Healthy\"" ]; then
+				break
+			else
+				echo "replication factor(7) test failed"
+				exit 1
 			fi
-			break
 		fi
+		sleep 2
 	done
 
 	pkill -9 -P $replica1_pid
