@@ -766,11 +766,12 @@ get_non_quorum_replica_count(spec_t *spec)
  * This functions returns true if it can be allowed, else, false
  * This should also return false if replication_factor number of quorum replicas
  * are connected.
+ * This also makes sure that there is enough room for quorum replicas to connect
  */
 static bool
 can_replica_connect(spec_t *spec, replica_t *replica)
 {
-	int replica_count, non_quorum_count;
+	int replica_count, non_quorum_count, max_quorum, min_req_quorum;
 	bool ret = true;
 
 	ASSERT(MTX_LOCKED(&spec->rq_mtx));
@@ -783,8 +784,11 @@ can_replica_connect(spec_t *spec, replica_t *replica)
 		    spec->degraded_rcount, spec->replication_factor);
 		ret = false;
 	} else {
+		min_req_quorum = MAX_OF(spec->replication_factor - spec->consistency_factor + 1,
+		    spec->consistency_factor);
+		max_quorum = MAX_OF(min_req_quorum, replica_count);
 		non_quorum_count = get_non_quorum_replica_count(spec);
-		if ((non_quorum_count + replica_count) >= MAXREPLICA) {
+		if ((non_quorum_count + max_quorum) >= MAXREPLICA) {
 			REPLICA_ERRLOG("erroring replica(%s:%d) since "
 			    "non_quorum: %d healthy: %d degraded: %d are"
 			    " connected >= %d", replica->ip, replica->port,
@@ -1103,20 +1107,20 @@ update_replica_entry(spec_t *spec, replica_t *replica)
 		replica->ip = NULL;
 		return -1;
 	}
+#ifdef	DEBUG
 	TAILQ_FOREACH(rep, &spec->rwaitq, r_waitnext) {
 		if (replica == rep)
 			break;
 	}
+#endif
 	MTX_UNLOCK(&spec->rq_mtx);
-
+#if DEBUG
 	if (rep != replica) {
 		REPLICA_ERRLOG("replica %s with handshake resp is NOT part of "
 		    "waitlist", replica->ip);
-		free(replica->ip);
-		replica->ip = NULL;
-		return (-1);
+		abort();
 	}
-
+#endif
 	replica->spec = spec;
 	replica->io_resp_hdr = (zvol_io_hdr_t *) malloc(sizeof (zvol_io_hdr_t));
 	memset(replica->io_resp_hdr, 0, sizeof (zvol_io_hdr_t));
@@ -1137,23 +1141,35 @@ can_send_open_opcode(spec_t *spec, uint64_t *io_seq)
 	int quorum_count = 0;
 	replica_t *replica;
 
-	ASSERT(MTX_LOCKED(&spec->rq_mtx));
-
+	MTX_LOCK(&spec->rq_mtx);
 	TAILQ_FOREACH(replica, &spec->rwaitq, r_waitnext) {
-		if (replica->quorum == 1)
-			quorum_count++;
+		/*
+		 * Need to count only quorum replicas, and also,
+		 * this makes sure there is handshake response
+		 */
+		if (replica->quorum == 1) {
+			/*
+			 * count only replicas that are not
+			 * marked for disconnects
+			 */
+			if (replica->disconnect_conn == 0)
+				quorum_count++;
+		}
 		if (max < replica->initial_checkpointed_io_seq)
 			max = replica->initial_checkpointed_io_seq;
 	}
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
-		if (replica->quorum == 1)
-			quorum_count++;
+		if (replica->quorum == 1) {
+			if (replica->disconnect_conn == 0)
+				quorum_count++;
+		}
 		if (max < replica->initial_checkpointed_io_seq)
 			max = replica->initial_checkpointed_io_seq;
 	}
 
 	if (max < spec->io_seq)
 		max = spec->io_seq;
+	MTX_UNLOCK(&spec->rq_mtx);
 
 	if (max == 0)
 		max = INITIAL_IOSEQ_NUM;
@@ -1178,6 +1194,23 @@ write_open_opcode(spec_t *spec, uint64_t io_seq, replica_t *replica)
 	rio_hdr = (zvol_io_hdr_t *) malloc(sizeof (zvol_io_hdr_t));
 	memset(rio_hdr, 0, sizeof (zvol_io_hdr_t));
 	rio_hdr->opcode = ZVOL_OPCODE_OPEN;
+
+	/*
+	 * If spec is ready, IOs can happen while sending this opcode.
+	 * If io_seq is sent as INITIAL_IOSEQ_NUM, replica can mark the
+	 * volume as healthy, where as, IOs might have happened after
+	 * sending this opcode.
+	 * So, change the io_seq so that replica will not mark volume as
+	 * healthy.
+	 * No need of lock as spec->ready becomes true in this thread.
+	 */
+	if (spec->ready == true) {
+		if (io_seq == INITIAL_IOSEQ_NUM) {
+			REPLICA_LOG("changing io_seq for replica %s",
+			    replica->ip);
+			io_seq++;
+		}
+	}
 	rio_hdr->io_seq = io_seq;
 	rio_hdr->offset = 0;
 	rio_hdr->len = sizeof (zvol_op_open_data_t);
@@ -1192,9 +1225,9 @@ write_open_opcode(spec_t *spec, uint64_t io_seq, replica_t *replica)
 	    sizeof (rio_payload->volname));
 	rio_payload->replication_factor = spec->replication_factor;
 
-	REPLICA_LOG("replica(%lu) connected successfully from %s:%d rep: %d\n",
-	    replica->zvol_guid, replica->ip, replica->port,
-	    rio_payload->replication_factor);
+	REPLICA_LOG("replica(%lu) connected successfully from %s:%d rep: %d"
+	    " io_seq: %lu", replica->zvol_guid, replica->ip, replica->port,
+	    rio_payload->replication_factor, io_seq);
 
 	if (write(replica->iofd, rio_hdr, sizeof (*rio_hdr)) !=
 	    sizeof (*rio_hdr)) {
@@ -1246,7 +1279,6 @@ send_replica_open_opcode(spec_t *spec, uint64_t io_seq, replica_t *replica)
 	int iofd;
 	int rc, i;
 	pthread_t r_thread;
-	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 
 	if((iofd = cstor_ops.conn_connect(replica->ip, replica->port)) < 0) {
 		REPLICA_ERRLOG("Failed to open data connection for replica"
@@ -1274,14 +1306,17 @@ send_replica_open_opcode(spec_t *spec, uint64_t io_seq, replica_t *replica)
 		goto replica_error;
 	}
 
+	MTX_LOCK(&spec->rq_mtx);
 	if (can_replica_connect(spec, replica) == false) {
 		REPLICA_ERRLOG("Already healthy: %d degraded: %d non_quorum: %d "
 		    "replicas are connected.. disconnecting new replica(ip:%s port:%d "
 		    "guid:%lu) before replica thread creation\n", spec->healthy_rcount,
 		    spec->degraded_rcount, get_non_quorum_replica_count(spec),
 		    replica->ip, replica->port, replica->zvol_guid);
+		MTX_UNLOCK(&spec->rq_mtx);
 		goto replica_error;
 	}
+	MTX_UNLOCK(&spec->rq_mtx);
 
 
 	rc = pthread_create(&r_thread, NULL, &replica_thread, (void *)replica);
@@ -1309,7 +1344,6 @@ replica_error:
 		 * as this function doesn't run in parallel with handle_mgmt_conn
 		 * for given replica, its fine to set these values to -1 here.
 		 */
-//error_out_replica:
 		replica->dont_free = 1;
 		replica->iofd = -1;
 		MTX_UNLOCK(&replica->r_mtx);
@@ -1318,34 +1352,6 @@ replica_error:
 		return -1;
 	}
 
-	/*
-	 * As above can_replica_connect check is done with lock,
-	 * below code is not required.
-	 * But, in first place, non_quorum becomes healthy in same thread.
-	 * So, no need of lock, correct? TODO
-	 * Ok, lock is required because remove is happening in data conn thread?
-	 * But, removal can happen only if it is added right?
-	 */
-#if 0
-	/*
-	 * After can_replica_connect check above, 
-         * there might be any non_quorum replicas became healthy. 
-         * If (healthy+degraded) reaches replication_factor, 
-         * this replica addition won't be required. 
-         * So, same check required here with the spec lock.
-	 */
-	if (can_replica_connect(spec, replica) == false) {
-		replica->mgmt_eventfd2 = -1;
-		replica->quorum = 0;
-
-		REPLICA_ERRLOG("Already healthy: %d degraded: %d non_quorum: %d "
-		    "replicas are connected.. disconnecting new replica(ip:%s port:%d "
-		    "guid:%lu)\n", spec->healthy_rcount, spec->degraded_rcount,
-		    get_non_quorum_replica_count(spec), replica->ip, replica->port,
-		    replica->zvol_guid);
-		goto error_out_replica;
-	}
-#endif
 	MTX_UNLOCK(&replica->r_mtx);
 	return 0;
 }
@@ -1365,13 +1371,52 @@ send_open_opcode(spec_t *spec, uint64_t io_seq)
 	replica_t *replica, *treplica;
 	int rc;
 
-	ASSERT(MTX_LOCKED(&spec->rq_mtx));
-
 	REPLICA_ERRLOG("doing again..");
+	/*
+	 * No need of lock in access rwaitq, as, it gets updated in this thread
+	 */
 	TAILQ_FOREACH_SAFE(replica, &spec->rwaitq, r_waitnext, treplica) {
+		/* Yet to get the handshake response */
 		if (replica->ip == NULL)
 			continue;
-		if (replica->quorum == 0)
+		/*
+		 * We won't need this check as can_replica_connect takes care
+		 * of too many non-quorum replicas
+		 */
+//		if (replica->quorum == 0)
+//			continue;
+		/* Already disconnected replicas are not required */
+		if (replica->disconnect_conn == 1)
+			continue;
+		rc = send_replica_open_opcode(spec, io_seq, replica);
+		if (rc != 0) {
+			inform_mgmt_conn(replica);
+			continue;
+		}
+		MTX_LOCK(&spec->rq_mtx);
+		TAILQ_REMOVE(&spec->rwaitq, replica, r_waitnext);
+
+		TAILQ_INSERT_TAIL(&spec->rq, replica, r_next);
+		spec->degraded_rcount++;
+
+		/* Update the volume ready state */
+		update_volstate(spec);
+		MTX_UNLOCK(&spec->rq_mtx);
+	}
+#if 0
+	/*
+	 * First, send OPEN opcode to atleast req. number of replicas, i.e.,
+	 * max_of(r-c+1, c) to make volume RW.
+	 * And, return from here if spec is not ready, as there is no point
+	 * in doing OPEN with non-quorum replicas.
+	 * If ready is true during check, but, later, if it becomes false,
+	 * there is no problem as can_replica_connect takes care.
+	 */
+	if (spec->ready == false)
+		return 0;
+
+	TAILQ_FOREACH_SAFE(replica, &spec->rwaitq, r_waitnext, treplica) {
+		if (replica->ip == NULL)
 			continue;
 		if (replica->disconnect_conn == 1)
 			continue;
@@ -1380,26 +1425,11 @@ send_open_opcode(spec_t *spec, uint64_t io_seq)
 			inform_mgmt_conn(replica);
 			continue;
 		}
-		TAILQ_REMOVE(&spec->rwaitq, replica, r_waitnext);
-
-		TAILQ_INSERT_TAIL(&spec->rq, replica, r_next);
-		spec->degraded_rcount++;
-
-		/* Update the volume ready state */
-		update_volstate(spec);
-	}
-
-	if (spec->ready == false)
-		return 0;
-	TAILQ_FOREACH_SAFE(replica, &spec->rwaitq, r_waitnext, treplica) {
-		if (replica->ip == NULL)
-			continue;
-		if (replica->disconnect_conn == 1)
-			continue;
-		rc = send_replica_open_opcode(spec, io_seq, replica);
-		if (rc != 0) {
+		MTX_LOCK(&spec->rq_mtx);
+		if (spec->ready == false) {
+			MTX_UNLOCK(&spec->rq_mtx);
 			inform_mgmt_conn(replica);
-			continue;
+			break;
 		}
 		TAILQ_REMOVE(&spec->rwaitq, replica, r_waitnext);
 
@@ -1411,8 +1441,9 @@ send_open_opcode(spec_t *spec, uint64_t io_seq)
 
 		/* Update the volume ready state */
 		update_volstate(spec);
+		MTX_UNLOCK(&spec->rq_mtx);
 	}
-
+#endif
 	return 0;
 }
 
@@ -2198,11 +2229,9 @@ zvol_handshake(spec_t *spec, replica_t *replica)
 	if (rc != 0)
 		return -1;
 
-	MTX_LOCK(&spec->rq_mtx);
 	ret = can_send_open_opcode(spec, &io_seq);
 	if (ret == false) {
 		/* Not enough quorum replicas are connected */
-		MTX_UNLOCK(&spec->rq_mtx);
 		return 0;
 	}
 
