@@ -642,7 +642,7 @@ check_degraded_quorum()
 	if [ $cnt -ne $expected_degraded_count ]
 	then
 		$ISTGTCONTROL -q REPLICA vol1
-		echo "Degraded replica count is not matched: expected degraded replica count $expected_rep_count and got $cnt"
+		echo "Degraded replica count is not matched: expected degraded replica count $expected_degraded_count and got $cnt"
 		exit 1
 	fi
 

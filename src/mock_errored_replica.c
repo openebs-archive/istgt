@@ -232,7 +232,7 @@ verify_replica_removal(int replica_mgmt_sport)
 #ifdef	DEBUG
 	replica_t *r;
 	spec_t *spec = NULL;
-	int retry_count = 10;
+	int retry_count = 60;
 #endif
 
 	if (!replica_mgmt_sport)
@@ -995,7 +995,7 @@ shutdown_errored_replica(void)
 void
 wait_for_spec_ready(void)
 {
-	int count = 10;
+	int count = 15;
 	spec_t *spec = NULL;
 	
 	MTX_LOCK(&specq_mtx);

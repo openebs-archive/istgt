@@ -766,12 +766,13 @@ get_non_quorum_replica_count(spec_t *spec)
  * This functions returns true if it can be allowed, else, false
  * This should also return false if replication_factor number of quorum replicas
  * are connected.
- * This also makes sure that there is enough room for quorum replicas to connect
+ * This also makes sure that there is enough room for req number of quorum
+ * replicas to connect.
  */
 static bool
 can_replica_connect(spec_t *spec, replica_t *replica)
 {
-	int replica_count, non_quorum_count, max_quorum, min_req_quorum;
+	int replica_count, non_quorum_count, max, min_req_quorum;
 	bool ret = true;
 
 	ASSERT(MTX_LOCKED(&spec->rq_mtx));
@@ -786,15 +787,26 @@ can_replica_connect(spec_t *spec, replica_t *replica)
 	} else {
 		min_req_quorum = MAX_OF(spec->replication_factor - spec->consistency_factor + 1,
 		    spec->consistency_factor);
-		max_quorum = MAX_OF(min_req_quorum, replica_count);
+		max = MAX_OF(min_req_quorum, replica_count);
 		non_quorum_count = get_non_quorum_replica_count(spec);
-		if ((non_quorum_count + max_quorum) >= MAXREPLICA) {
-			REPLICA_ERRLOG("erroring replica(%s:%d) since "
-			    "non_quorum: %d healthy: %d degraded: %d are"
-			    " connected >= %d", replica->ip, replica->port,
-			    non_quorum_count, spec->healthy_rcount,
-			    spec->degraded_rcount, MAXREPLICA);
-			ret = false;
+		if (replica->quorum == 0) {
+			if ((non_quorum_count + max) >= MAXREPLICA) {
+				REPLICA_ERRLOG("erroring replica(%s:%d) since "
+				    "non_quorum: %d healthy: %d degraded: %d max: %d are"
+				    " connected, which can be >= %d", replica->ip, replica->port,
+				    non_quorum_count, spec->healthy_rcount,
+				    spec->degraded_rcount, max, MAXREPLICA);
+				ret = false;
+			}
+		} else {
+			if ((non_quorum_count + replica_count) >= MAXREPLICA) {
+				REPLICA_ERRLOG("erroring replica(%s:%d) since "
+				    "non_quorum: %d healthy: %d degraded: %d are"
+				    " connected >= %d", replica->ip, replica->port,
+				    non_quorum_count, spec->healthy_rcount,
+				    spec->degraded_rcount, MAXREPLICA);
+				ret = false;
+			}
 		}
 	}
 
@@ -1396,8 +1408,11 @@ send_open_opcode(spec_t *spec, uint64_t io_seq)
 		MTX_LOCK(&spec->rq_mtx);
 		TAILQ_REMOVE(&spec->rwaitq, replica, r_waitnext);
 
-		TAILQ_INSERT_TAIL(&spec->rq, replica, r_next);
-		spec->degraded_rcount++;
+		if (replica->quorum == 1) {
+			TAILQ_INSERT_TAIL(&spec->rq, replica, r_next);
+			spec->degraded_rcount++;
+		} else
+			TAILQ_INSERT_TAIL(&spec->non_quorum_rq, replica, r_non_quorum_next);
 
 		/* Update the volume ready state */
 		update_volstate(spec);
@@ -2240,6 +2255,10 @@ zvol_handshake(spec_t *spec, replica_t *replica)
 	CHECK_FOR_REPLICA_PRESENCE(replica, spec, rwaitq, ret);
 	MTX_UNLOCK(&spec->rq_mtx);
 
+	/*
+	 * TODO: how did non-quorum things worked last time, when
+	 * send_open_opcode doesn't act on non-quorum if volume is not ready?
+	 */
 	/*
 	 * for failure, replica will be part of rwaitq
 	 */
