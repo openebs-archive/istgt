@@ -1044,7 +1044,7 @@ run_rebuild_time_test_in_single_replica()
 
 	while [ 1 ]; do
 		# With replica poll timeout as 10, volume should become
-		# healthy in less than 40 seconds.
+		# healthy in less than 20 seconds.
 		cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[0].\"upTime\"'"
 		rt=$(eval $cmd)
 		echo "replica start time $rt"
