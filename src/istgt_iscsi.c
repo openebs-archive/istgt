@@ -2510,6 +2510,8 @@ istgt_iscsi_op_text(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 	uint32_t sMaxCmdSN = 0;
 	uint32_t cStatSN = 0;
 	int  step = 0;
+	int8_t sendtargets_discovery = 0;
+
 	if (!conn->full_feature) {
 		ISTGT_ERRLOG("before Full Feature\n");
 		return (-1);
@@ -2521,7 +2523,7 @@ istgt_iscsi_op_text(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 	memset(data, 0, alloc_len);
 
 	cp = (uint8_t *) &pdu->bhs;
-	I_bit = BGET8(&cp[0], 7);
+	I_bit = BGET8(&cp[0], 6);
 	F_bit = BGET8(&cp[1], 7);
 	C_bit = BGET8(&cp[1], 6);
 
@@ -2625,6 +2627,7 @@ istgt_iscsi_op_text(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 				conn->initiator_name,
 				conn->initiator_addr,
 				val, data, alloc_len, data_len);
+			sendtargets_discovery = 1;
 			SESS_MTX_LOCK(conn);
 		} else {
 			if (strcasecmp(val, "ALL") == 0) {
@@ -2637,6 +2640,7 @@ istgt_iscsi_op_text(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 					conn->initiator_name,
 					conn->initiator_addr,
 					val, data, alloc_len, data_len);
+				sendtargets_discovery = 2;
 				SESS_MTX_LOCK(conn);
 			}
 		}
@@ -2691,6 +2695,8 @@ istgt_iscsi_op_text(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 		return (-1);
 	}
 
+	ISTGT_NOTICELOG("queued op_text response: %s", (sendtargets_discovery == 1) ? "sendtargets_discovery" :
+	    ((sendtargets_discovery == 2) ? "sendtargets_nondiscovery" : ""));
 	/* update internal variables */
 	istgt_iscsi_copy_param2var(conn);
 	/* check value */
@@ -6483,14 +6489,6 @@ istgt_create_conn(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock, struct sockaddr 
 		ISTGT_ERRLOG("istgt_set_sendtimeo() failed\n");
 		goto error_return;
 	}
-#if defined(ISTGT_USE_IOVEC)
-	/* set low water mark */
-	rc = istgt_set_recvlowat(conn->sock, ISCSI_BHS_LEN);
-	if (rc != 0) {
-		ISTGT_ERRLOG("istgt_set_recvlowat() failed\n");
-		goto error_return;
-	}
-#endif
 
 	rc = pipe(conn->task_pipe);
 	if (rc != 0) {
