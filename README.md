@@ -1,3 +1,4 @@
+[![Build Status](https://travis-ci.org/openebs/istgt.svg?branch=replication)](https://travis-ci.org/openebs/istgt)
 [![FOSSA Status](https://app.fossa.io/api/projects/git%2Bgithub.com%2Fopenebs%2Fistgt.svg?type=shield)](https://app.fossa.io/projects/git%2Bgithub.com%2Fopenebs%2Fistgt?ref=badge_shield)
 
 ### Instructions to check cstyle
