@@ -306,7 +306,7 @@ check_header_sanity(zvol_io_hdr_t *resp_hdr)
 			break;
 		
 		case ZVOL_OPCODE_STATS:
-			if((resp_hdr->len % sizeof (zvol_op_stat_t)) != 0) {
+			if(resp_hdr->len != sizeof (zvol_op_stat_t)) {
 				REPLICA_ERRLOG("hdr->len length(%lu) is non "
 				    "matching with zvol_op_stat..\n",
 				    resp_hdr->len);
