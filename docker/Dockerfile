@@ -5,9 +5,9 @@
 FROM openebs/cstor-ubuntu:xenial-20181005
 RUN apt-get update; exit 0
 RUN apt-get -y install rsyslog
-RUN apt-get -y install net-tools iputils-ping
-RUN apt-get -y install libssl-dev libjson-c-dev libjemalloc-dev
-RUN apt -y install apt-file && apt-file update
+RUN apt-get -y install curl tcpdump dnsutils net-tools iputils-ping gdb
+RUN apt-get -y install apt-utils libssl-dev libjson-c-dev libjemalloc-dev
+RUN apt-get -y install apt-file && apt-file update
 
 RUN mkdir -p /usr/local/etc/bkpistgt
 RUN mkdir -p /usr/local/etc/istgt
