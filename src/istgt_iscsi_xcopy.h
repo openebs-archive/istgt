@@ -1,20 +1,19 @@
 /*
- *  (C) Copyright 2014 CloudByte, Inc.
- *  All Rights Reserved.
+ * Copyright © 2017-2019 The OpenEBS Authors
  *
- *  This program is an unpublished copyrighted work which is proprietary
- *  to CloudByte, Inc. and contains confidential information that is not
- *  to be reproduced or disclosed to any other person or entity without
- *  prior written consent from CloudByte, Inc. in each and every instance.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
- *  WARNING:  Unauthorized reproduction of this program as well as
- *  unauthorized preparation of derivative works based upon the
- *  program or distribution of copies by sale, rental, lease or
- *  lending are violations of federal copyright laws and state trade
- *  secret laws, punishable by civil and criminal penalties.
- *
- *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
+
 #ifndef ISTGT_ISCSI_XCOPY_H
 #define	ISTGT_ISCSI_XCOPY_H
 
