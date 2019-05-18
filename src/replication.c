@@ -300,50 +300,36 @@ count_of_replicas_helping_rebuild(spec_t *spec, replica_t *healthy_replica)
 static int
 check_header_sanity(zvol_io_hdr_t *resp_hdr)
 {
-
+	uint64_t exp_len = 0;
 	switch (resp_hdr->opcode) {
 		case ZVOL_OPCODE_HANDSHAKE:
 		case ZVOL_OPCODE_PREPARE_FOR_REBUILD:
-			if (resp_hdr->len != sizeof (mgmt_ack_t)) {
-				REPLICA_ERRLOG("hdr->len length(%lu) is not"
-				    " matching with size of mgmt_ack_t..\n",
-				    resp_hdr->len);
-				return -1;
-			}
+			exp_len = sizeof (mgmt_ack_t);
 			break;
-
 		case ZVOL_OPCODE_REPLICA_STATUS:
-			if(resp_hdr->len != sizeof (zrepl_status_ack_t)) {
-				REPLICA_ERRLOG("hdr->len length(%lu) is not "
-				    "matching with zrepl_status_ack_t..\n",
-				    resp_hdr->len);
-				return -1;
-			}
+			exp_len = sizeof (zrepl_status_ack_t);
 			break;
-		
 		case ZVOL_OPCODE_STATS:
-			if((resp_hdr->len % sizeof (zvol_op_stat_t)) != 0) {
-				REPLICA_ERRLOG("hdr->len length(%lu) is non "
-				    "matching with zvol_op_stat..\n",
-				    resp_hdr->len);
-				return -1;
-			}
+			exp_len = sizeof (zvol_op_stat_t);
 			break;
-
 		case ZVOL_OPCODE_SNAP_CREATE:
 		case ZVOL_OPCODE_START_REBUILD:
 		case ZVOL_OPCODE_SNAP_DESTROY:
-			if(resp_hdr->len != 0) {
-				REPLICA_ERRLOG("hdr->len length(%lu) is non "
-				    "zero, should be zero..\n",
-				    resp_hdr->len);
-				return -1;
-			}
+			exp_len = 0;
 			break;
 		default:
 			assert(!"Please handle this opcode\n");
 			break;
 	}
+	if (resp_hdr->status != ZVOL_OP_STATUS_OK)
+		exp_len = 0;
+	if (resp_hdr->len != exp_len) {
+		REPLICA_ERRLOG("hdr->len length(%lu) is not "
+		    "matching with exp len (%lu) for opcode (%d)..\n",
+		    resp_hdr->len, exp_len, resp_hdr->opcode);
+		return -1;
+	}
+
 	return 0;
 }
 
