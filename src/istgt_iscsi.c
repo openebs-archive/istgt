@@ -7201,9 +7201,15 @@ istgt_iscsi_drop_old_conns(CONN_Ptr conn)
 			continue;
 		if (xconn == conn)
 			continue;
+#ifdef REPLICATION
+		if (strcasecmp(conn->initiator_name, xconn->initiator_name) == 0) {
+			continue;
+		}
+#else
 		if (strcasecmp(conn->initiator_port, xconn->initiator_port) != 0) {
 			continue;
 		}
+#endif
 		if (strcasecmp(conn->target_name, xconn->target_name) == 0) {
 			if (xconn->sess != NULL) {
 				printf("exiting conn by %s(%s), TSIH=%u, CID=%u\n",
