@@ -166,6 +166,7 @@ static int istgt_append_sess(CONN_Ptr conn, uint64_t isid, uint16_t tsih, uint16
 static void istgt_remove_conn(CONN_Ptr conn);
 static int istgt_iscsi_drop_all_conns(CONN_Ptr conn);
 static int istgt_iscsi_drop_old_conns(CONN_Ptr conn);
+static int istgt_iscsi_drop_stale_login(CONN_Ptr conn);
 static void ioctl_call(CONN_Ptr, enum iscsi_log);
 
 // _verb_stat SCSIstat_0min[SCSI_ARYSZ]
@@ -1984,6 +1985,9 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 			} else {
 				/* new session, drop old sess by the initiator */
 				istgt_iscsi_drop_old_conns(conn);
+#ifdef REPLICATION
+				istgt_iscsi_drop_stale_login(conn);
+#endif
 			}
 
 			/* force target flags */
@@ -7201,15 +7205,90 @@ istgt_iscsi_drop_old_conns(CONN_Ptr conn)
 			continue;
 		if (xconn == conn)
 			continue;
-#ifdef REPLICATION
-		if (strcasecmp(conn->initiator_name, xconn->initiator_name) == 0) {
-			continue;
-		}
-#else
 		if (strcasecmp(conn->initiator_port, xconn->initiator_port) != 0) {
 			continue;
 		}
-#endif
+		if (strcasecmp(conn->target_name, xconn->target_name) == 0) {
+			if (xconn->sess != NULL) {
+				printf("exiting conn by %s(%s), TSIH=%u, CID=%u\n",
+					xconn->initiator_port,
+					xconn->initiator_addr,
+					xconn->sess->tsih, xconn->cid);
+			} else {
+				printf("exiting conn by %s(%s), TSIH=xx, CID=%u\n",
+					xconn->initiator_port,
+					xconn->initiator_addr,
+					xconn->cid);
+			}
+			xconn->state = CONN_STATE_EXITING;
+			num++;
+		}
+	}
+
+	if (num != 0) {
+		istgt_yield();
+		sleep(1);
+		ISTGT_NOTICELOG("drop all %d old connections %d %s by %s\n",
+						num, conn->id, conn->target_name, conn->initiator_port);
+	}
+
+	if (num > max_conns + 1) {
+		for (i = 0; i <= g_max_connidx; i++) {
+			xconn = g_conns[i];
+			if (xconn == NULL)
+				continue;
+			if (xconn == conn)
+				continue;
+			if (strcasecmp(conn->initiator_port, xconn->initiator_port) != 0) {
+				continue;
+			}
+			if (strcasecmp(conn->target_name, xconn->target_name) == 0) {
+				if (xconn->sess != NULL) {
+					printf("exiting conn by %s(%s), TSIH=%u, CID=%u\n",
+						xconn->initiator_port,
+						xconn->initiator_addr,
+						xconn->sess->tsih, xconn->cid);
+				} else {
+					printf("exiting conn by %s(%s), TSIH=xx, CID=%u\n",
+						xconn->initiator_port,
+						xconn->initiator_addr,
+						xconn->cid);
+				}
+				rc = pthread_cancel(xconn->thread);
+				if (rc != 0) {
+					ISTGT_ERRLOG("pthread_cancel() failed rc=%d\n", rc);
+				}
+			}
+		}
+	}
+	MTX_UNLOCK(&g_conns_mutex);
+	return (0);
+}
+
+static int
+istgt_iscsi_drop_stale_login(CONN_Ptr conn)
+{
+	CONN_Ptr xconn;
+	int max_conns;
+	int num;
+	int rc;
+	int i;
+
+	MTX_LOCK(&conn->istgt->mutex);
+	max_conns = conn->istgt->MaxConnections;
+	MTX_UNLOCK(&conn->istgt->mutex);
+	num = 0;
+
+	MTX_LOCK(&g_conns_mutex);
+	for (i = 0; i <= g_max_connidx; i++) {
+		xconn = g_conns[i];
+		if (xconn == NULL)
+			continue;
+		if (xconn == conn)
+			continue;
+		if (strcasecmp(conn->initiator_name, xconn->initiator_name) == 0) {
+			continue;
+		}
 		if (strcasecmp(conn->target_name, xconn->target_name) == 0) {
 			if (xconn->sess != NULL) {
 				printf("exiting conn by %s(%s), TSIH=%u, CID=%u\n",
