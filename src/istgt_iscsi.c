@@ -7324,7 +7324,7 @@ istgt_iscsi_drop_stale_login(CONN_Ptr conn)
 				continue;
 			if (xconn == conn)
 				continue;
-			if (strcasecmp(conn->initiator_port, xconn->initiator_port) != 0) {
+			if (strcasecmp(conn->initiator_name, xconn->initiator_name) == 0) {
 				continue;
 			}
 			if (strcasecmp(conn->target_name, xconn->target_name) == 0) {
