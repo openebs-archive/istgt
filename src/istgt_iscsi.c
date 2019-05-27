@@ -7265,6 +7265,10 @@ istgt_iscsi_drop_old_conns(CONN_Ptr conn)
 	return (0);
 }
 
+/*
+ * logout from the old node as we are
+ * trying to login from the new node.
+*/
 static int
 istgt_iscsi_drop_stale_login(CONN_Ptr conn)
 {
