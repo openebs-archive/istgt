@@ -1123,7 +1123,7 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	memset(rio_hdr, 0, sizeof (zvol_io_hdr_t));
 	rio_hdr->opcode = ZVOL_OPCODE_OPEN;
 	rio_hdr->io_seq = 0;
-	rio_hdr->offset = 0;
+	rio_hdr->volsize = spec->size;
 	rio_hdr->len = sizeof (zvol_op_open_data_t);
 	rio_hdr->version = REPLICA_VERSION;
 
