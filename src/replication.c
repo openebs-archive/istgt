@@ -283,6 +283,7 @@ free_rcommon_mgmt_cmd(rcommon_mgmt_cmd_t *rcomm_mgmt)
 {
 	if (rcomm_mgmt->buf != NULL)
 		free(rcomm_mgmt->buf);
+	pthread_mutex_destroy(&rcomm_mgmt->mtx);
 	free(rcomm_mgmt);
 	return;
 }
@@ -1369,12 +1370,19 @@ handle_snap_prepare_resp(replica_t *replica, mgmt_cmd_t *mgmt_cmd)
 {
 	zvol_io_hdr_t *hdr = replica->mgmt_io_resp_hdr;
 	rcommon_mgmt_cmd_t *rcomm_mgmt = mgmt_cmd->rcomm_mgmt;
+	bool delete = false;
+
 	MTX_LOCK(&rcomm_mgmt->mtx);
 	if (hdr->status != ZVOL_OP_STATUS_OK)
 		rcomm_mgmt->cmds_failed++;
 	else
 		rcomm_mgmt->cmds_succeeded++;
+	if ((rcomm_mgmt->caller_gone == 1) &&
+	    (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_failed + rcomm_mgmt->cmds_succeeded)))
+		delete = true;
 	MTX_UNLOCK(&rcomm_mgmt->mtx);
+	if (delete == true)
+		free_rcommon_mgmt_cmd(rcomm_mgmt);
 }
 
 static int
@@ -1558,6 +1566,43 @@ int istgt_lu_destroy_snapshot(spec_t *spec, char *snapname)
 }
 
 /*
+ * will wait for the command till the timeout or command completetion
+ * this function should be calledwhile holding the spec->rq_mtx lock
+ */
+static inline int
+timeout_wait_for_command(spec_t *spec, rcommon_mgmt_cmd_t *rcomm_mgmt, int wait_time, struct timespec last)
+{
+	struct timespec diff, now;
+	int8_t free_rcomm_mgmt = 0;
+
+	timesdiff(CLOCK_MONOTONIC_COARSE, last, now, diff);
+
+	MTX_LOCK(&rcomm_mgmt->mtx);
+
+	while (diff.tv_sec < wait_time) {
+		if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed))
+			break;
+		MTX_UNLOCK(&rcomm_mgmt->mtx);
+		MTX_UNLOCK(&spec->rq_mtx);
+		sleep(1);
+		MTX_LOCK(&spec->rq_mtx);
+		MTX_LOCK(&rcomm_mgmt->mtx);
+		timesdiff(CLOCK_MONOTONIC_COARSE, last, now, diff);
+	}
+	rcomm_mgmt->caller_gone = 1;
+	if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed)) {
+		free_rcomm_mgmt = 1;
+	}
+	int success = rcomm_mgmt->cmds_succeeded;
+
+	MTX_UNLOCK(&rcomm_mgmt->mtx);
+
+	if (free_rcomm_mgmt)
+		free_rcommon_mgmt_cmd(rcomm_mgmt);
+	return (success);
+}
+
+/*
  * This API will create snapshot with given name on the spec.
  * It will wait for io_wait_time seconds to complete ongoing IOs.
  * Overall, this API will wait for wait_time seconds to get response
@@ -1568,8 +1613,7 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 {
 	bool r;
 	replica_t *replica;
-	int free_rcomm_mgmt = 0;
-	struct timespec last, now, diff;
+	struct timespec last;
 	rcommon_mgmt_cmd_t *rcomm_mgmt;
 	uint64_t io_seq;
 
@@ -1602,31 +1646,17 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
 		(void) send_replica_snapshot(spec, replica, io_seq, snapname, ZVOL_OPCODE_SNAP_PREPARE, rmgmt);
 	}
+	int sent = rmgmt->cmds_sent;
 
-	timesdiff(CLOCK_MONOTONIC_COARSE, last, now, diff);
-	MTX_LOCK(&rmgmt->mtx);
+	int success = timeout_wait_for_command(spec, rmgmt, wait_time, last);
 
-	while (diff.tv_sec < wait_time) {
-		if ((rmgmt->cmds_sent == rmgmt->cmds_succeeded) ||
-		    rmgmt->cmds_failed)
-			break;
-		MTX_UNLOCK(&rmgmt->mtx);
+	if (success != sent) {
 		MTX_UNLOCK(&spec->rq_mtx);
-		sleep(1);
-		MTX_LOCK(&spec->rq_mtx);
-		MTX_LOCK(&rmgmt->mtx);
-		timesdiff(CLOCK_MONOTONIC_COARSE, last, now, diff);
-	}
-	MTX_UNLOCK(&rmgmt->mtx);
-
-	if (rmgmt->cmds_sent != rmgmt->cmds_succeeded) {
-		MTX_UNLOCK(&spec->rq_mtx);
-		free(rmgmt);
+		REPLICA_ERRLOG("snap prep failed.. success=%d rf=%d\n", success, spec->replication_factor);
 		return (false);
 	}
 
 	rcomm_mgmt = allocate_rcommon_mgmt_cmd(0);
-	free_rcomm_mgmt = 0;
 
 	r = false;
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
@@ -1634,27 +1664,11 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	}
 
 	uint8_t cf = spec->consistency_factor;
+	success = timeout_wait_for_command(spec, rcomm_mgmt, wait_time, last);
 
-	MTX_LOCK(&rcomm_mgmt->mtx);
-
-	while (diff.tv_sec < wait_time) {
-		if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed))
-			break;
-		MTX_UNLOCK(&rcomm_mgmt->mtx);
-		MTX_UNLOCK(&spec->rq_mtx);
-		sleep(1);
-		MTX_LOCK(&spec->rq_mtx);
-		MTX_LOCK(&rcomm_mgmt->mtx);
-		timesdiff(CLOCK_MONOTONIC_COARSE, last, now, diff);
-	}
-	rcomm_mgmt->caller_gone = 1;
-	if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed)) {
-		free_rcomm_mgmt = 1;
-	}
-	if (rcomm_mgmt->cmds_succeeded >= cf) {
+	if (success >= cf) {
 		r = true;
 	}
-	MTX_UNLOCK(&rcomm_mgmt->mtx);
 
 	if (r == false) {
 		TAILQ_FOREACH(replica, &spec->rq, r_next)
@@ -1675,9 +1689,6 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	MTX_UNLOCK(&spec->rq_mtx);
 	if (r == false)
 		REPLICA_ERRLOG("snap create ioseq: %lu resp: %d\n", io_seq, r);
-	if (free_rcomm_mgmt == 1)
-		free(rcomm_mgmt);
-	free(rmgmt);
 	return r;
 }
 
