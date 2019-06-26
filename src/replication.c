@@ -1659,6 +1659,16 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	} else if (success < sent) {
 		REPLICA_ERRLOG("snap prep partial failure, success=%d sent=%d rf=%d\n",
 		    success, sent, spec->replication_factor);
+		/*
+		 * If there is partial failure of SNAP_PREP opcode, there will be
+		 * some replica on which SNAP_PREP is successful and if we try to
+		 * do SNAP_PREP for other snapshot command then it will fail.
+		 * Aborting it here as when replica will connect again, SNAP_PREP
+		 * will be reset.
+		 * Ideally we have to disconnect the replicas where this
+		 * command is successful, since we lack that info as of now, so
+		 * aborting is OK as SNAP_PREP will fail rarely.
+		 */
 		abort();
 	}
 
