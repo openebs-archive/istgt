@@ -1575,6 +1575,8 @@ timeout_wait_for_command(spec_t *spec, rcommon_mgmt_cmd_t *rcomm_mgmt, int wait_
 	struct timespec diff, now;
 	int8_t free_rcomm_mgmt = 0;
 
+	ASSERT(MTX_LOCKED(&spec->rq_mtx));
+
 	timesdiff(CLOCK_MONOTONIC_COARSE, last, now, diff);
 
 	MTX_LOCK(&rcomm_mgmt->mtx);
@@ -1650,10 +1652,14 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 
 	int success = timeout_wait_for_command(spec, rmgmt, wait_time, last);
 
-	if (success != sent) {
+	if (success == 0) {
 		MTX_UNLOCK(&spec->rq_mtx);
-		REPLICA_ERRLOG("snap prep failed.. success=%d rf=%d\n", success, spec->replication_factor);
+		REPLICA_ERRLOG("snap prep failed.. sent=%d rf=%d\n", sent, spec->replication_factor);
 		return (false);
+	} else if (success < sent) {
+		REPLICA_ERRLOG("snap prep partial failure, success=%d sent=%d rf=%d\n",
+		    success, sent, spec->replication_factor);
+		abort();
 	}
 
 	rcomm_mgmt = allocate_rcommon_mgmt_cmd(0);
