@@ -1377,9 +1377,24 @@ handle_snap_prepare_resp(replica_t *replica, mgmt_cmd_t *mgmt_cmd)
 		rcomm_mgmt->cmds_failed++;
 	else
 		rcomm_mgmt->cmds_succeeded++;
-	if ((rcomm_mgmt->caller_gone == 1) &&
-	    (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_failed + rcomm_mgmt->cmds_succeeded)))
-		delete = true;
+	if (rcomm_mgmt->caller_gone == 1) {
+		if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_failed + rcomm_mgmt->cmds_succeeded))
+			delete = true;
+		if (hdr->status == ZVOL_OP_STATUS_OK) {
+			/*
+			 * snapshot prep wait is over and we got the reply,
+			 * disconnect the replica as replica has executed the snap
+			 * prep command, As a part of reconnetion, the replica will
+			 * undo the snap prep command. We have to disconnect it in the
+			 * successful case only as in the failure case replica
+			 * will not have executed the snap prep command.
+			 */
+			REPLICA_ERRLOG("Disconnecting the replica (%lu) "
+			   "as snap_prep opcode has been timed out\n",
+			    replica->zvol_guid);
+			inform_mgmt_conn(replica);
+		}
+	}
 	MTX_UNLOCK(&rcomm_mgmt->mtx);
 	if (delete == true)
 		free_rcommon_mgmt_cmd(rcomm_mgmt);
@@ -1645,31 +1660,22 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	io_seq = ++spec->io_seq;
 
 	rcommon_mgmt_cmd_t *rmgmt = allocate_rcommon_mgmt_cmd(0);
-	TAILQ_FOREACH(replica, &spec->rq, r_next) {
-		(void) send_replica_snapshot(spec, replica, io_seq, snapname, ZVOL_OPCODE_SNAP_PREPARE, rmgmt);
+	replica_t *hr = spec->rebuild_info.healthy_replica;
+	if (hr) {
+		(void) send_replica_snapshot(spec, hr, io_seq, snapname, ZVOL_OPCODE_SNAP_PREPARE, rmgmt);
 	}
+
 	int sent = rmgmt->cmds_sent;
+	uint8_t cf = spec->consistency_factor;
+	uint8_t rf = spec->replication_factor;
 
 	int success = timeout_wait_for_command(spec, rmgmt, wait_time, last);
 
-	if (success == 0) {
+	if (success != sent) {
+		spec->quiesce = 0;
 		MTX_UNLOCK(&spec->rq_mtx);
-		REPLICA_ERRLOG("snap prep failed.. sent=%d rf=%d\n", sent, spec->replication_factor);
+		REPLICA_ERRLOG("snap prep failed.. sent=%d cf=%d rf=%d\n", sent, cf, rf);
 		return (false);
-	} else if (success < sent) {
-		REPLICA_ERRLOG("snap prep partial failure, success=%d sent=%d rf=%d\n",
-		    success, sent, spec->replication_factor);
-		/*
-		 * If there is partial failure of SNAP_PREP opcode, there will be
-		 * some replica on which SNAP_PREP is successful and if we try to
-		 * do SNAP_PREP for other snapshot command then it will fail.
-		 * Aborting it here as when replica will connect again, SNAP_PREP
-		 * will be reset.
-		 * Ideally we have to disconnect the replicas where this
-		 * command is successful, since we lack that info as of now, so
-		 * aborting is OK as SNAP_PREP will fail rarely.
-		 */
-		abort();
 	}
 
 	rcomm_mgmt = allocate_rcommon_mgmt_cmd(0);
@@ -1679,7 +1685,6 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 		(void) send_replica_snapshot(spec, replica, io_seq, snapname, ZVOL_OPCODE_SNAP_CREATE, rcomm_mgmt);
 	}
 
-	uint8_t cf = spec->consistency_factor;
 	success = timeout_wait_for_command(spec, rcomm_mgmt, wait_time, last);
 
 	if (success >= cf) {
