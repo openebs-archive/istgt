@@ -283,6 +283,7 @@ free_rcommon_mgmt_cmd(rcommon_mgmt_cmd_t *rcomm_mgmt)
 {
 	if (rcomm_mgmt->buf != NULL)
 		free(rcomm_mgmt->buf);
+	pthread_mutex_destroy(&rcomm_mgmt->mtx);
 	free(rcomm_mgmt);
 	return;
 }
@@ -313,6 +314,7 @@ check_header_sanity(zvol_io_hdr_t *resp_hdr)
 			exp_len = sizeof (zvol_op_stat_t);
 			break;
 		case ZVOL_OPCODE_SNAP_CREATE:
+		case ZVOL_OPCODE_SNAP_PREPARE:
 		case ZVOL_OPCODE_START_REBUILD:
 		case ZVOL_OPCODE_SNAP_DESTROY:
 			exp_len = 0;
@@ -1363,6 +1365,41 @@ handle_snap_create_resp(replica_t *replica, mgmt_cmd_t *mgmt_cmd)
 		free(rcomm_mgmt);
 }
 
+static void
+handle_snap_prepare_resp(replica_t *replica, mgmt_cmd_t *mgmt_cmd)
+{
+	zvol_io_hdr_t *hdr = replica->mgmt_io_resp_hdr;
+	rcommon_mgmt_cmd_t *rcomm_mgmt = mgmt_cmd->rcomm_mgmt;
+	bool delete = false;
+
+	MTX_LOCK(&rcomm_mgmt->mtx);
+	if (hdr->status != ZVOL_OP_STATUS_OK)
+		rcomm_mgmt->cmds_failed++;
+	else
+		rcomm_mgmt->cmds_succeeded++;
+	if (rcomm_mgmt->caller_gone == 1) {
+		if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_failed + rcomm_mgmt->cmds_succeeded))
+			delete = true;
+		if (hdr->status == ZVOL_OP_STATUS_OK) {
+			/*
+			 * snapshot prep wait is over and we got the reply,
+			 * disconnect the replica as replica has executed the snap
+			 * prep command, As a part of reconnetion, the replica will
+			 * undo the snap prep command. We have to disconnect it in the
+			 * successful case only as in the failure case replica
+			 * will not have executed the snap prep command.
+			 */
+			REPLICA_ERRLOG("Disconnecting the replica (%lu) "
+			   "as snap_prep opcode has been timed out\n",
+			    replica->zvol_guid);
+			inform_mgmt_conn(replica);
+		}
+	}
+	MTX_UNLOCK(&rcomm_mgmt->mtx);
+	if (delete == true)
+		free_rcommon_mgmt_cmd(rcomm_mgmt);
+}
+
 static int
 send_replica_snapshot(spec_t *spec, replica_t *replica, uint64_t io_seq,
     char *snapname, zvol_op_code_t opcode, rcommon_mgmt_cmd_t *rcomm_mgmt)
@@ -1544,6 +1581,45 @@ int istgt_lu_destroy_snapshot(spec_t *spec, char *snapname)
 }
 
 /*
+ * will wait for the command till the timeout or command completetion
+ * this function should be calledwhile holding the spec->rq_mtx lock
+ */
+static inline int
+timeout_wait_for_command(spec_t *spec, rcommon_mgmt_cmd_t *rcomm_mgmt, int wait_time, struct timespec last)
+{
+	struct timespec diff, now;
+	int8_t free_rcomm_mgmt = 0;
+
+	ASSERT(MTX_LOCKED(&spec->rq_mtx));
+
+	timesdiff(CLOCK_MONOTONIC_COARSE, last, now, diff);
+
+	MTX_LOCK(&rcomm_mgmt->mtx);
+
+	while (diff.tv_sec < wait_time) {
+		if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed))
+			break;
+		MTX_UNLOCK(&rcomm_mgmt->mtx);
+		MTX_UNLOCK(&spec->rq_mtx);
+		sleep(1);
+		MTX_LOCK(&spec->rq_mtx);
+		MTX_LOCK(&rcomm_mgmt->mtx);
+		timesdiff(CLOCK_MONOTONIC_COARSE, last, now, diff);
+	}
+	rcomm_mgmt->caller_gone = 1;
+	if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed)) {
+		free_rcomm_mgmt = 1;
+	}
+	int success = rcomm_mgmt->cmds_succeeded;
+
+	MTX_UNLOCK(&rcomm_mgmt->mtx);
+
+	if (free_rcomm_mgmt)
+		free_rcommon_mgmt_cmd(rcomm_mgmt);
+	return (success);
+}
+
+/*
  * This API will create snapshot with given name on the spec.
  * It will wait for io_wait_time seconds to complete ongoing IOs.
  * Overall, this API will wait for wait_time seconds to get response
@@ -1554,8 +1630,7 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 {
 	bool r;
 	replica_t *replica;
-	int free_rcomm_mgmt = 0;
-	struct timespec last, now, diff;
+	struct timespec last;
 	rcommon_mgmt_cmd_t *rcomm_mgmt;
 	uint64_t io_seq;
 
@@ -1582,38 +1657,39 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 		return false;
 	}
 
+	io_seq = ++spec->io_seq;
+
+	rcommon_mgmt_cmd_t *rmgmt = allocate_rcommon_mgmt_cmd(0);
+	replica_t *hr = spec->rebuild_info.healthy_replica;
+	if (hr) {
+		(void) send_replica_snapshot(spec, hr, io_seq, snapname, ZVOL_OPCODE_SNAP_PREPARE, rmgmt);
+	}
+
+	int sent = rmgmt->cmds_sent;
+	uint8_t cf = spec->consistency_factor;
+	uint8_t rf = spec->replication_factor;
+
+	int success = timeout_wait_for_command(spec, rmgmt, wait_time, last);
+
+	if (success != sent) {
+		spec->quiesce = 0;
+		MTX_UNLOCK(&spec->rq_mtx);
+		REPLICA_ERRLOG("snap prep failed.. sent=%d cf=%d rf=%d\n", sent, cf, rf);
+		return (false);
+	}
+
 	rcomm_mgmt = allocate_rcommon_mgmt_cmd(0);
-	free_rcomm_mgmt = 0;
 
 	r = false;
-	io_seq = ++spec->io_seq;
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
 		(void) send_replica_snapshot(spec, replica, io_seq, snapname, ZVOL_OPCODE_SNAP_CREATE, rcomm_mgmt);
 	}
 
-	uint8_t cf = spec->consistency_factor;
+	success = timeout_wait_for_command(spec, rcomm_mgmt, wait_time, last);
 
-	timesdiff(CLOCK_MONOTONIC_COARSE, last, now, diff);
-	MTX_LOCK(&rcomm_mgmt->mtx);
-
-	while (diff.tv_sec < wait_time) {
-		if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed))
-			break;
-		MTX_UNLOCK(&rcomm_mgmt->mtx);
-		MTX_UNLOCK(&spec->rq_mtx);
-		sleep(1);
-		MTX_LOCK(&spec->rq_mtx);
-		MTX_LOCK(&rcomm_mgmt->mtx);
-		timesdiff(CLOCK_MONOTONIC_COARSE, last, now, diff);
-	}
-	rcomm_mgmt->caller_gone = 1;
-	if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed)) {
-		free_rcomm_mgmt = 1;
-	}
-	if (rcomm_mgmt->cmds_succeeded >= cf) {
+	if (success >= cf) {
 		r = true;
 	}
-	MTX_UNLOCK(&rcomm_mgmt->mtx);
 
 	if (r == false) {
 		TAILQ_FOREACH(replica, &spec->rq, r_next)
@@ -1634,8 +1710,6 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	MTX_UNLOCK(&spec->rq_mtx);
 	if (r == false)
 		REPLICA_ERRLOG("snap create ioseq: %lu resp: %d\n", io_seq, r);
-	if (free_rcomm_mgmt == 1)
-		free(rcomm_mgmt);
 	return r;
 }
 
@@ -2371,6 +2445,15 @@ read_io_resp_hdr:
 					handle_snap_create_resp(replica, mgmt_cmd);
 					break;
 
+				case ZVOL_OPCODE_SNAP_PREPARE:
+					/*
+					 * snap create response must come from
+					 * mgmt connection
+					 */
+					assert(fd != replica->iofd);
+					handle_snap_prepare_resp(replica, mgmt_cmd);
+					break;
+
 				case ZVOL_OPCODE_START_REBUILD:
 					assert(fd != replica->iofd);
 					handle_start_rebuild_resp(spec, resp_hdr);
@@ -2517,6 +2600,9 @@ empty_mgmt_q_of_replica(replica_t *r)
 			switch (mgmt_cmd->io_hdr->opcode) {
 				case ZVOL_OPCODE_SNAP_CREATE:
 					handle_snap_create_resp(r, mgmt_cmd);
+					break;
+				case ZVOL_OPCODE_SNAP_PREPARE:
+					handle_snap_prepare_resp(r, mgmt_cmd);
 					break;
 				case ZVOL_OPCODE_PREPARE_FOR_REBUILD:
 					handle_prepare_for_rebuild_resp(r->spec,

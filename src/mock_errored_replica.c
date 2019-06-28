@@ -401,6 +401,13 @@ send_mgmt_ack(int fd, zvol_io_hdr_t *mgmt_ack_hdr, void *buf, int *zrepl_status_
 			mgmt_ack_hdr->len = 0;
 			break;
 
+		case ZVOL_OPCODE_SNAP_PREPARE:
+			iovec_count = 3;
+			sleep(random()%3 + 1);
+			mgmt_ack_hdr->status = (random() % 5 == 0) ? ZVOL_OP_STATUS_FAILED : ZVOL_OP_STATUS_OK;
+			mgmt_ack_hdr->len = 0;
+			break;
+
 		case ZVOL_OPCODE_REPLICA_STATUS:
 			zrepl_status.state = ZVOL_STATUS_DEGRADED;
 //			zrepl_status.state = ZVOL_STATUS_HEALTHY;
