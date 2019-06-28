@@ -159,6 +159,7 @@ zio_cmd_alloc(zvol_io_hdr_t *hdr)
 	    (hdr->opcode == ZVOL_OPCODE_REPLICA_STATUS) ||
 	    (hdr->opcode == ZVOL_OPCODE_OPEN) ||
 	    (hdr->opcode == ZVOL_OPCODE_SNAP_CREATE) ||
+	    (hdr->opcode == ZVOL_OPCODE_SNAP_PREPARE) ||
 	    (hdr->opcode == ZVOL_OPCODE_SNAP_DESTROY) ||
 	    (hdr->opcode == ZVOL_OPCODE_STATS) ||
 	    (hdr->opcode == ZVOL_OPCODE_START_REBUILD) ||
@@ -315,6 +316,12 @@ handle_snap_opcode(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 		REPLICA_ERRLOG("name mismatch %s %s\n",
 			(char *)zio_cmd->buf, rargs->volname);
 		exit(1);
+	}
+
+	//TODO handle the success/fail resopnse
+	if (hdr->opcode == ZVOL_OPCODE_SNAP_PREPARE) {
+		hdr->status = ZVOL_OP_STATUS_OK;
+		goto send_response;
 	}
 
 	if (hdr->opcode == ZVOL_OPCODE_SNAP_DESTROY) {
@@ -780,6 +787,7 @@ mock_repl_mgmt_worker(void *args)
 				break;
 			case ZVOL_OPCODE_SNAP_CREATE:
 			case ZVOL_OPCODE_SNAP_DESTROY:
+			case ZVOL_OPCODE_SNAP_PREPARE:
 				handle_snap_opcode(rargs, zio_cmd);
 				break;
 			case ZVOL_OPCODE_REPLICA_STATUS:
