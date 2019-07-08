@@ -64,6 +64,8 @@ typedef struct snapshot_resp_s {
 	int test_id;
 	int success_cnt;
 	int failure_cnt;
+	int prequired_resp;
+	int psuccess_cnt;
 } snapshot_resp_t;
 
 snapshot_resp_t snap_resp;
@@ -282,7 +284,17 @@ update_snap_resp_list(spec_t *spec)
 	snap_resp.required_resp = spec->consistency_factor;
 	snap_resp.success_cnt = 0;
 	snap_resp.failure_cnt = 0;
+	snap_resp.psuccess_cnt = 0;
 	snap_resp.test_id = (++snap_resp.test_id) % SNAP_TEST_COUNT;
+	switch (snap_resp.test_id)
+	{
+		case SNAP_CREATE_TIMEOUT:
+		case SNAP_CREATE_FAILURE:
+			snap_resp.prequired_resp = 0;
+			break;
+		default:
+			snap_resp.prequired_resp = 1;
+	}
 	MTX_UNLOCK(&snap_resp.snap_resp_mtx);
 }
 
@@ -294,8 +306,11 @@ verify_snap_response(int res)
 		VERIFY(snap_resp.success_cnt < snap_resp.required_resp);
 	} else {
 		VERIFY(snap_resp.success_cnt >= snap_resp.required_resp);
+		VERIFY(snap_resp.psuccess_cnt);
 	}
+	VERIFY(snap_resp.psuccess_cnt == snap_resp.prequired_resp);
 	snap_resp.required_resp = 0;
+	snap_resp.prequired_resp = 0;
 	MTX_UNLOCK(&snap_resp.snap_resp_mtx);
 }
 
@@ -318,9 +333,26 @@ handle_snap_opcode(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 		exit(1);
 	}
 
-	//TODO handle the success/fail resopnse
 	if (hdr->opcode == ZVOL_OPCODE_SNAP_PREPARE) {
-		hdr->status = ZVOL_OP_STATUS_OK;
+		MTX_LOCK(&snap_resp.snap_resp_mtx);
+		switch (snap_resp.test_id) {
+			case SNAP_CREATE_TIMEOUT:
+				sleep (10);
+				hdr->status = ZVOL_OP_STATUS_OK;
+				snap_resp.psuccess_cnt++;
+				break;
+
+			case  SNAP_CREATE_FAILURE:
+				hdr->status = ZVOL_OP_STATUS_FAILED;
+				break;
+
+			default:
+				hdr->status = ZVOL_OP_STATUS_OK;
+				snap_resp.psuccess_cnt++;
+				break;
+		}
+		MTX_UNLOCK(&snap_resp.snap_resp_mtx);
+
 		goto send_response;
 	}
 

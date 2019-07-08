@@ -292,6 +292,8 @@ snapshot_thread(void *args)
 		io_wait_time = random() % 2 + 2;
 		wait_time = random() % 2 + 4;
 
+		spec->rebuild_info.healthy_replica = TAILQ_FIRST(&spec->rq);
+
 		clock_gettime(CLOCK_MONOTONIC_RAW, &cmd_start);
 		ret = istgt_lu_create_snapshot(spec, snapname, io_wait_time,
 		    wait_time);
