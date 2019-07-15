@@ -292,6 +292,11 @@ snapshot_thread(void *args)
 		io_wait_time = random() % 2 + 2;
 		wait_time = random() % 2 + 4;
 
+		/*
+		 * we send SNAP_PREP op code to the healthy helping
+		 * replica only. So we are setting it here so that
+		 * we can test that scenario.
+		 */
 		MTX_LOCK(&spec->rq_mtx);
 		spec->rebuild_info.healthy_replica = TAILQ_FIRST(&spec->rq);
 		MTX_UNLOCK(&spec->rq_mtx);
@@ -299,7 +304,7 @@ snapshot_thread(void *args)
 		clock_gettime(CLOCK_MONOTONIC_RAW, &cmd_start);
 		ret = istgt_lu_create_snapshot(spec, snapname, io_wait_time,
 		    wait_time);
-
+		// reset the helper healthy replica
 		MTX_LOCK(&spec->rq_mtx);
 		spec->rebuild_info.healthy_replica = NULL;
 		MTX_UNLOCK(&spec->rq_mtx);
