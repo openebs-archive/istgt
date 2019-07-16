@@ -1475,8 +1475,7 @@ disconnect_nonresponding_replica(replica_t *replica, uint64_t io_seq,
 				}
 				REPLICA_ERRLOG("Disconnecting replica (%lu) as its not responded for"
 				   " snap_create\n", replica->zvol_guid);
-			}
-			if (opcode == ZVOL_OPCODE_SNAP_PREPARE) {
+			} else if (opcode == ZVOL_OPCODE_SNAP_PREPARE) {
 				REPLICA_ERRLOG("Disconnecting the replica (%lu) "
 				   "as snap_prep opcode has been timed out\n",
 				    replica->zvol_guid);

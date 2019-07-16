@@ -327,7 +327,7 @@ handle_snap_opcode(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 		MTX_LOCK(&snap_resp.snap_resp_mtx);
 		switch (snap_resp.test_id) {
 			case  SNAP_CREATE_TIMEOUT:
-				rargs->snap_error = 1;
+			//	rargs->snap_error = 1;
 				hdr->status = ZVOL_OP_STATUS_OK;
 				break;
 
