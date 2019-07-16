@@ -19,7 +19,7 @@ run_snap_commands()
 			exit 1
 		fi
 	done
-	for (( j = 1; j <= 4; j++ )) do
+	for (( j = 2; j <= 5; j++ )) do
 		for (( i = 1; i <= 10; i++ )) do
 			sudo $ISTGTCONTROL snapcreate vol1 snapname1 1 $j
 			if [ $? -ne 1 ]; then

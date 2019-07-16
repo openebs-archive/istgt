@@ -1457,23 +1457,29 @@ disconnect_nonresponding_replica(replica_t *replica, uint64_t io_seq,
 		if (mgmt_cmd->io_hdr->io_seq == io_seq &&
 		    mgmt_cmd->io_hdr->opcode == opcode) {
 
-			/*
-			 * If replica that is healthy and in rebuild process
-			 * doesn't respond for SNAP_CREATE, dw replica that is
-			 * involved in rebuild process need to be disconnected.
-			 * After reconnection, both of them will get this snap
-			 * if it is successful
-			 */
-			hr = replica->spec->rebuild_info.healthy_replica;
-			dr = replica->spec->rebuild_info.dw_replica;
-			if (replica == hr) {
-				REPLICA_ERRLOG("Disconnecting dw replica (%lu) "
-				   "as its healthy replica (%lu) not responded snap_create\n",
-				    dr->zvol_guid, hr->zvol_guid);
-				inform_mgmt_conn(dr);
+			if (opcode == ZVOL_OPCODE_SNAP_CREATE) {
+				/*
+				 * If replica that is healthy and in rebuild process
+				 * doesn't respond for SNAP_CREATE, dw replica that is
+				 * involved in rebuild process need to be disconnected.
+				 * After reconnection, both of them will get this snap
+				 * if it is successful
+				 */
+				hr = replica->spec->rebuild_info.healthy_replica;
+				dr = replica->spec->rebuild_info.dw_replica;
+				if (replica == hr) {
+					REPLICA_ERRLOG("Disconnecting dw replica (%lu) "
+					   "as its healthy replica (%lu) not responded snap_create\n",
+					    dr->zvol_guid, hr->zvol_guid);
+					inform_mgmt_conn(dr);
+				}
+				REPLICA_ERRLOG("Disconnecting replica (%lu) as its not responded for"
+				   " snap_create\n", replica->zvol_guid);
+			} else if (opcode == ZVOL_OPCODE_SNAP_PREPARE) {
+				REPLICA_ERRLOG("Disconnecting the replica (%lu) "
+				   "as snap_prep opcode has been timed out\n",
+				    replica->zvol_guid);
 			}
-			REPLICA_ERRLOG("Disconnecting replica (%lu) as its not responded for"
-			   " snap_create\n", replica->zvol_guid);
 			inform_mgmt_conn(replica);
 			break;
 		}
@@ -1629,6 +1635,7 @@ timeout_wait_for_command(spec_t *spec, rcommon_mgmt_cmd_t *rcomm_mgmt, int wait_
 int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int wait_time)
 {
 	bool r;
+	int ret = false, sent = 0, success;
 	replica_t *replica;
 	struct timespec last;
 	rcommon_mgmt_cmd_t *rcomm_mgmt;
@@ -1658,24 +1665,30 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	}
 
 	io_seq = ++spec->io_seq;
+	uint8_t cf = spec->consistency_factor;
+	uint8_t rf = spec->replication_factor;
 
 	rcommon_mgmt_cmd_t *rmgmt = allocate_rcommon_mgmt_cmd(0);
 	replica_t *hr = spec->rebuild_info.healthy_replica;
 	if (hr) {
+		REPLICA_LOG("sending SNAP_PREP to Replica(%lu)\n", hr->zvol_guid);
 		(void) send_replica_snapshot(spec, hr, io_seq, snapname, ZVOL_OPCODE_SNAP_PREPARE, rmgmt);
-	}
 
-	int sent = rmgmt->cmds_sent;
-	uint8_t cf = spec->consistency_factor;
-	uint8_t rf = spec->replication_factor;
+		sent = rmgmt->cmds_sent;
+		success = timeout_wait_for_command(spec, rmgmt, wait_time, last);
 
-	int success = timeout_wait_for_command(spec, rmgmt, wait_time, last);
-
-	if (success != sent) {
-		spec->quiesce = 0;
-		MTX_UNLOCK(&spec->rq_mtx);
-		REPLICA_ERRLOG("snap prep failed.. sent=%d cf=%d rf=%d\n", sent, cf, rf);
-		return (false);
+		if (success != sent) {
+			spec->quiesce = 0;
+			MTX_UNLOCK(&spec->rq_mtx);
+			REPLICA_ERRLOG("snap prep failed.. sent=%d cf=%d rf=%d\n", sent, cf, rf);
+			/*
+			 * disconnect the replica from which we have
+			 * not received the response yet.
+			 */
+			disconnect_nonresponding_replica(hr, io_seq,
+			    ZVOL_OPCODE_SNAP_PREPARE);
+			return (false);
+		}
 	}
 
 	rcomm_mgmt = allocate_rcommon_mgmt_cmd(0);
@@ -1689,6 +1702,7 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 
 	if (success >= cf) {
 		r = true;
+		ret = r + sent; // let the caller know the total success count
 	}
 
 	if (r == false) {
@@ -1710,7 +1724,7 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	MTX_UNLOCK(&spec->rq_mtx);
 	if (r == false)
 		REPLICA_ERRLOG("snap create ioseq: %lu resp: %d\n", io_seq, r);
-	return r;
+	return (ret);
 }
 
 void
