@@ -1671,6 +1671,7 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	rcommon_mgmt_cmd_t *rmgmt = allocate_rcommon_mgmt_cmd(0);
 	replica_t *hr = spec->rebuild_info.healthy_replica;
 	if (hr) {
+		REPLICA_LOG("sending SNAP_PREP to Replica(%lu)\n", hr->zvol_guid);
 		(void) send_replica_snapshot(spec, hr, io_seq, snapname, ZVOL_OPCODE_SNAP_PREPARE, rmgmt);
 
 		sent = rmgmt->cmds_sent;

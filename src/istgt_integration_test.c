@@ -327,7 +327,8 @@ handle_snap_opcode(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 		MTX_LOCK(&snap_resp.snap_resp_mtx);
 		switch (snap_resp.test_id) {
 			case  SNAP_CREATE_TIMEOUT:
-			//	rargs->snap_error = 1;
+				// skip putting this hdr to the reply queue
+				rargs->snap_error = 1;
 				hdr->status = ZVOL_OP_STATUS_OK;
 				break;
 
@@ -1443,7 +1444,6 @@ main(int argc, char **argv)
 
 	replica_poll_time = 5;
 	replica_timeout = 10;
-	replication_log_level = LOG_LEVEL_MAX;
 
 	signal(SIGPIPE, SIG_IGN);
 
