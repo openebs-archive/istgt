@@ -270,13 +270,13 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 		iovec_count = 1;
 		mgmt_ack_hdr->status = (random() % 2) ? ZVOL_OP_STATUS_FAILED : ZVOL_OP_STATUS_OK;
 		mgmt_ack_hdr->len = 0;
-	} if (opcode == ZVOL_OPCODE_SNAP_PREPARE) {
-		iovec_count = 1;
-		mgmt_ack_hdr->status = (random() % 5 == 0) ? ZVOL_OP_STATUS_FAILED : ZVOL_OP_STATUS_OK;
-		mgmt_ack_hdr->len = 0;
 	} else if (opcode == ZVOL_OPCODE_SNAP_CREATE) {
 		iovec_count = 1;
-		sleep(random()%3 + 1);
+		sleep(random()%2);
+		mgmt_ack_hdr->status = (random() % 5 == 0) ? ZVOL_OP_STATUS_FAILED : ZVOL_OP_STATUS_OK;
+		mgmt_ack_hdr->len = 0;
+	} else if (opcode == ZVOL_OPCODE_SNAP_PREPARE) {
+		iovec_count = 1;
 		mgmt_ack_hdr->status = (random() % 5 == 0) ? ZVOL_OP_STATUS_FAILED : ZVOL_OP_STATUS_OK;
 		mgmt_ack_hdr->len = 0;
 	} else if (opcode == ZVOL_OPCODE_REPLICA_STATUS) {
