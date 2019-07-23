@@ -1460,7 +1460,7 @@ disconnect_nonresponding_replica(replica_t *replica, uint64_t io_seq,
 		if (mgmt_cmd->io_hdr->io_seq == io_seq &&
 		    mgmt_cmd->io_hdr->opcode == opcode) {
 
-			if (opcode == ZVOL_OPCODE_SNAP_CREATE) {
+			if (opcode == ZVOL_OPCODE_SNAP_CREATE || opcode == ZVOL_OPCODE_RESIZE) {
 				/*
 				 * If replica that is healthy and in rebuild process
 				 * doesn't respond for SNAP_CREATE Or RESIZE dw replica that is
@@ -1778,18 +1778,15 @@ int istgt_execute_volume_operation(spec_t *spec, zvol_op_code_t opcode,
 {
 	bool r;
 	replica_t *replica;
-	int free_rcomm_mgmt = 0;
+	int sent = 0, success, ret;
 	uint8_t rf, cf;
-	struct timespec last, now, diff;
+	struct timespec last;
 	rcommon_mgmt_cmd_t *rcomm_mgmt;
 	uint64_t io_seq;
 	size_t data_len = 0;
 	void *data = NULL;
 	zvol_op_resize_data_t *resize_cmd;
 
-
-	ASSERT(spec);
-	ASSERT(rcomm_mgmt);
 
 	clock_gettime(CLOCK_MONOTONIC_COARSE, &last);
 	MTX_LOCK(&spec->rq_mtx);
@@ -1814,17 +1811,16 @@ int istgt_execute_volume_operation(spec_t *spec, zvol_op_code_t opcode,
 		return false;
 	}
 
-	free_rcomm_mgmt = 0;
-
 	io_seq = ++spec->io_seq;
 	cf = spec->consistency_factor;
 	rf = spec->replication_factor;
 
 	rcommon_mgmt_cmd_t *rmgmt = allocate_rcommon_mgmt_cmd(0);
 	replica_t *hr = spec->rebuild_info.healthy_replica;
-	if (hr) {
+	if (hr && opcode == ZVOL_OPCODE_SNAP_CREATE) {
+		BUILD_VOL_CMD_DATA(spec)
 		REPLICA_LOG("sending SNAP_PREP to Replica(%lu)\n", hr->zvol_guid);
-		(void) send_replica_snapshot(spec, hr, io_seq, snapname, ZVOL_OPCODE_SNAP_PREPARE, rmgmt);
+		(void) send_replica_volume_operation(spec, hr, io_seq, ZVOL_OPCODE_SNAP_PREPARE , data_len, data, rmgmt);
 
 		sent = rmgmt->cmds_sent;
 		success = timeout_wait_for_command(spec, rmgmt, wait_time, last);

@@ -911,17 +911,19 @@ exec_resize(UCTL_Ptr uctl)
 	char *arg;
 	char *result;
 	int rc = 0, wait_time, io_wait_time;
+	char *name = uctl->setargv[0];
+	char *size = uctl->setargv[1];
 
-	if (uctl->setargcnt >= 1)
-		io_wait_time = atoi(uctl->setargv[0]);
+	if (uctl->setargcnt >= 3)
+		io_wait_time = atoi(uctl->setargv[2]);
 	else
 		io_wait_time = 10;
-	if (uctl->setargcnt >= 2)
-		wait_time = atoi(uctl->setargv[1]);
+	if (uctl->setargcnt >= 4)
+		wait_time = atoi(uctl->setargv[3]);
 	else
 		wait_time = 30;
-	uctl_snprintf(uctl, "%s \"%d\" \"%d\"\n",
-	uctl->cmd, io_wait_time, wait_time);
+	uctl_snprintf(uctl, "%s \"%s\" \"%s\" \"%d\" \"%d\"\n",
+	uctl->cmd, name, size, io_wait_time, wait_time);
 
 	rc = uctl_writeline(uctl);
 	if (rc != UCTL_CMD_OK) {
@@ -1346,7 +1348,7 @@ static EXEC_TABLE exec_table[] =
 	{"SNAPDESTROY", exec_snap, 2, 0},
 	{"REPLICA", exec_replica, 0, 0},
 	{"MAXIOWAIT", exec_max_io_wait, 0, 0},
-	{"RESIZE", exec_resize, 0, 0},
+	{"RESIZE", exec_resize, 2, 0},
 #endif
 	{ NULL,	NULL,	0,	0 },
 };

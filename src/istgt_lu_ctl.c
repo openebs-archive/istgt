@@ -614,14 +614,18 @@ istgt_uctl_cmd_resize(UCTL_Ptr uctl)
 {
 	ISTGT_LU_Ptr lu = NULL;
 	ISTGT_LU_DISK *spec = NULL;
-	int rc = 0, ret = UCTL_CMD_ERR, pos, io_wait_time, wait_time;
-	CONFIG *config;
-	CF_SECTION *sp;
-	char *config_file, *volname, *size_str, *arg;
+	int rc = 0, ret = UCTL_CMD_ERR, io_wait_time, wait_time;
+	char *volname, *size_str, *arg;
 	uint64_t new_size, old_size;
 	bool r;
 	const char *delim = ARGS_DELIM;
 	arg = uctl->arg;
+
+	CHECK_ARG_AND_GOTO_ERROR;
+	volname = strsepq(&arg, delim);
+
+	CHECK_ARG_AND_GOTO_ERROR;
+	size_str = strsepq(&arg, delim);
 
 	CHECK_ARG_AND_GOTO_ERROR;
 	io_wait_time = atoi(strsepq(&arg, delim));
@@ -629,23 +633,6 @@ istgt_uctl_cmd_resize(UCTL_Ptr uctl)
 	CHECK_ARG_AND_GOTO_ERROR;
 	wait_time = atoi(strsepq(&arg, delim));
 
-	config_file = uctl->istgt->config->file;
-	config = istgt_allocate_config();
-	rc = istgt_read_config(config, config_file);
-	if (rc < 0 || config->section == NULL) {
-		istgt_uctl_snprintf(uctl, "config error\n");
-	}
-
-	sp = istgt_get_section(config, ST_LOGICAL_UNIT);
-	if (sp == NULL) {
-		istgt_uctl_snprintf(uctl, "LogicalUnit section not found\n");
-		goto error_return;
-	}
-
-	volname = istgt_get_val(sp, "TargetName");
-	// get the size from istgt.config file
-	pos = 1;
-	size_str = istgt_get_lun_values(sp, "Storage", pos);
 	if (size_str == NULL) {
 		istgt_uctl_snprintf(uctl, "LUN format error\n");
 		goto error_return;
@@ -661,7 +648,9 @@ istgt_uctl_cmd_resize(UCTL_Ptr uctl)
 		goto error_return;
 	}
 	spec = lu->lun[0].spec;
-	old_size = lu->lun[0].u.storage.size;
+	//old_size = lu->lun[0].u.storage.size;
+	old_size = spec->size;
+	ISTGT_LOG("spec->size= %"PRIu64"lun size= %"PRIu64,old_size, lu->lun[0].u.storage.size);
 	new_size = istgt_lu_parse_size(size_str);
 	if (old_size >= new_size) {
 		ISTGT_LOG("volume(%s) size is already greater than or equal to requested resize\n", volname);
