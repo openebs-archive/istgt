@@ -1994,8 +1994,11 @@ static void
 handle_update_spec_stats(spec_t *spec, zvol_io_hdr_t *hdr, void *resp)
 {
 	zvol_op_stat_t *stats = (zvol_op_stat_t *)resp;
-	if (hdr->status != ZVOL_OP_STATUS_OK)
+	if ((hdr->status != ZVOL_OP_STATUS_OK) ||
+	    (hdr->len != sizeof (zvol_op_stat_t))) {
+		REPLICA_ERRLOG("update stats reply status is not ok.");
 		return;
+	}
 	if (strcmp(stats->label, "used") == 0)
 		spec->stats.used = stats->value;
 	clock_gettime(CLOCK_MONOTONIC_COARSE, &spec->stats.updated_stats_time);
@@ -2003,7 +2006,7 @@ handle_update_spec_stats(spec_t *spec, zvol_io_hdr_t *hdr, void *resp)
 }
 
 static int
-update_replica_status(spec_t *spec, replica_t *replica)
+update_replica_status(spec_t *spec, zvol_io_hdr_t *hdr, replica_t *replica)
 {
 	zrepl_status_ack_t *repl_status;
 	replica_state_t last_state;
@@ -2011,6 +2014,12 @@ update_replica_status(spec_t *spec, replica_t *replica)
 	replica_t *r1;
 	int replica_count;
 
+	if ((hdr->status != ZVOL_OP_STATUS_OK) ||
+	    (hdr->len != sizeof (zrepl_status_ack_t))) {
+		REPLICA_ERRLOG("update replica status is not ok.. for "
+		    "replica(%s:%d)\n", replica->ip, replica->port);
+		return -1;
+	}
 	repl_status = (zrepl_status_ack_t *)replica->mgmt_io_resp_data;
 
 	REPLICA_ERRLOG("Replica(%lu) state:%d rebuild status:%d\n",
@@ -2124,7 +2133,8 @@ zvol_handshake(spec_t *spec, replica_t *replica)
 	ack_hdr = replica->mgmt_io_resp_hdr;	
 	ack_data = (mgmt_ack_t *)replica->mgmt_io_resp_data;
 
-	if (ack_hdr->status != ZVOL_OP_STATUS_OK) {
+	if ((ack_hdr->status != ZVOL_OP_STATUS_OK) ||
+	    (ack_hdr->len != sizeof (mgmt_ack_t))) {
 		REPLICA_ERRLOG("mgmt_ack status is not ok.. for "
 		    "replica(%s:%d)\n", replica->ip, replica->port);
 		return -1;
@@ -2414,7 +2424,6 @@ read_io_resp_hdr:
 
 			switch (resp_hdr->opcode) {
 				case ZVOL_OPCODE_HANDSHAKE:
-					VERIFY3U(resp_hdr->len, ==, sizeof (mgmt_ack_t));
 					/* dont process handshake on data connection */
 					ASSERT(fd != replica->iofd);
 
@@ -2423,17 +2432,19 @@ read_io_resp_hdr:
 					memset(resp_hdr, 0, sizeof(zvol_io_hdr_t));
 					free(*resp_data);
 					mgmt_cmd->cmd_completed = 1;
+					*resp_data = NULL;
+					*read_count = 0;
+					*state = READ_IO_RESP_HDR;
 
 					if (rc == -1)
 						return (rc);
 					break;
 
 				case ZVOL_OPCODE_REPLICA_STATUS:
-					VERIFY3U(resp_hdr->len, ==, sizeof (zrepl_status_ack_t));
 					/* replica status must come from mgmt connection */
 					ASSERT(fd != replica->iofd);
 
-					update_replica_status(spec, replica);
+					update_replica_status(spec, resp_hdr, replica);
 					free(*resp_data);
 					break;
 
