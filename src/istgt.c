@@ -1238,56 +1238,6 @@ istgt_get_intval(CF_SECTION *sp, const char *key)
 	return (istgt_get_nintval(sp, key, 0));
 }
 
-CF_SECTION *
-istgt_get_section(CONFIG *config, CF_SECTION_TYPE section_type)
-{
-	CF_SECTION *sp;
-	sp = config->section;
-	while (sp != NULL) {
-		if (sp->type == section_type) {
-			if (sp->num == 0) {
-				ISTGT_ERRLOG("invalid section\n");
-				return NULL;
-			}
-			if (sp->num > ISTGT_LU_TAG_MAX) {
-				ISTGT_ERRLOG("tag %d is invalid\n", sp->num);
-				return NULL;
-			}
-			return sp;
-		}
-		sp = sp->next;
-	}
-	return NULL;
-}
-
-char *
-istgt_get_lun_values(CF_SECTION *sp, const char *key, int pos)
-{
-	int i, j;
-	char buf[MAX_TMPBUF], *val, *required_value;
-	for(i = 0; i < MAX_LU_LUN; i++) {
-		snprintf(buf, sizeof (buf), "LUN%d", i);
-		val = istgt_get_val(sp, buf);
-		if (val == NULL)
-			continue;
-		for(j = 0; ; j++) {
-			val = istgt_get_nmval(sp, buf, j, 0);
-			if (val == NULL)
-				break;
-			if (strcasecmp(val, key) == 0) {
-				required_value = istgt_get_nmval(sp, buf, j, pos);
-#ifdef REPLICATION
-				if (required_value == NULL) {
-					return NULL;
-				}
-#endif
-				return required_value;
-			}
-		}
-	}
-	return NULL;
-}
-
 static const char *
 istgt_get_log_facility(CONFIG *config)
 {

@@ -650,7 +650,6 @@ istgt_uctl_cmd_resize(UCTL_Ptr uctl)
 	spec = lu->lun[0].spec;
 	//old_size = lu->lun[0].u.storage.size;
 	old_size = spec->size;
-	ISTGT_LOG("spec->size= %"PRIu64"lun size= %"PRIu64,old_size, lu->lun[0].u.storage.size);
 	new_size = istgt_lu_parse_size(size_str);
 	if (old_size >= new_size) {
 		ISTGT_LOG("volume(%s) size is already greater than or equal to requested resize\n", volname);
@@ -661,6 +660,7 @@ istgt_uctl_cmd_resize(UCTL_Ptr uctl)
 			     io_wait_time, wait_time);
 
 		if (r == true) {
+			ISTGT_LOG("Successfully resized volume %s to %s size", volname, size_str);
 			istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
 			ret = UCTL_CMD_OK;
 			lu->lun[0].u.storage.size = new_size;

@@ -902,13 +902,15 @@ verify_resize_command()
 	local CONF_FILE="/usr/local/etc/istgt/istgt.conf"
 	old_size=$(lsblk | grep $disk_name |awk -F ' ' '{print $4+0}')
 	new_size=$(( $old_size + 2 ))
-	sed -i "s|LUN0 Storage.*|LUN0 Storage ${new_size}G 32k|g" $CONF_FILE
-	sleep 3
-	$ISTGTCONTROL resize
+	vol_name=$(cat $CONF_FILE | grep TargetName | awk '{print $2}')
+	$ISTGTCONTROL resize $vol_name "${new_size}G"
 	if [ $? -ne 0 ]
 	then
 		echo "Failed to resize the volume"
 		exit 1
+	else
+		sed -i "s|LUN0 Storage.*|LUN0 Storage ${new_size}G 32k|g" $CONF_FILE
+		sleep 3
 	fi
 	sleep 2
 
