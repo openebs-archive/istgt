@@ -3,7 +3,7 @@ set -e
 
 pwd
 make clean
-sh autogen.sh
+bash autogen.sh
 ./configure --enable-replication
 make clean
 make

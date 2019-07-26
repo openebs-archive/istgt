@@ -1,14 +1,9 @@
-#!/bin/sh
+#!/bin/bash
 
-if [ ! -z ${TRAVIS_TAG} ];
-then
-  ZFS_BUILD_BRANCH=${TRAVIS_TAG}
-else
-  . ./fetch-zfs-branch.sh
-fi
+source ./fetch-libcstor-branch.sh
 
-echo "Using zfs branch - ${ZFS_BUILD_BRANCH}"
-echo $(wget -O /tmp/zrepl_prot.h https://raw.githubusercontent.com/openebs/libcstor/${ZFS_BUILD_BRANCH}/include/zrepl_prot.h)
+echo "Using libcstor branch - ${LIBCSTOR_BUILD_BRANCH}"
+echo $(wget -O /tmp/zrepl_prot.h https://raw.githubusercontent.com/openebs/libcstor/${LIBCSTOR_BUILD_BRANCH}/include/zrepl_prot.h)
 
 autoreconf -fiv
 rm -Rf autom4te.cache
