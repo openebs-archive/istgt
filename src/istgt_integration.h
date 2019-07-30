@@ -142,10 +142,6 @@ typedef struct replica_s {
 	/* port from which replica has made mgmt conn. */
 	int replica_mgmt_dport;
 #endif
-
-#ifdef REPLICATION
-    REPLICA_STATUS_Ptr status;
-#endif
 } replica_t;
 
 typedef struct cstor_conn_ops {

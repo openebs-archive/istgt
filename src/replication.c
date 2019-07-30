@@ -357,9 +357,9 @@ enqueue_prepare_for_rebuild(spec_t *spec, replica_t *replica,
 	mgmt_cmd->rcomm_mgmt = rcomm_mgmt;
 
 	MTX_LOCK(&replica->r_mtx);
-        replica->spec->replica->prepare_rebuild_req_cnt++;
 	TAILQ_INSERT_TAIL(&replica->mgmt_cmd_queue, mgmt_cmd, mgmt_cmd_next);
 	MTX_UNLOCK(&replica->r_mtx);
+        __sync_add_and_fetch(&spec->replica->prepare_rebuild_req_cnt, 1);
 
 	rcomm_mgmt->cmds_sent++;
 
