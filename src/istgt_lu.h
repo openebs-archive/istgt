@@ -762,6 +762,15 @@ struct luworker_exit_args {
 #define SEND_R2T		0x80
 #define SEND_TASK_RSP		0x100
 
+typedef struct replica_status {
+    uint64_t snapshot_prepare_req_cnt, snapshot_prepare_req_success_cnt;
+    uint64_t snapshot_create_req_cnt, snapshot_create_req_success_cnt;
+    uint64_t start_rebuild_req_cnt, start_rebuild_req_success_cnt;
+    uint64_t prepare_rebuild_req_cnt, prepare_rebuild_req_success_cnt;
+} REPLICA_STATUS;
+
+typedef REPLICA_STATUS *REPLICA_STATUS_Ptr;
+
 typedef struct istgt_lu_disk_t {
 	ISTGT_LU_Ptr lu;
 	int num;
@@ -808,6 +817,7 @@ typedef struct istgt_lu_disk_t {
 	uint64_t totalwriterepltime; /* Similar to above */
 	uint64_t totalreadblockcount;
 	uint64_t totalwriteblockcount;
+    REPLICA_STATUS_Ptr  replica;
 #endif
 	/* modify lun */
 	int dofake;
@@ -880,8 +890,8 @@ typedef struct istgt_lu_disk_t {
 
 	/*Common for both the above queues,
 	Since same cmd is part of both the queues*/
-	pthread_mutex_t rq_mtx; 
-	pthread_mutex_t rcommonq_mtx; 
+	pthread_mutex_t rq_mtx;
+	pthread_mutex_t rcommonq_mtx;
 	pthread_mutex_t luworker_rmutex[ISTGT_MAX_NUM_LUWORKERS];
 	pthread_cond_t luworker_rcond[ISTGT_MAX_NUM_LUWORKERS];
 

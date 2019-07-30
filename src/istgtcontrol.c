@@ -800,6 +800,40 @@ exec_iostats(UCTL_Ptr uctl)
 	}
 	return (UCTL_CMD_OK);
 }
+
+static int
+exec_istgt_status(UCTL_Ptr uctl)
+{
+	const char *delim = ARGS_DELIM;
+	char *arg;
+	char *result;
+	int rc;
+
+ 	uctl_snprintf(uctl, "ISTGTSTATUS\n");
+	rc = uctl_writeline(uctl);
+	if (rc != UCTL_CMD_OK) {
+		return (rc);
+	}
+	/* receive result */
+	while (1) {
+		rc = uctl_readline(uctl);
+		if (rc != UCTL_CMD_OK) {
+			return (rc);
+		}
+		arg = trim_string(uctl->recvbuf);
+		result = strsepq(&arg, delim);
+		strupr(result);
+		if (strcmp(result, uctl->cmd) != 0) {
+			break;
+		}
+		fprintf(stdout, "%s\n", arg);
+	}
+	if (strcmp(result, "OK") != 0) {
+		fprintf(stderr, "ERROR %s\n", arg);
+		return (UCTL_CMD_ERR);
+	}
+	return (UCTL_CMD_OK);
+}
 #endif
 
 static int
@@ -1287,6 +1321,7 @@ static EXEC_TABLE exec_table[] =
 	{"STATS", exec_stats, 0, 0 },
 #ifdef REPLICATION
 	{"IOSTATS", exec_iostats, 0, 0 },
+	{"ISTGTSTATUS", exec_istgt_status, 0, 0 },
 	{"MEMPOOL", exec_mempool_stats, 0, 0 },
 #endif
 	{"SET", exec_set, 0, 1},

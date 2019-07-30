@@ -357,6 +357,7 @@ enqueue_prepare_for_rebuild(spec_t *spec, replica_t *replica,
 	mgmt_cmd->rcomm_mgmt = rcomm_mgmt;
 
 	MTX_LOCK(&replica->r_mtx);
+        replica->spec->replica->prepare_rebuild_req_cnt++;
 	TAILQ_INSERT_TAIL(&replica->mgmt_cmd_queue, mgmt_cmd, mgmt_cmd_next);
 	MTX_UNLOCK(&replica->r_mtx);
 
@@ -414,12 +415,12 @@ send_prepare_for_rebuild_or_trigger_rebuild(spec_t *spec,
 	 */
 	if (replica_cnt == 0) {
 		assert(spec->ready == true);
-
 		data_len = strlen(spec->volname) + 1;
 		mgmt_data = (mgmt_ack_t *)malloc(sizeof (*mgmt_data));
 		memset(mgmt_data, 0, sizeof (*mgmt_data));
 		snprintf(mgmt_data->dw_volname, data_len, "%s",
 		    spec->volname);
+
 		ret = start_rebuild(mgmt_data,
 		    spec->rebuild_info.dw_replica, sizeof (*mgmt_data));
 		if (ret == -1) {
@@ -453,7 +454,6 @@ send_prepare_for_rebuild_or_trigger_rebuild(spec_t *spec,
 		
 		if (replica_cnt == 0)
 			break;
-    
 		ret = enqueue_prepare_for_rebuild(spec, replica, rcomm_mgmt,
 		    ZVOL_OPCODE_PREPARE_FOR_REBUILD);
 		if (ret == -1) {
@@ -487,6 +487,7 @@ start_rebuild(void *buf, replica_t *replica, uint64_t data_len)
 	mgmt_cmd_t *mgmt_cmd;
 
 	ASSERT(MTX_LOCKED(&replica->spec->rq_mtx));
+        replica->spec->replica->start_rebuild_req_cnt++;
 
 	mgmt_cmd = malloc(sizeof (mgmt_cmd_t));
 	memset(mgmt_cmd, 0, sizeof (mgmt_cmd_t));
@@ -1352,15 +1353,17 @@ handle_snap_create_resp(replica_t *replica, mgmt_cmd_t *mgmt_cmd)
 		}
 		MTX_UNLOCK(&replica->spec->rq_mtx);
 	}
-	MTX_LOCK(&rcomm_mgmt->mtx);
-	if (hdr->status != ZVOL_OP_STATUS_OK)
+        MTX_LOCK(&rcomm_mgmt->mtx);
+	if (hdr->status != ZVOL_OP_STATUS_OK){
 		rcomm_mgmt->cmds_failed++;
-	else
+        } else {
 		rcomm_mgmt->cmds_succeeded++;
+                __sync_add_and_fetch(&replica->spec->replica->snapshot_create_req_success_cnt, 1);
+        }
 	if ((rcomm_mgmt->caller_gone == 1) &&
 	    (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_failed + rcomm_mgmt->cmds_succeeded)))
 		delete = true;
-	MTX_UNLOCK(&rcomm_mgmt->mtx);
+        MTX_UNLOCK(&rcomm_mgmt->mtx);
 	if (delete == true)
 		free(rcomm_mgmt);
 }
@@ -1371,12 +1374,13 @@ handle_snap_prepare_resp(replica_t *replica, mgmt_cmd_t *mgmt_cmd)
 	zvol_io_hdr_t *hdr = replica->mgmt_io_resp_hdr;
 	rcommon_mgmt_cmd_t *rcomm_mgmt = mgmt_cmd->rcomm_mgmt;
 	bool delete = false;
-
-	MTX_LOCK(&rcomm_mgmt->mtx);
-	if (hdr->status != ZVOL_OP_STATUS_OK)
+        MTX_LOCK(&rcomm_mgmt->mtx);
+	if (hdr->status != ZVOL_OP_STATUS_OK) {
 		rcomm_mgmt->cmds_failed++;
-	else
+        } else {
 		rcomm_mgmt->cmds_succeeded++;
+                __sync_add_and_fetch(&replica->spec->replica->snapshot_prepare_req_success_cnt, 1);
+        }
 	if (rcomm_mgmt->caller_gone == 1) {
 		if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_failed + rcomm_mgmt->cmds_succeeded))
 			delete = true;
@@ -1643,6 +1647,7 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 
 	clock_gettime(CLOCK_MONOTONIC_COARSE, &last);
 	MTX_LOCK(&spec->rq_mtx);
+        spec->replica->snapshot_create_req_cnt++;
 
 	/* Wait for any ongoing snapshot commands */
 	while (spec->quiesce == 1) {
@@ -1672,6 +1677,7 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	replica_t *hr = spec->rebuild_info.healthy_replica;
 	if (hr) {
 		REPLICA_LOG("sending SNAP_PREP to Replica(%lu)\n", hr->zvol_guid);
+                spec->replica->snapshot_prepare_req_cnt++;
 		(void) send_replica_snapshot(spec, hr, io_seq, snapname, ZVOL_OPCODE_SNAP_PREPARE, rmgmt);
 
 		sent = rmgmt->cmds_sent;
@@ -1914,8 +1920,10 @@ static void
 handle_start_rebuild_resp(spec_t *spec, zvol_io_hdr_t *hdr)
 {
 
-	if (hdr->status == ZVOL_OP_STATUS_OK)
+	if (hdr->status == ZVOL_OP_STATUS_OK) {
+                __sync_add_and_fetch(&spec->replica->start_rebuild_req_success_cnt, 1);
 		return;
+        }
 
 	MTX_LOCK(&spec->rq_mtx);
 	spec->rebuild_info.dw_replica = NULL;
@@ -1955,6 +1963,7 @@ handle_prepare_for_rebuild_resp(spec_t *spec, zvol_io_hdr_t *hdr,
 				REPLICA_LOG("Rebuild triggered on Replica(%lu) "
 				    "state:%d\n", dw_replica->zvol_guid,
 				    dw_replica->state);
+                                spec->replica->prepare_rebuild_req_success_cnt++;
 			} else {
 				REPLICA_LOG("Unable to start rebuild on Replica(%lu)"
 				    " state:%d\n", dw_replica->zvol_guid,
@@ -2130,7 +2139,7 @@ zvol_handshake(spec_t *spec, replica_t *replica)
 	zvol_io_hdr_t *ack_hdr;
 	mgmt_ack_t *ack_data;
 
-	ack_hdr = replica->mgmt_io_resp_hdr;	
+	ack_hdr = replica->mgmt_io_resp_hdr;
 	ack_data = (mgmt_ack_t *)replica->mgmt_io_resp_data;
 
 	if ((ack_hdr->status != ZVOL_OP_STATUS_OK) ||
@@ -2214,7 +2223,7 @@ accept_mgmt_conns(int epfd, int sfd)
                 MTX_LOCK(&specq_mtx);
                 TAILQ_FOREACH(spec, &spec_q, spec_next) {
 			// Since we are supporting single spec per controller
-			// we will continue using first spec only	
+			// we will continue using first spec only
                         break;
                 }
                 MTX_UNLOCK(&specq_mtx);
@@ -2454,7 +2463,7 @@ read_io_resp_hdr:
 					break;
 
 				case ZVOL_OPCODE_PREPARE_FOR_REBUILD:
-				
+
 					/* replica status must come from mgmt connection */
 					assert(fd != replica->iofd);
 					handle_prepare_for_rebuild_resp(spec, resp_hdr, *resp_data, mgmt_cmd);

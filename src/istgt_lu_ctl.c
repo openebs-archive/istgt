@@ -3495,6 +3495,83 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 	}
 	return (UCTL_CMD_OK);
 }
+
+static int
+istgt_uctl_cmd_istgt_status(UCTL_Ptr uctl)
+{
+	int rc;
+	ISTGT_LU_DISK *spec;
+	/* instantiate json_object from json-c library. */
+	struct json_object *jobj;
+        MTX_LOCK(&uctl->istgt->mutex);
+	jobj = json_object_new_object();	/* create new object */
+	json_object_object_add(jobj, "loginReqCnt",
+	    json_object_new_uint64(uctl->istgt->login_req_cnt));
+	json_object_object_add(jobj, "loginReqSuccessCnt",
+	    json_object_new_uint64(uctl->istgt->login_req_success_cnt));
+	json_object_object_add(jobj, "logoutReqCnt",
+	    json_object_new_uint64(uctl->istgt->logout_req_cnt));
+	json_object_object_add(jobj, "logoutReqSuccessCnt",
+	    json_object_new_uint64(uctl->istgt->logout_req_success_cnt));
+	json_object_object_add(jobj, "discoveryReqCnt",
+	    json_object_new_uint64(uctl->istgt->discovery_req_cnt));
+	json_object_object_add(jobj, "discoveryReqSuccessCnt",
+	    json_object_new_uint64(uctl->istgt->discovery_req_success_cnt));
+	json_object_object_add(jobj, "read6Cnt",
+	    json_object_new_uint64(uctl->istgt->read6_cnt));
+	json_object_object_add(jobj, "read10Cnt",
+	    json_object_new_uint64(uctl->istgt->read10_cnt));
+	json_object_object_add(jobj, "read12Cnt",
+	    json_object_new_uint64(uctl->istgt->read12_cnt));
+	json_object_object_add(jobj, "read16Cnt",
+	    json_object_new_uint64(uctl->istgt->read16_cnt));
+	json_object_object_add(jobj, "write6Cnt",
+	    json_object_new_uint64(uctl->istgt->write6_cnt));
+	json_object_object_add(jobj, "write10Cnt",
+	    json_object_new_uint64(uctl->istgt->write10_cnt));
+	json_object_object_add(jobj, "write12Cnt",
+	    json_object_new_uint64(uctl->istgt->write12_cnt));
+	json_object_object_add(jobj, "write16Cnt",
+	    json_object_new_uint64(uctl->istgt->write16_cnt));
+	json_object_object_add(jobj, "sync10Cnt",
+	    json_object_new_uint64(uctl->istgt->sync10_cnt));
+	json_object_object_add(jobj, "sync16Cnt",
+            json_object_new_uint64(uctl->istgt->sync16_cnt));
+        MTX_UNLOCK(&uctl->istgt->mutex);
+	MTX_LOCK(&specq_mtx);
+	TAILQ_FOREACH(spec, &spec_q, spec_next) {
+		json_object_object_add(jobj, "snapshotCreateReqCnt",
+		    json_object_new_uint64(spec->replica->snapshot_create_req_cnt));
+		json_object_object_add(jobj, "snapshotPrepareReqCnt",
+		    json_object_new_uint64(spec->replica->snapshot_prepare_req_cnt));
+		json_object_object_add(jobj, "snapshotCreateReqSuccessCnt",
+		    json_object_new_uint64(spec->replica->snapshot_create_req_success_cnt));
+		json_object_object_add(jobj, "snapshotPrepareReqSuccessCnt",
+		    json_object_new_uint64(spec->replica->snapshot_prepare_req_success_cnt));
+		json_object_object_add(jobj, "startRebuildReqCnt",
+		    json_object_new_uint64(spec->replica->start_rebuild_req_cnt));
+		json_object_object_add(jobj, "startRebuildReqSuccessCnt",
+		    json_object_new_uint64(spec->replica->start_rebuild_req_success_cnt));
+		json_object_object_add(jobj, "prepareRebuildReqCnt",
+		    json_object_new_uint64(spec->replica->prepare_rebuild_req_cnt));
+		json_object_object_add(jobj, "prepareRebuildReqSuccessCnt",
+		    json_object_new_uint64(spec->replica->prepare_rebuild_req_success_cnt));
+        }
+	MTX_UNLOCK(&specq_mtx);
+	istgt_uctl_snprintf(uctl, "%s  %s\n",
+	    uctl->cmd, json_object_to_json_string(jobj));
+	rc = istgt_uctl_writeline(uctl);
+	json_object_put(jobj);
+	if (rc != UCTL_CMD_OK) {
+		return (rc);
+	}
+	istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
+	rc = istgt_uctl_writeline(uctl);
+	if (rc != UCTL_CMD_OK) {
+		return (rc);
+	}
+	return (UCTL_CMD_OK);
+}
 #endif
 
 static int
@@ -3732,6 +3809,7 @@ static ISTGT_UCTL_CMD_TABLE istgt_uctl_cmd_table[] =
 	{ "STATS", istgt_uctl_cmd_stats},
 #ifdef REPLICATION
 	{ "IOSTATS", istgt_uctl_cmd_iostats},
+	{ "ISTGTSTATUS", istgt_uctl_cmd_istgt_status},
 	{ "MEMPOOL", istgt_uctl_cmd_mempoolstats},
 #endif
 	{ "SET", istgt_uctl_cmd_set},

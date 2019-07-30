@@ -903,6 +903,7 @@ int
 istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 {
 	ISTGT_LU_DISK *spec;
+        REPLICA_STATUS *replica_status;
 	IT_NEXUS *nexus;
 	uint64_t gb_size;
 	uint64_t mb_size;
@@ -934,9 +935,12 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 
 		spec = xmalloc(sizeof *spec);
 		memset(spec, 0, sizeof *spec);
+                replica_status = xmalloc(sizeof *replica_status);
+                memset(replica_status, 0, sizeof *replica_status);
 		spec->lu = lu;
 #ifdef	REPLICATION
 		spec->volname = xstrdup(spec->lu->volname);
+                spec->replica = replica_status;
 #endif
 		spec->num = lu->num;
 		spec->lun = i;
@@ -1032,7 +1036,7 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 				ISTGT_ERRLOG("LU%d: luworker %d mutex_init() failed errno:%d\n", lu->num, k, errno);
 				return -1;
 			}
-        
+
 			rc = pthread_cond_init(&spec->luworker_cond[k], NULL);
 			if (rc != 0) {
 				ISTGT_ERRLOG("LU%d: luworker %d cond_init() failed errno:%d\n", lu->num, k, errno);
@@ -1045,7 +1049,7 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 				ISTGT_ERRLOG("LU%d: luworker %d mutex_init() failed errno:%d\n", lu->num, k, errno);
 				return -1;
 			}
-        
+
 			rc = pthread_cond_init(&spec->luworker_rcond[k], NULL);
 			if (rc != 0) {
 				ISTGT_ERRLOG("LU%d: luworker %d cond_init() failed errno:%d\n", lu->num, k, errno);
@@ -1058,7 +1062,7 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 				ISTGT_ERRLOG("LU%d: lu_tmf_mutex %d mutex_init() failed errno:%d\n", lu->num, k, errno);
 				return -1;
 			}
-        
+
 			rc = pthread_cond_init(&spec->lu_tmf_cond[k], NULL);
 			if (rc != 0) {
 				ISTGT_ERRLOG("LU%d: lu_tmf_cond %d cond_init() failed errno:%d\n", lu->num, k, errno);

@@ -1907,6 +1907,9 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 
 		/* Target Name and Port */
 		if (strcasecmp(session_type, "Normal") == 0) {
+			MTX_LOCK(&conn->istgt->mutex);
+                        conn->istgt->login_req_cnt++;
+			MTX_UNLOCK(&conn->istgt->mutex);
 			val = ISCSI_GETVAL(params, "TargetName");
 			if (val == NULL) {
 				ISTGT_ERRLOG("TargetName is empty\n");
@@ -2059,6 +2062,9 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 				}
 			}
 			MTX_UNLOCK(&lu->mutex);
+			MTX_LOCK(&conn->istgt->mutex);
+                        conn->istgt->login_req_success_cnt++;
+			MTX_UNLOCK(&conn->istgt->mutex);
 		} else if (strcasecmp(session_type, "Discovery") == 0) {
 			snprintf(conn->target_name, sizeof (conn->target_name),
 				"%s", "dummy");
@@ -2069,6 +2075,7 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 
 			/* force target flags */
 			MTX_LOCK(&conn->istgt->mutex);
+                        conn->istgt->discovery_req_cnt++;
 			if (conn->istgt->no_discovery_auth) {
 				conn->req_auth = 0;
 				rc = istgt_iscsi_param_del(&conn->params,
@@ -2105,6 +2112,7 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 			if (conn->istgt->req_discovery_auth_mutual) {
 				conn->req_mutual = 1;
 			}
+                        conn->istgt->discovery_req_success_cnt++;
 			MTX_UNLOCK(&conn->istgt->mutex);
 		} else {
 			ISTGT_ERRLOG("unknown session type\n");
@@ -3034,7 +3042,7 @@ istgt_iscsi_transfer_in_internal(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 }
 
 static void
-parse_scsi_cdb(ISTGT_LU_CMD_Ptr lu_cmd)
+parse_scsi_cdb(ISTGT_LU_CMD_Ptr lu_cmd, ISTGT_Ptr istgt)
 {
 #define	setinf1()  {					 \
 	if (dpo) lu_cmd->info[lu_cmd->infdx++] = 'd'; \
@@ -3110,6 +3118,7 @@ parse_scsi_cdb(ISTGT_LU_CMD_Ptr lu_cmd)
 		  // break;
 
 		case SBC_READ_6:
+                        __sync_fetch_and_add(&istgt->read6_cnt, 1);
 			if (lu_cmd->R_bit == 0)
 				NOR = 1;
 			lba = (uint64_t) (DGET24(&cdb[1]) & 0x001fffffU);
@@ -3119,6 +3128,7 @@ parse_scsi_cdb(ISTGT_LU_CMD_Ptr lu_cmd)
 			break;
 
 		case SBC_READ_10:
+                        __sync_fetch_and_add(&istgt->read10_cnt, 1);
 			if (lu_cmd->R_bit == 0)
 				NOR = 1;
 			dpo = BGET8(&cdb[1], 4);
@@ -3130,6 +3140,7 @@ parse_scsi_cdb(ISTGT_LU_CMD_Ptr lu_cmd)
 			break;
 
 		case SBC_READ_12:
+                        __sync_fetch_and_add(&istgt->read12_cnt, 1);
 			if (lu_cmd->R_bit == 0)
 				NOR = 1;
 			dpo = BGET8(&cdb[1], 4);
@@ -3141,6 +3152,7 @@ parse_scsi_cdb(ISTGT_LU_CMD_Ptr lu_cmd)
 			break;
 
 		case SBC_READ_16:
+                        __sync_fetch_and_add(&istgt->read16_cnt, 1);
 			if (lu_cmd->R_bit == 0)
 				NOR = 1;
 			dpo = BGET8(&cdb[1], 4);
@@ -3152,6 +3164,7 @@ parse_scsi_cdb(ISTGT_LU_CMD_Ptr lu_cmd)
 			break;
 
 		case SBC_WRITE_6:
+                        __sync_fetch_and_add(&istgt->write6_cnt, 1);
 			if (lu_cmd->W_bit == 0)
 				NOW = 1; // WBit not set to 1
 			lba = (uint64_t) (DGET24(&cdb[1]) & 0x001fffffU);
@@ -3162,6 +3175,7 @@ parse_scsi_cdb(ISTGT_LU_CMD_Ptr lu_cmd)
 
 		case SBC_WRITE_10:
 		case SBC_WRITE_AND_VERIFY_10:
+                        __sync_fetch_and_add(&istgt->write10_cnt, 1);
 			if (lu_cmd->W_bit == 0)
 				NOW = 1; // WBit not set to 1
 			dpo = BGET8(&cdb[1], 4);
@@ -3174,6 +3188,7 @@ parse_scsi_cdb(ISTGT_LU_CMD_Ptr lu_cmd)
 
 		case SBC_WRITE_12:
 		case SBC_WRITE_AND_VERIFY_12:
+                        __sync_fetch_and_add(&istgt->write12_cnt, 1);
 			if (lu_cmd->W_bit == 0)
 				NOW = 1; // WBit not set to 1
 			dpo = BGET8(&cdb[1], 4);
@@ -3186,6 +3201,8 @@ parse_scsi_cdb(ISTGT_LU_CMD_Ptr lu_cmd)
 
 		case SBC_WRITE_16:
 		case SBC_WRITE_AND_VERIFY_16:
+                        __sync_fetch_and_add(&istgt->write16_cnt, 1);
+
 			if (lu_cmd->W_bit == 0)
 				NOW = 1; // WBit not set to 1
 			dpo = BGET8(&cdb[1], 4);
@@ -3265,6 +3282,7 @@ parse_scsi_cdb(ISTGT_LU_CMD_Ptr lu_cmd)
 			break;
 
 		case SBC_SYNCHRONIZE_CACHE_10:
+                        __sync_fetch_and_add(&istgt->sync10_cnt, 1);
 			sync_nv = BGET8(&cdb[1], 2);
 			immed = BGET8(&cdb[1], 1);
 			lba = (uint64_t) DGET32(&cdb[2]);
@@ -3274,6 +3292,7 @@ parse_scsi_cdb(ISTGT_LU_CMD_Ptr lu_cmd)
 			break;
 
 		case SBC_SYNCHRONIZE_CACHE_16:
+                        __sync_fetch_and_add(&istgt->sync16_cnt, 1);
 			sync_nv = BGET8(&cdb[1], 2);
 			immed = BGET8(&cdb[1], 1);
 			lba = (uint64_t) DGET64(&cdb[2]);
@@ -3456,7 +3475,7 @@ istgt_iscsi_op_scsi(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 	SESS_MTX_UNLOCK(conn);
 
 	lu_cmd.cdb = cdb;
-	parse_scsi_cdb(&lu_cmd);
+	parse_scsi_cdb(&lu_cmd, conn->istgt);
 	lu_cmd.task_tag = task_tag;
 	lu_cmd.transfer_len = transfer_len;
 
@@ -5206,10 +5225,16 @@ istgt_iscsi_execute(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 
 	case ISCSI_OP_LOGOUT:
 		op = "logout";
+		MTX_LOCK(&conn->istgt->mutex);
+                conn->istgt->logout_req_cnt++;
+		MTX_UNLOCK(&conn->istgt->mutex);
 		rc = istgt_iscsi_op_logout(conn, pdu);
 		if (rc < 0)
 			goto error_out;
 		ret = 1;
+		MTX_LOCK(&conn->istgt->mutex);
+                conn->istgt->logout_req_success_cnt++;
+		MTX_UNLOCK(&conn->istgt->mutex);
 		break;
 
 	case ISCSI_OP_SCSI_DATAOUT:
