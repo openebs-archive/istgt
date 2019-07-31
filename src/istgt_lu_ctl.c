@@ -73,6 +73,7 @@
 #include <json-c/json_object.h>
 #include "istgt_integration.h"
 #include <replication_misc.h>
+#include "replication.h"
 #endif
 
 #if !defined(__GNUC__)
@@ -136,6 +137,21 @@ typedef enum {
 } UCTL_CMD_STATUS;
 
 #define	ARGS_DELIM " \t"
+
+static int
+replica_queue_count(replica_t *r)
+{
+	if (r == NULL)
+		return (0);
+	rcmd_t *cmd;
+        int cnt = 0;
+
+	TAILQ_FOREACH(cmd, &(r->waitq), next) {
+                cnt++;
+        }
+
+	return cnt;
+}
 
 static int
 istgt_uctl_readline(UCTL_Ptr uctl)
@@ -3496,6 +3512,8 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 	return (UCTL_CMD_OK);
 }
 
+
+
 static int
 istgt_uctl_cmd_istgt_status(UCTL_Ptr uctl)
 {
@@ -3503,6 +3521,8 @@ istgt_uctl_cmd_istgt_status(UCTL_Ptr uctl)
 	ISTGT_LU_DISK *spec;
 	/* instantiate json_object from json-c library. */
 	struct json_object *jobj;
+	replica_t *replica;
+
         MTX_LOCK(&uctl->istgt->mutex);
 	jobj = json_object_new_object();	/* create new object */
 	json_object_object_add(jobj, "loginReqCnt",
@@ -3540,6 +3560,8 @@ istgt_uctl_cmd_istgt_status(UCTL_Ptr uctl)
         MTX_UNLOCK(&uctl->istgt->mutex);
 	MTX_LOCK(&specq_mtx);
 	TAILQ_FOREACH(spec, &spec_q, spec_next) {
+		json_object_object_add(jobj, "luWorkers",
+		    json_object_new_int(spec->luworkers));
 		json_object_object_add(jobj, "snapshotCreateReqCnt",
 		    json_object_new_uint64(spec->replica->snapshot_create_req_cnt));
 		json_object_object_add(jobj, "snapshotPrepareReqCnt",
@@ -3556,6 +3578,47 @@ istgt_uctl_cmd_istgt_status(UCTL_Ptr uctl)
 		    json_object_new_uint64(spec->replica->prepare_rebuild_req_cnt));
 		json_object_object_add(jobj, "prepareRebuildReqSuccessCnt",
 		    json_object_new_uint64(spec->replica->prepare_rebuild_req_success_cnt));
+		json_object_object_add(jobj, "maintCmdQLen",
+		    json_object_new_uint64(istgt_queue_count(&spec->maint_cmd_queue)));
+		json_object_object_add(jobj, "maintBlockedQLen",
+		    json_object_new_uint64(istgt_queue_count(&spec->maint_blocked_queue)));
+		json_object_object_add(jobj, "cmdQLen",
+		    json_object_new_uint64(istgt_queue_count(&spec->cmd_queue)));
+		json_object_object_add(jobj, "blockedQLen",
+		    json_object_new_uint64(istgt_queue_count(&spec->blocked_queue)));
+		json_object *jobj_arr = json_object_new_array();
+		MTX_LOCK(&spec->rq_mtx);
+		TAILQ_FOREACH(replica, &spec->rq, r_next) {
+		    MTX_LOCK(&replica->r_mtx);
+		    struct json_object *jobjarr = NULL;
+		    get_replica_stats_json(replica, &jobjarr);
+		    json_object_object_add(jobjarr, "waitQ",
+			json_object_new_int(replica_queue_count(replica)));
+		    json_object_object_add(jobjarr, "readyQ",
+			json_object_new_int(replica_queue_count(replica)));
+		    json_object_object_add(jobjarr, "blockedQ",
+			json_object_new_int(replica_queue_count(replica)));
+                    json_object_object_add(jobjarr, "snapshotCreateReqCnt",
+                        json_object_new_uint64(replica->status->snapshot_create_req_cnt));
+                    json_object_object_add(jobjarr, "snapshotPrepareReqCnt",
+                        json_object_new_uint64(replica->status->snapshot_prepare_req_cnt));
+                    json_object_object_add(jobjarr, "snapshotCreateReqSuccessCnt",
+                        json_object_new_uint64(replica->status->snapshot_create_req_success_cnt));
+                    json_object_object_add(jobjarr, "snapshotPrepareReqSuccessCnt",
+                        json_object_new_uint64(replica->status->snapshot_prepare_req_success_cnt));
+                    json_object_object_add(jobjarr, "startRebuildReqCnt",
+                        json_object_new_uint64(replica->status->start_rebuild_req_cnt));
+                    json_object_object_add(jobjarr, "startRebuildReqSuccessCnt",
+                        json_object_new_uint64(replica->status->start_rebuild_req_success_cnt));
+                    json_object_object_add(jobjarr, "prepareRebuildReqCnt",
+                        json_object_new_uint64(replica->status->prepare_rebuild_req_cnt));
+                    json_object_object_add(jobjarr, "prepareRebuildReqSuccessCnt",
+                        json_object_new_uint64(replica->status->prepare_rebuild_req_success_cnt));
+		    MTX_UNLOCK(&replica->r_mtx);
+		    json_object_array_add(jobj_arr, jobjarr);
+		}
+		MTX_UNLOCK(&spec->rq_mtx);
+		json_object_object_add(jobj, "Replicas", jobj_arr);
         }
 	MTX_UNLOCK(&specq_mtx);
 	istgt_uctl_snprintf(uctl, "%s  %s\n",

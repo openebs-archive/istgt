@@ -358,8 +358,8 @@ enqueue_prepare_for_rebuild(spec_t *spec, replica_t *replica,
 
 	MTX_LOCK(&replica->r_mtx);
 	TAILQ_INSERT_TAIL(&replica->mgmt_cmd_queue, mgmt_cmd, mgmt_cmd_next);
+        replica->status->prepare_rebuild_req_cnt++;
 	MTX_UNLOCK(&replica->r_mtx);
-        __sync_add_and_fetch(&spec->replica->prepare_rebuild_req_cnt, 1);
 
 	rcomm_mgmt->cmds_sent++;
 
@@ -420,7 +420,7 @@ send_prepare_for_rebuild_or_trigger_rebuild(spec_t *spec,
 		memset(mgmt_data, 0, sizeof (*mgmt_data));
 		snprintf(mgmt_data->dw_volname, data_len, "%s",
 		    spec->volname);
-
+                spec->replica->start_rebuild_req_cnt++;
 		ret = start_rebuild(mgmt_data,
 		    spec->rebuild_info.dw_replica, sizeof (*mgmt_data));
 		if (ret == -1) {
@@ -438,6 +438,7 @@ send_prepare_for_rebuild_or_trigger_rebuild(spec_t *spec,
 	// Case 1
 	if (healthy_replica != NULL) {
 		replica = healthy_replica;
+                spec->replica->prepare_rebuild_req_cnt++;
 		ret = enqueue_prepare_for_rebuild(spec, replica, rcomm_mgmt,
 		    ZVOL_OPCODE_PREPARE_FOR_REBUILD);
 		if (ret == -1) {
@@ -451,9 +452,10 @@ send_prepare_for_rebuild_or_trigger_rebuild(spec_t *spec,
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
 		if (replica == dw_replica)
 			continue;
-		
+
 		if (replica_cnt == 0)
 			break;
+                spec->replica->prepare_rebuild_req_cnt++;
 		ret = enqueue_prepare_for_rebuild(spec, replica, rcomm_mgmt,
 		    ZVOL_OPCODE_PREPARE_FOR_REBUILD);
 		if (ret == -1) {
@@ -472,7 +474,7 @@ exit:
 		}
 	}
 	assert(((ret == -1) && replica_cnt) || (ret == replica_cnt));
-	
+
 	return ret;
 }
 
@@ -487,7 +489,6 @@ start_rebuild(void *buf, replica_t *replica, uint64_t data_len)
 	mgmt_cmd_t *mgmt_cmd;
 
 	ASSERT(MTX_LOCKED(&replica->spec->rq_mtx));
-        replica->spec->replica->start_rebuild_req_cnt++;
 
 	mgmt_cmd = malloc(sizeof (mgmt_cmd_t));
 	memset(mgmt_cmd, 0, sizeof (mgmt_cmd_t));
@@ -499,6 +500,7 @@ start_rebuild(void *buf, replica_t *replica, uint64_t data_len)
 
 	MTX_LOCK(&replica->r_mtx);
 	TAILQ_INSERT_TAIL(&replica->mgmt_cmd_queue, mgmt_cmd, mgmt_cmd_next);
+        replica->status->start_rebuild_req_cnt++;
 	MTX_UNLOCK(&replica->r_mtx);
 
 	if (write(replica->mgmt_eventfd1, &num, sizeof (num)) !=
@@ -1012,6 +1014,9 @@ create_replica_entry(spec_t *spec, int epfd, int mgmt_fd)
 {
 	replica_t *replica = NULL;
 	int rc;
+        REPLICA_STATUS *replica_status;
+        replica_status = xmalloc(sizeof *replica_status);
+        memset(replica_status, 0, sizeof *replica_status);
 
 	ASSERT(epfd > 0);
 	ASSERT(mgmt_fd > 0);
@@ -1038,6 +1043,7 @@ create_replica_entry(spec_t *spec, int epfd, int mgmt_fd)
 	replica->mgmt_eventfd2 = -1;
 	replica->iofd = -1;
 	replica->spec = spec;
+        replica->status = replica_status;
 
 	rc = pthread_mutex_init(&replica->r_mtx, NULL);
 	if (rc != 0) {
@@ -1358,7 +1364,7 @@ handle_snap_create_resp(replica_t *replica, mgmt_cmd_t *mgmt_cmd)
 		rcomm_mgmt->cmds_failed++;
         } else {
 		rcomm_mgmt->cmds_succeeded++;
-                __sync_add_and_fetch(&replica->spec->replica->snapshot_create_req_success_cnt, 1);
+                __sync_add_and_fetch(&replica->status->snapshot_create_req_success_cnt, 1);
         }
 	if ((rcomm_mgmt->caller_gone == 1) &&
 	    (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_failed + rcomm_mgmt->cmds_succeeded)))
@@ -1379,7 +1385,7 @@ handle_snap_prepare_resp(replica_t *replica, mgmt_cmd_t *mgmt_cmd)
 		rcomm_mgmt->cmds_failed++;
         } else {
 		rcomm_mgmt->cmds_succeeded++;
-                __sync_add_and_fetch(&replica->spec->replica->snapshot_prepare_req_success_cnt, 1);
+                __sync_add_and_fetch(&replica->status->snapshot_prepare_req_success_cnt, 1);
         }
 	if (rcomm_mgmt->caller_gone == 1) {
 		if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_failed + rcomm_mgmt->cmds_succeeded))
@@ -1678,6 +1684,7 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	if (hr) {
 		REPLICA_LOG("sending SNAP_PREP to Replica(%lu)\n", hr->zvol_guid);
                 spec->replica->snapshot_prepare_req_cnt++;
+                __sync_add_and_fetch(&hr->status->snapshot_prepare_req_cnt, 1);
 		(void) send_replica_snapshot(spec, hr, io_seq, snapname, ZVOL_OPCODE_SNAP_PREPARE, rmgmt);
 
 		sent = rmgmt->cmds_sent;
@@ -1695,12 +1702,14 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 			    ZVOL_OPCODE_SNAP_PREPARE);
 			return (false);
 		}
+                spec->replica->snapshot_prepare_req_success_cnt++;
 	}
 
 	rcomm_mgmt = allocate_rcommon_mgmt_cmd(0);
 
 	r = false;
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
+                __sync_add_and_fetch(&replica->status->snapshot_create_req_cnt, 1);
 		(void) send_replica_snapshot(spec, replica, io_seq, snapname, ZVOL_OPCODE_SNAP_CREATE, rcomm_mgmt);
 	}
 
@@ -1709,6 +1718,7 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	if (success >= cf) {
 		r = true;
 		ret = r + sent; // let the caller know the total success count
+                __sync_add_and_fetch(&spec->replica->snapshot_create_req_success_cnt, 1);
 	}
 
 	if (r == false) {
@@ -1921,7 +1931,7 @@ handle_start_rebuild_resp(spec_t *spec, zvol_io_hdr_t *hdr)
 {
 
 	if (hdr->status == ZVOL_OP_STATUS_OK) {
-                __sync_add_and_fetch(&spec->replica->start_rebuild_req_success_cnt, 1);
+                __sync_add_and_fetch(&spec->rebuild_info.dw_replica->status->start_rebuild_req_success_cnt, 1);
 		return;
         }
 
@@ -1956,6 +1966,7 @@ handle_prepare_for_rebuild_resp(spec_t *spec, zvol_io_hdr_t *hdr,
 		MTX_LOCK(&spec->rq_mtx);
 		replica_t *dw_replica = spec->rebuild_info.dw_replica;
 		if (dw_replica) {
+                        spec->replica->start_rebuild_req_cnt++;
 			ret = start_rebuild(buf, dw_replica,
 			    rcomm_mgmt->buf_size);
 			rcomm_mgmt->buf = NULL;
@@ -1963,7 +1974,7 @@ handle_prepare_for_rebuild_resp(spec_t *spec, zvol_io_hdr_t *hdr,
 				REPLICA_LOG("Rebuild triggered on Replica(%lu) "
 				    "state:%d\n", dw_replica->zvol_guid,
 				    dw_replica->state);
-                                spec->replica->prepare_rebuild_req_success_cnt++;
+                                __sync_add_and_fetch(&dw_replica->status->prepare_rebuild_req_success_cnt, 1);
 			} else {
 				REPLICA_LOG("Unable to start rebuild on Replica(%lu)"
 				    " state:%d\n", dw_replica->zvol_guid,
