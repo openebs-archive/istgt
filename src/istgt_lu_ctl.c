@@ -138,6 +138,7 @@ typedef enum {
 
 #define	ARGS_DELIM " \t"
 
+#ifdef REPLICATION
 static int
 replica_queue_count(replica_t *r)
 {
@@ -152,6 +153,7 @@ replica_queue_count(replica_t *r)
 
 	return cnt;
 }
+#endif
 
 static int
 istgt_uctl_readline(UCTL_Ptr uctl)
