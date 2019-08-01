@@ -274,6 +274,7 @@ respond_with_error_for_all_outstanding_ios(replica_t *r)
 	    read_cnt, write_cnt);
 }
 
+
 /*
  * handle error in replica_thread (or data_connection)
  */
@@ -287,6 +288,9 @@ handle_data_conn_error(replica_t *r)
 
 	if (r->iofd == -1) {
 		REPLICA_ERRLOG("repl %s %d %p data_conn error\n", r->ip, r->port, r);
+                MTX_LOCK(&r->spec->rq_mtx);
+                update_error_queue(r, DATA_CONN_ERROR);
+		MTX_UNLOCK(&r->spec->rq_mtx);
 		return -1;
 	}
 
@@ -322,6 +326,7 @@ handle_data_conn_error(replica_t *r)
 		if (r->mgmt_eventfd2 != -1)
 			r->mgmt_eventfd2 = -1;
 		MTX_UNLOCK(&r->r_mtx);
+                update_error_queue(r, DATA_CONN_ERROR);
 		MTX_UNLOCK(&spec->rq_mtx);
 		return -1;
 	}
@@ -340,6 +345,7 @@ handle_data_conn_error(replica_t *r)
 	}
 
 	update_volstate(r->spec);
+        update_error_queue(r, DATA_CONN_ERROR);
 
 	mgmt_eventfd2 = r->mgmt_eventfd2;
 

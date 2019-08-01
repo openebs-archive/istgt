@@ -427,7 +427,9 @@ send_prepare_for_rebuild_or_trigger_rebuild(spec_t *spec,
 			spec->rebuild_info.dw_replica = NULL;
 			spec->rebuild_info.healthy_replica = NULL;
 			spec->rebuild_info.rebuild_in_progress = false;
-		}
+		} else {
+                        spec->replica->start_rebuild_req_success_cnt++;
+                }
 		return ret;
 	}
 
@@ -445,6 +447,7 @@ send_prepare_for_rebuild_or_trigger_rebuild(spec_t *spec,
 			goto exit;
 		}
 		replica_cnt--;
+                spec->replica->prepare_rebuild_req_success_cnt++;
 		goto exit;
 	}
 
@@ -461,6 +464,7 @@ send_prepare_for_rebuild_or_trigger_rebuild(spec_t *spec,
 		if (ret == -1) {
 			goto exit;
 		}
+                spec->replica->prepare_rebuild_req_success_cnt++;
 		replica_cnt--;
 	}
 
@@ -804,6 +808,36 @@ can_replica_connect(spec_t *spec, replica_t *replica)
 	return ret;
 }
 
+void
+update_error_queue(replica_t *r, error_types type) {
+        ERROR_QUEUE *eq = NULL;
+        TAILQ_FOREACH(eq, &r->spec->errorq, next) {
+                if ( eq->pool_guid == r->pool_guid ) {
+                        switch (type) {
+                                case DATA_CONN_ERROR:
+                                        eq->data_conn_err_cnt++;
+                                        break;
+                                case MGMT_CONN_ERROR:
+                                        eq->mgmt_conn_err_cnt++;
+                        }
+                        break;
+                }
+        }
+        if ( eq == NULL ) {
+                eq = xmalloc(sizeof *eq);
+                memset(eq, 0, sizeof *eq);
+                eq->pool_guid = r->pool_guid;
+                switch (type) {
+                        case DATA_CONN_ERROR:
+                                eq->data_conn_err_cnt++;
+                                break;
+                        case MGMT_CONN_ERROR:
+                                eq->mgmt_conn_err_cnt++;
+                }
+                TAILQ_INSERT_TAIL(&r->spec->errorq, eq, next);
+        }
+}
+
 /*
  * Update vol state based on the connected number of replicas and their status
  */
@@ -1089,7 +1123,7 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	zvol_op_open_data_t *rio_payload = NULL;
 	int i;
 
-	ack_hdr = replica->mgmt_io_resp_hdr;	
+	ack_hdr = replica->mgmt_io_resp_hdr;
 	ack_data = (mgmt_ack_t *)replica->mgmt_io_resp_data;
 
 	TAILQ_INIT(&replica->waitq);
@@ -1974,7 +2008,7 @@ handle_prepare_for_rebuild_resp(spec_t *spec, zvol_io_hdr_t *hdr,
 				REPLICA_LOG("Rebuild triggered on Replica(%lu) "
 				    "state:%d\n", dw_replica->zvol_guid,
 				    dw_replica->state);
-                                __sync_add_and_fetch(&dw_replica->status->prepare_rebuild_req_success_cnt, 1);
+                                spec->replica->start_rebuild_req_success_cnt++;
 			} else {
 				REPLICA_LOG("Unable to start rebuild on Replica(%lu)"
 				    " state:%d\n", dw_replica->zvol_guid,
@@ -3109,6 +3143,7 @@ handle_mgmt_conn_error(replica_t *r, int sfd, struct epoll_event *events, int ev
 	known_replica_t *kr = NULL;
 
 	MTX_LOCK(&r->spec->rq_mtx);
+        update_error_queue(r, MGMT_CONN_ERROR);
 	MTX_LOCK(&r->r_mtx);
 
 	r->conn_closed++;
@@ -3480,6 +3515,7 @@ initialize_volume(spec_t *spec, int replication_factor, int consistency_factor)
 	TAILQ_INIT(&spec->non_quorum_rq);
 	TAILQ_INIT(&spec->rwaitq);
 	TAILQ_INIT(&spec->identified_replica);
+	TAILQ_INIT(&spec->errorq);
 
 	VERIFY(replication_factor > 0);
 	VERIFY(consistency_factor > 0);

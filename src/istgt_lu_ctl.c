@@ -138,23 +138,6 @@ typedef enum {
 
 #define	ARGS_DELIM " \t"
 
-#ifdef REPLICATION
-static int
-replica_queue_count(replica_t *r)
-{
-	if (r == NULL)
-		return (0);
-	rcmd_t *cmd;
-        int cnt = 0;
-
-	TAILQ_FOREACH(cmd, &(r->waitq), next) {
-                cnt++;
-        }
-
-	return cnt;
-}
-#endif
-
 static int
 istgt_uctl_readline(UCTL_Ptr uctl)
 {
@@ -3594,12 +3577,24 @@ istgt_uctl_cmd_istgt_status(UCTL_Ptr uctl)
 		    MTX_LOCK(&replica->r_mtx);
 		    struct json_object *jobjarr = NULL;
 		    get_replica_stats_json(replica, &jobjarr);
+                    int wqcnt = 0, rqcnt = 0, bqcnt = 0;
+                    rcmd_t *cmd;
+                    TAILQ_FOREACH(cmd, &(replica->waitq), next) {
+                            wqcnt++;
+                    }
+                    TAILQ_FOREACH(cmd, &(replica->waitq), next) {
+                            rqcnt++;
+                    }
+                    TAILQ_FOREACH(cmd, &(replica->waitq), next) {
+                            bqcnt++;
+                    }
+
 		    json_object_object_add(jobjarr, "waitQ",
-			json_object_new_int(replica_queue_count(replica)));
+			json_object_new_int(wqcnt));
 		    json_object_object_add(jobjarr, "readyQ",
-			json_object_new_int(replica_queue_count(replica)));
+			json_object_new_int(rqcnt));
 		    json_object_object_add(jobjarr, "blockedQ",
-			json_object_new_int(replica_queue_count(replica)));
+			json_object_new_int(bqcnt));
                     json_object_object_add(jobjarr, "snapshotCreateReqCnt",
                         json_object_new_uint64(replica->status->snapshot_create_req_cnt));
                     json_object_object_add(jobjarr, "snapshotPrepareReqCnt",
@@ -3619,8 +3614,23 @@ istgt_uctl_cmd_istgt_status(UCTL_Ptr uctl)
 		    MTX_UNLOCK(&replica->r_mtx);
 		    json_object_array_add(jobj_arr, jobjarr);
 		}
+		json_object *jobj_qarr = json_object_new_array();
+
+                ERROR_QUEUE *eq = NULL;
+                TAILQ_FOREACH(eq, &(spec->errorq), next) {
+                        struct json_object *jobjqarr = json_object_new_object();
+                        json_object_object_add(jobjqarr, "mgmtConnErrCnt",
+                            json_object_new_uint64(eq->mgmt_conn_err_cnt));
+                        json_object_object_add(jobjqarr, "dataConnErrCnt",
+                            json_object_new_int64(eq->data_conn_err_cnt));
+                        json_object_object_add(jobjqarr, "poolGuid",
+                            json_object_new_uint64(eq->pool_guid));
+                        json_object_array_add(jobj_qarr, jobjqarr);
+                }
+
 		MTX_UNLOCK(&spec->rq_mtx);
-		json_object_object_add(jobj, "Replicas", jobj_arr);
+		json_object_object_add(jobj, "replicas", jobj_arr);
+                json_object_object_add(jobj, "errors", jobj_qarr);
         }
 	MTX_UNLOCK(&specq_mtx);
 	istgt_uctl_snprintf(uctl, "%s  %s\n",

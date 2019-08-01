@@ -771,6 +771,13 @@ typedef struct replica_status {
 
 typedef REPLICA_STATUS *REPLICA_STATUS_Ptr;
 
+typedef struct error_q {
+	TAILQ_ENTRY(error_q) next;
+    uint64_t mgmt_conn_err_cnt;
+    uint64_t data_conn_err_cnt;
+    uint64_t pool_guid;
+} ERROR_QUEUE;
+
 typedef struct istgt_lu_disk_t {
 	ISTGT_LU_Ptr lu;
 	int num;
@@ -877,6 +884,7 @@ typedef struct istgt_lu_disk_t {
 	TAILQ_HEAD(, replica_s) rwaitq; //Queue of replicas completed handshake, and yet to have data connection to this spec(volume)
 	TAILQ_HEAD(, replica_s) non_quorum_rq; //Queue of non_quorum replicas connected to this spec
 	TAILQ_HEAD(, known_replica_s) identified_replica;	/* List of replicas known to spec */
+	TAILQ_HEAD(, error_q) errorq;	/* List of replicas known to spec */
 	int replication_factor;
 	int consistency_factor;
 	int healthy_rcount;
