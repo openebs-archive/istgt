@@ -968,14 +968,14 @@ static int
 initialize_spec(spec_t *spec)
 {
 	int k, rc;
-        REPLICA_STATUS *replica_status; 
+    REPLICA_STATUS *replica_status;
 	memset(spec, 0, sizeof (spec_t));
 	spec->volname = xstrdup("vol1");
 	spec->blocklen = blocklen;
 	spec->blockcnt = (volsize / spec->blocklen);
-        replica_status = malloc(sizeof *replica_status);
-        memset(replica_status, 0, sizeof *replica_status);
-        spec->replica = replica_status;
+    replica_status = malloc(sizeof *replica_status);
+    memset(replica_status, 0, sizeof *replica_status);
+    spec->replica = replica_status;
 
 	for (k = 0; k < ISTGT_MAX_NUM_LUWORKERS; k++) {
 		rc = pthread_cond_init(&spec->luworker_rcond[k], NULL);
@@ -1372,7 +1372,7 @@ rebuild_test(void *arg)
 					rargs->kill_replica = true;
 					test_args->state++;
 				}
-				break; 
+				break;
 
 				case UNIT_TEST_STATE_REREGISTER_REPLICA:
 				if (rargs->kill_is_over == true) {

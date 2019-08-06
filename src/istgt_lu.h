@@ -147,9 +147,9 @@ typedef enum {
 	ISTGT_LU_FLAG_MEDIA_DYNAMIC  = 0x00000020,
 } ISTGT_LU_FLAG;
 
-/* 
+/*
  * Value for max retry attempts by luworkers that get spawned,
- * esp for reload (kill -HUP) case to detect lu state in 
+ * esp for reload (kill -HUP) case to detect lu state in
  * RUNNING
  */
 #define ISTGT_MAX_LU_RUNNING_STATE_RETRY_COUNT 45
@@ -775,7 +775,7 @@ typedef struct error_q {
 	TAILQ_ENTRY(error_q) next;
     uint64_t mgmt_conn_err_cnt;
     uint64_t data_conn_err_cnt;
-    uint64_t pool_guid;
+    uint64_t zvol_guid;
 } ERROR_QUEUE;
 
 typedef struct istgt_lu_disk_t {
@@ -910,8 +910,8 @@ typedef struct istgt_lu_disk_t {
 	} stats;
 #endif
 
-	/*Queue containing all the tasks. Instead of going to separate 
-	queues (Cmd Queue, blocked queue, maint_cmd_que, maint_blocked_queue, 
+	/*Queue containing all the tasks. Instead of going to separate
+	queues (Cmd Queue, blocked queue, maint_cmd_que, maint_blocked_queue,
 	inflight)to check for blockage, we will check it in just this queue.*/
 	ISTGT_QUEUE complete_queue;
 	pthread_mutex_t complete_queue_mutex;
@@ -990,7 +990,7 @@ typedef struct istgt_lu_disk_t {
 typedef struct scsi_pr_key  SCSI_PR_KEY;
 typedef struct scsi_pr_data  SCSI_PR_DATA;
 #else
-/* To store Persistent Registrations */ 
+/* To store Persistent Registrations */
 typedef struct scsi_pr_key {
         uint64_t key;
         char registered_initiator_port[256];
@@ -1033,7 +1033,7 @@ int64_t
 replicate(ISTGT_LU_DISK *, ISTGT_LU_CMD_Ptr, uint64_t, uint64_t);
 int
 istgt_lu_disk_update_raw(ISTGT_LU_Ptr lu, int i, int dofake);
- 
+
 int istgt_lu_print_q(ISTGT_LU_Ptr lu, int lun);
 int istgt_lu_disk_print_reservation(ISTGT_LU_Ptr lu, int lun);
 int istgt_lu_disk_close_raw(ISTGT_LU_DISK *spec);

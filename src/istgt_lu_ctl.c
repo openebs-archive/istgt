@@ -3624,7 +3624,7 @@ istgt_uctl_cmd_istgt_status(UCTL_Ptr uctl)
                         json_object_object_add(jobjqarr, "dataConnErrCnt",
                             json_object_new_int64(eq->data_conn_err_cnt));
                         json_object_object_add(jobjqarr, "poolGuid",
-                            json_object_new_uint64(eq->pool_guid));
+                            json_object_new_uint64(eq->zvol_guid));
                         json_object_array_add(jobj_qarr, jobjqarr);
                 }
 
