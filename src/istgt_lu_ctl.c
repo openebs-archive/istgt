@@ -665,6 +665,7 @@ istgt_uctl_cmd_resize(UCTL_Ptr uctl)
 			ret = UCTL_CMD_OK;
 			lu->lun[0].u.storage.size = new_size;
 			spec->size = new_size;
+			// NOTE: Since we are supporting only expansion no need to worry about queued IOs or upcoming IOs
 			spec->blockcnt = (new_size / spec->blocklen);
 		}
 		else

@@ -1768,7 +1768,7 @@ int istgt_execute_volume_operation(spec_t *spec, zvol_op_code_t opcode,
 	}
 
 	if (r == false && opcode == ZVOL_OPCODE_SNAP_CREATE) {
-		TAILQ_FOREACH(replica, &spec->non_quorum_rq, r_non_quorum_next) {
+		TAILQ_FOREACH(replica, &spec->rq, r_next) {
 			BUILD_VOL_CMD_DATA(spec)
 			(void) send_replica_volume_operation(spec, replica, io_seq, ZVOL_OPCODE_SNAP_DESTROY, data_len, data, rcomm_mgmt);
 		}
@@ -1792,7 +1792,7 @@ int istgt_execute_volume_operation(spec_t *spec, zvol_op_code_t opcode,
 	spec->quiesce = 0;
 	MTX_UNLOCK(&spec->rq_mtx);
 	if (r == false)
-		REPLICA_ERRLOG("volume operation ioseq: %lu resp: %d\n", io_seq, r);
+		REPLICA_ERRLOG("volume operation opcode: %d ioseq: %lu resp: %d\n", opcode, io_seq, r);
 	return r;
 }
 
