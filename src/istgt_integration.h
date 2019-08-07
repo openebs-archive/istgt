@@ -138,10 +138,8 @@ typedef struct replica_s {
 	TAILQ_HEAD(, mgmt_cmd_s) mgmt_cmd_queue;
 
 	uint64_t initial_checkpointed_io_seq;
-#ifdef	DEBUG
 	/* port from which replica has made mgmt conn. */
 	int replica_mgmt_dport;
-#endif
     REPLICA_STATUS_Ptr status;
 } replica_t;
 

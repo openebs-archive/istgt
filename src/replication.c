@@ -2328,9 +2328,7 @@ accept_mgmt_conns(int epfd, int sfd)
 		event.data.ptr = mevent2;
 		event.events = EPOLLIN | EPOLLHUP | EPOLLERR | EPOLLET | EPOLLOUT | EPOLLRDHUP;
 
-#ifdef	DEBUG
 		replica->replica_mgmt_dport = atoi(sbuf);
-#endif
 
 		rc = epoll_ctl(epfd, EPOLL_CTL_ADD, mgmt_fd, &event);
 		if(rc == -1) {
