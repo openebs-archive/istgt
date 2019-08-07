@@ -18,6 +18,17 @@ if test "$CC" = "clang" && test "$ac_test_CFLAGS" != "set"; then
   CFLAGS="-g -O3 -DNDEBUG"
 fi
 
+RELEASE_TAG=`git describe --tags`
+AC_DEFINE_UNQUOTED([GIT_RELEASE_TAG],
+                   ["$RELEASE_TAG"],
+                   [Git release tag])
+
+
+GIT_HASH=`git rev-parse HEAD`
+AC_DEFINE_UNQUOTED([GIT_COMMIT_HASH],
+                   ["$GIT_HASH"],
+                   [Git commit hash])
+
 # host OS related
 vboxinc="/usr/local/src/virtualbox/*/include"
 vboxlib="/usr/local/lib/virtualbox"

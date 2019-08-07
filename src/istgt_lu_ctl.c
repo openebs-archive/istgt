@@ -3510,6 +3510,10 @@ istgt_uctl_cmd_istgt_status(UCTL_Ptr uctl)
 
         MTX_LOCK(&uctl->istgt->mutex);
 	jobj = json_object_new_object();	/* create new object */
+	json_object_object_add(jobj, "gitCommitHash",
+	    json_object_new_string(GIT_COMMIT_HASH));
+	json_object_object_add(jobj, "releaseTag",
+	    json_object_new_string(GIT_RELEASE_TAG));
 	json_object_object_add(jobj, "loginReqCnt",
 	    json_object_new_uint64(uctl->istgt->login_req_cnt));
 	json_object_object_add(jobj, "loginReqSuccessCnt",
