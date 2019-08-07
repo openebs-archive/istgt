@@ -195,7 +195,8 @@ typedef struct known_replica_s {
 
 typedef enum {
     DATA_CONN_ERROR = 0,
-    MGMT_CONN_ERROR
+    MGMT_CONN_ERROR,
+    REPLICA_RESTART
 } error_types;
 
 extern struct timespec istgt_start_time;

@@ -776,6 +776,7 @@ typedef struct error_q {
     uint64_t mgmt_conn_err_cnt;
     uint64_t data_conn_err_cnt;
     uint64_t zvol_guid;
+    uint64_t restart_count;
 } ERROR_QUEUE;
 
 typedef struct istgt_lu_disk_t {

@@ -819,6 +819,8 @@ update_error_queue(replica_t *r, error_types type) {
                                         break;
                                 case MGMT_CONN_ERROR:
                                         eq->mgmt_conn_err_cnt++;
+                                case REPLICA_RESTART:
+                                        eq->restart_count++;
                         }
                         break;
                 }
@@ -1154,6 +1156,7 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 		    replica->zvol_guid);
 		goto replica_error;
 	}
+    update_error_queue(replica, REPLICA_RESTART);
 	MTX_UNLOCK(&spec->rq_mtx);
 
 	replica->spec = spec;
