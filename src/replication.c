@@ -1460,10 +1460,10 @@ disconnect_nonresponding_replica(replica_t *replica, uint64_t io_seq,
 		if (mgmt_cmd->io_hdr->io_seq == io_seq &&
 		    mgmt_cmd->io_hdr->opcode == opcode) {
 
-			if (opcode == ZVOL_OPCODE_SNAP_CREATE || opcode == ZVOL_OPCODE_RESIZE) {
+			if (opcode == ZVOL_OPCODE_SNAP_CREATE) {
 				/*
 				 * If replica that is healthy and in rebuild process
-				 * doesn't respond for SNAP_CREATE Or RESIZE dw replica that is
+				 * doesn't respond for SNAP_CREATE, dw replica that is
 				 * involved in rebuild process need to be disconnected.
 				 * After reconnection, both of them will get this snap
 				 * if it is successful
@@ -1478,10 +1478,10 @@ disconnect_nonresponding_replica(replica_t *replica, uint64_t io_seq,
 				}
 				REPLICA_ERRLOG("Disconnecting replica (%lu) as its not responded for"
 				   " snap_create\n", replica->zvol_guid);
-			} else if (opcode == ZVOL_OPCODE_SNAP_PREPARE) {
+			} else if (opcode == ZVOL_OPCODE_SNAP_PREPARE || opcode == ZVOL_OPCODE_RESIZE) {
 				REPLICA_ERRLOG("Disconnecting the replica (%lu) "
-				   "as snap_prep opcode has been timed out\n",
-				    replica->zvol_guid);
+				   "as %d opcode has been timed out\n",
+				    replica->zvol_guid, opcode);
 			}
 			inform_mgmt_conn(replica);
 			break;
@@ -1588,21 +1588,22 @@ pause_and_timed_wait_for_ongoing_ios(spec_t *spec, zvol_op_code_t opcode, int se
 	return ret;
 }
 
-#define BUILD_VOL_CMD_DATA(SPEC)								\
-	switch (opcode) {	 								\
+#define BUILD_VOL_CMD_DATA(_spec, _opcode, _snapname, _size, _data, _data_len)								\
+	zvol_op_resize_data_t *resize_cmd;							\
+	switch (_opcode) {	 								\
 		case ZVOL_OPCODE_SNAP_CREATE:							\
 		case ZVOL_OPCODE_SNAP_DESTROY:							\
-			data_len = strlen(SPEC->volname) + strlen(snapname) + 2;		\
-			data = (char *)malloc(data_len);					\
-			snprintf(data, data_len, "%s@%s", SPEC->volname, snapname);		\
+			_data_len = strlen(_spec->volname) + strlen(_snapname) + 2;		\
+			_data = (char *)malloc(_data_len);					\
+			snprintf(_data, _data_len, "%s@%s", _spec->volname, _snapname);		\
 			break;									\
 		case ZVOL_OPCODE_RESIZE:							\
-			data_len = sizeof(zvol_op_resize_data_t);				\
-			resize_cmd = malloc(data_len);						\
-			memset(resize_cmd, 0, data_len);					\
-			strncpy(resize_cmd->volname, SPEC->volname, MAX_NAME_LEN);		\
-			resize_cmd->size = size;						\
-			data = resize_cmd;							\
+			_data_len = sizeof(zvol_op_resize_data_t);				\
+			resize_cmd = malloc(_data_len);						\
+			memset(resize_cmd, 0, _data_len);					\
+			strncpy(resize_cmd->volname, _spec->volname, MAX_NAME_LEN);		\
+			resize_cmd->size = _size;						\
+			_data = resize_cmd;							\
 			break;									\
 		default:									\
 			REPLICA_LOG("Please handle new volume operation opcode: %d\n", opcode);	\
@@ -1616,15 +1617,14 @@ int istgt_lu_destroy_snapshot(spec_t *spec, char *snapname)
 	uint64_t size = 0;
 	size_t data_len = 0;
 	void *data = NULL;
-	zvol_op_resize_data_t *resize_cmd;
 
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
-		BUILD_VOL_CMD_DATA(spec)
-		send_replica_volume_operation(spec, replica, 0, opcode, data_len, data, NULL);
+		BUILD_VOL_CMD_DATA(spec, opcode, snapname, size, data, data_len);
+		send_replica_volume_operation(spec, replica, size, opcode, data_len, data, NULL);
 	}
 	TAILQ_FOREACH(replica, &spec->non_quorum_rq, r_non_quorum_next) {
-		BUILD_VOL_CMD_DATA(spec)
-		send_replica_volume_operation(spec, replica, 0, opcode, data_len, data, NULL);
+		BUILD_VOL_CMD_DATA(spec, opcode, snapname, size, data, data_len);
+		send_replica_volume_operation(spec, replica, size, opcode, data_len, data, NULL);
 	}
 	return true;
 }
@@ -1687,7 +1687,6 @@ int istgt_execute_volume_operation(spec_t *spec, zvol_op_code_t opcode,
 	uint64_t io_seq;
 	size_t data_len = 0;
 	void *data = NULL;
-	zvol_op_resize_data_t *resize_cmd;
 
 
 	clock_gettime(CLOCK_MONOTONIC_COARSE, &last);
@@ -1706,6 +1705,7 @@ int istgt_execute_volume_operation(spec_t *spec, zvol_op_code_t opcode,
 		return false;
 	}
 
+	//TODO: Here we need to avoid quiesce of ongoing IOs if operation is resize request
 	r = pause_and_timed_wait_for_ongoing_ios(spec, opcode, io_wait_time);
 	if (r == false) {
 		MTX_UNLOCK(&spec->rq_mtx);
@@ -1720,7 +1720,7 @@ int istgt_execute_volume_operation(spec_t *spec, zvol_op_code_t opcode,
 	rcommon_mgmt_cmd_t *rmgmt = allocate_rcommon_mgmt_cmd(0);
 	replica_t *hr = spec->rebuild_info.healthy_replica;
 	if (hr && opcode == ZVOL_OPCODE_SNAP_CREATE) {
-		BUILD_VOL_CMD_DATA(spec)
+		BUILD_VOL_CMD_DATA(spec, opcode, snapname, size, data, data_len);
 		REPLICA_LOG("sending SNAP_PREP to Replica(%lu)\n", hr->zvol_guid);
 		(void) send_replica_volume_operation(spec, hr, io_seq, ZVOL_OPCODE_SNAP_PREPARE , data_len, data, rmgmt);
 
@@ -1745,14 +1745,14 @@ int istgt_execute_volume_operation(spec_t *spec, zvol_op_code_t opcode,
 	r = false;
 
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
-		BUILD_VOL_CMD_DATA(spec)
+		BUILD_VOL_CMD_DATA(spec, opcode, snapname, size, data, data_len);
 		(void) send_replica_volume_operation(spec, replica, io_seq, opcode, data_len, data, rcomm_mgmt);
 	}
 
 	// send resize request to non-quorum replicas
 	if (opcode == ZVOL_OPCODE_RESIZE)
 		TAILQ_FOREACH(replica, &spec->non_quorum_rq, r_non_quorum_next) {
-			BUILD_VOL_CMD_DATA(spec)
+			BUILD_VOL_CMD_DATA(spec, opcode, snapname, size, data, data_len);
 			(void) send_replica_volume_operation(spec, replica, io_seq, opcode, data_len, data, rcomm_mgmt);
 		}
 
@@ -1769,7 +1769,7 @@ int istgt_execute_volume_operation(spec_t *spec, zvol_op_code_t opcode,
 
 	if (r == false && opcode == ZVOL_OPCODE_SNAP_CREATE) {
 		TAILQ_FOREACH(replica, &spec->rq, r_next) {
-			BUILD_VOL_CMD_DATA(spec)
+			BUILD_VOL_CMD_DATA(spec, opcode, snapname, size, data, data_len);
 			(void) send_replica_volume_operation(spec, replica, io_seq, ZVOL_OPCODE_SNAP_DESTROY, data_len, data, rcomm_mgmt);
 		}
 	} else {

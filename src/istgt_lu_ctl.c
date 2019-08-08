@@ -655,7 +655,13 @@ istgt_uctl_cmd_resize(UCTL_Ptr uctl)
 		ISTGT_LOG("volume(%s) size is already greater than or equal to requested resize\n", volname);
 		istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
 		ret = UCTL_CMD_OK;
-	} else {
+	} else if ((new_size % spec->blocklen) != 0) {
+		ISTGT_LOG("failed to resize volume %s new size %s "
+			"is not in multiples of block length %lu\n",
+			volname, size_str, spec->blocklen);
+		istgt_uctl_snprintf(uctl, "new size %s is not in multiples of block length %lu\n", size_str, spec->blocklen);
+		goto error_return;
+	}else {
 		r = istgt_execute_volume_operation(spec, ZVOL_OPCODE_RESIZE, NULL, new_size,
 			     io_wait_time, wait_time);
 
