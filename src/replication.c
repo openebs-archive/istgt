@@ -1588,8 +1588,9 @@ pause_and_timed_wait_for_ongoing_ios(spec_t *spec, zvol_op_code_t opcode, int se
 	return ret;
 }
 
-#define BUILD_VOL_CMD_DATA(_spec, _opcode, _snapname, _size, _data, _data_len)				\
+#define BUILD_VOL_CMD_DATA(_spec, _opcode, _snapname, _size, _data, _data_len, _abort)			\
 	do {												\
+		_abort = 0;										\
 		zvol_op_resize_data_t *resize_cmd;							\
 		switch (_opcode) {	 								\
 			case ZVOL_OPCODE_SNAP_CREATE:							\
@@ -1607,9 +1608,8 @@ pause_and_timed_wait_for_ongoing_ios(spec_t *spec, zvol_op_code_t opcode, int se
 				_data = resize_cmd;							\
 				break;									\
 			default:									\
-				MTX_UNLOCK(&spec->rq_mtx);						\
 				REPLICA_LOG("Please handle new volume operation opcode: %d\n", opcode);	\
-				return false;								\
+				_abort = 1;								\
 			}										\
 	} while (0)											\
 
@@ -1618,15 +1618,22 @@ int istgt_lu_destroy_snapshot(spec_t *spec, char *snapname)
 	replica_t *replica;
 	zvol_op_code_t opcode = ZVOL_OPCODE_SNAP_DESTROY;
 	uint64_t size = 0;
+	int abort;
 	size_t data_len = 0;
 	void *data = NULL;
 
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
-		BUILD_VOL_CMD_DATA(spec, opcode, snapname, size, data, data_len);
+		BUILD_VOL_CMD_DATA(spec, opcode, snapname, size, data, data_len, abort);
+		if (abort == 1) {
+			return false;
+		}
 		send_replica_volume_operation(spec, replica, size, opcode, data_len, data, NULL);
 	}
 	TAILQ_FOREACH(replica, &spec->non_quorum_rq, r_non_quorum_next) {
-		BUILD_VOL_CMD_DATA(spec, opcode, snapname, size, data, data_len);
+		BUILD_VOL_CMD_DATA(spec, opcode, snapname, size, data, data_len, abort);
+		if (abort == 1) {
+			return false;
+		}
 		send_replica_volume_operation(spec, replica, size, opcode, data_len, data, NULL);
 	}
 	return true;
@@ -1683,7 +1690,7 @@ int istgt_execute_volume_operation(spec_t *spec, zvol_op_code_t opcode,
 {
 	bool r;
 	replica_t *replica;
-	int sent = 0, success, ret;
+	int sent = 0, success, ret, abort;
 	uint8_t rf, cf;
 	struct timespec last;
 	rcommon_mgmt_cmd_t *rcomm_mgmt;
@@ -1725,7 +1732,11 @@ int istgt_execute_volume_operation(spec_t *spec, zvol_op_code_t opcode,
 	replica_t *hr = spec->rebuild_info.healthy_replica;
 	if (hr && opcode == ZVOL_OPCODE_SNAP_CREATE) {
 		REPLICA_LOG("sending SNAP_PREP to Replica(%lu)\n", hr->zvol_guid);
-		BUILD_VOL_CMD_DATA(spec, opcode, snapname, size, data, data_len);
+		BUILD_VOL_CMD_DATA(spec, opcode, snapname, size, data, data_len, abort);
+		if (abort == 1) {
+			MTX_UNLOCK(&spec->rq_mtx);
+			return false;
+		}
 		(void) send_replica_volume_operation(spec, hr, io_seq, ZVOL_OPCODE_SNAP_PREPARE , data_len, data, rmgmt);
 
 		sent = rmgmt->cmds_sent;
@@ -1749,14 +1760,22 @@ int istgt_execute_volume_operation(spec_t *spec, zvol_op_code_t opcode,
 	r = false;
 
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
-		BUILD_VOL_CMD_DATA(spec, opcode, snapname, size, data, data_len);
+		BUILD_VOL_CMD_DATA(spec, opcode, snapname, size, data, data_len, abort);
+		if (abort == 1) {
+			MTX_UNLOCK(&spec->rq_mtx);
+			return false;
+		}
 		(void) send_replica_volume_operation(spec, replica, io_seq, opcode, data_len, data, rcomm_mgmt);
 	}
 
 	// send resize request to non-quorum replicas
 	if (opcode == ZVOL_OPCODE_RESIZE)
 		TAILQ_FOREACH(replica, &spec->non_quorum_rq, r_non_quorum_next) {
-			BUILD_VOL_CMD_DATA(spec, opcode, snapname, size, data, data_len);
+			BUILD_VOL_CMD_DATA(spec, opcode, snapname, size, data, data_len, abort);
+			if (abort == 1) {
+				MTX_UNLOCK(&spec->rq_mtx);
+				return false;
+			}
 			(void) send_replica_volume_operation(spec, replica, io_seq, opcode, data_len, data, rcomm_mgmt);
 		}
 
@@ -1771,7 +1790,11 @@ int istgt_execute_volume_operation(spec_t *spec, zvol_op_code_t opcode,
 
 	if (r == false && opcode == ZVOL_OPCODE_SNAP_CREATE) {
 		TAILQ_FOREACH(replica, &spec->rq, r_next) {
-			BUILD_VOL_CMD_DATA(spec, opcode, snapname, size, data, data_len);
+			BUILD_VOL_CMD_DATA(spec, opcode, snapname, size, data, data_len, abort);
+			if (abort == 1) {
+				MTX_UNLOCK(&spec->rq_mtx);
+				return false;
+			}
 			(void) send_replica_volume_operation(spec, replica, io_seq, ZVOL_OPCODE_SNAP_DESTROY, data_len, data, NULL);
 		}
 	} else {
