@@ -1607,6 +1607,7 @@ pause_and_timed_wait_for_ongoing_ios(spec_t *spec, zvol_op_code_t opcode, int se
 				_data = resize_cmd;							\
 				break;									\
 			default:									\
+				MTX_UNLOCK(&spec->rq_mtx);						\
 				REPLICA_LOG("Please handle new volume operation opcode: %d\n", opcode);	\
 				return false;								\
 			}										\
