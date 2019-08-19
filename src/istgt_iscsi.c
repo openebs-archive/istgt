@@ -1908,7 +1908,7 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 		/* Target Name and Port */
 		if (strcasecmp(session_type, "Normal") == 0) {
 			MTX_LOCK(&conn->istgt->mutex);
-                        conn->istgt->login_req_cnt++;
+			conn->istgt->login_req_cnt++;
 			MTX_UNLOCK(&conn->istgt->mutex);
 			val = ISCSI_GETVAL(params, "TargetName");
 			if (val == NULL) {
@@ -2063,7 +2063,7 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 			}
 			MTX_UNLOCK(&lu->mutex);
 			MTX_LOCK(&conn->istgt->mutex);
-                        conn->istgt->login_req_success_cnt++;
+			conn->istgt->login_req_success_cnt++;
 			MTX_UNLOCK(&conn->istgt->mutex);
 		} else if (strcasecmp(session_type, "Discovery") == 0) {
 			snprintf(conn->target_name, sizeof (conn->target_name),
@@ -2075,7 +2075,7 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 
 			/* force target flags */
 			MTX_LOCK(&conn->istgt->mutex);
-                        conn->istgt->discovery_req_cnt++;
+			conn->istgt->discovery_req_cnt++;
 			if (conn->istgt->no_discovery_auth) {
 				conn->req_auth = 0;
 				rc = istgt_iscsi_param_del(&conn->params,
@@ -2112,7 +2112,7 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 			if (conn->istgt->req_discovery_auth_mutual) {
 				conn->req_mutual = 1;
 			}
-                        conn->istgt->discovery_req_success_cnt++;
+			conn->istgt->discovery_req_success_cnt++;
 			MTX_UNLOCK(&conn->istgt->mutex);
 		} else {
 			ISTGT_ERRLOG("unknown session type\n");

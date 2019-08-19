@@ -314,12 +314,12 @@ typedef struct istgt_t {
 	int DataSequenceInOrder;
 	int ErrorRecoveryLevel;
 	int OperationalMode;
-    uint64_t login_req_cnt, login_req_success_cnt;
-    uint64_t logout_req_cnt, logout_req_success_cnt;
-    uint64_t discovery_req_cnt, discovery_req_success_cnt;
-    uint64_t read6_cnt, read10_cnt, read12_cnt, read16_cnt;
-    uint64_t write6_cnt, write10_cnt, write12_cnt, write16_cnt;
-    uint64_t sync10_cnt, sync16_cnt;
+	uint64_t login_req_cnt, login_req_success_cnt;
+	uint64_t logout_req_cnt, logout_req_success_cnt;
+	uint64_t discovery_req_cnt, discovery_req_success_cnt;
+	uint64_t read6_cnt, read10_cnt, read12_cnt, read16_cnt;
+	uint64_t write6_cnt, write10_cnt, write12_cnt, write16_cnt;
+	uint64_t sync10_cnt, sync16_cnt;
 } ISTGT;
 typedef ISTGT *ISTGT_Ptr;
 

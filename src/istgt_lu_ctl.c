@@ -3586,10 +3586,10 @@ istgt_uctl_cmd_istgt_status(UCTL_Ptr uctl)
                     TAILQ_FOREACH(cmd, &(replica->waitq), next) {
                             wqcnt++;
                     }
-                    TAILQ_FOREACH(cmd, &(replica->waitq), next) {
+                    TAILQ_FOREACH(cmd, &(replica->readyq), next) {
                             rqcnt++;
                     }
-                    TAILQ_FOREACH(cmd, &(replica->waitq), next) {
+                    TAILQ_FOREACH(cmd, &(replica->blockedq), next) {
                             bqcnt++;
                     }
 

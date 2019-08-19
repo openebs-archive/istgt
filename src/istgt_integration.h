@@ -140,7 +140,7 @@ typedef struct replica_s {
 	uint64_t initial_checkpointed_io_seq;
 	/* port from which replica has made mgmt conn. */
 	int replica_mgmt_dport;
-    REPLICA_STATUS_Ptr status;
+	REPLICA_STATUS_Ptr status;
 } replica_t;
 
 typedef struct cstor_conn_ops {
