@@ -609,6 +609,72 @@ error_return:
 }
 
 static int
+istgt_uctl_cmd_resize(UCTL_Ptr uctl)
+{
+	ISTGT_LU_Ptr lu = NULL;
+	ISTGT_LU_DISK *spec = NULL;
+	int rc = 0, ret = UCTL_CMD_ERR;
+	char *volname, *size_str, *arg;
+	uint64_t new_size, old_size;
+	bool r;
+	const char *delim = ARGS_DELIM;
+	arg = uctl->arg;
+
+	CHECK_ARG_AND_GOTO_ERROR;
+	volname = strsepq(&arg, delim);
+
+	CHECK_ARG_AND_GOTO_ERROR;
+	size_str = strsepq(&arg, delim);
+
+	if (size_str == NULL) {
+		istgt_uctl_snprintf(uctl, "LUN format error\n");
+		goto error_return;
+	} else if (*size_str == '-') {
+		istgt_uctl_snprintf(uctl, "invalid size\n");
+		goto error_return;
+	}
+	ISTGT_LOG("volume(%s) requested to resize %s\n", volname, size_str);
+
+	lu = istgt_lu_find_target_by_volname(uctl->istgt, volname);
+	if (lu == NULL) {
+		istgt_uctl_snprintf(uctl, "ERR target not found\n");
+		goto error_return;
+	}
+	spec = lu->lun[0].spec;
+	//old_size = lu->lun[0].u.storage.size;
+	old_size = spec->size;
+	new_size = istgt_lu_parse_size(size_str);
+	if (old_size >= new_size) {
+		ISTGT_LOG("volume(%s) size is already greater than or equal to requested resize\n", volname);
+		istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
+		ret = UCTL_CMD_OK;
+	} else if ((new_size % spec->blocklen) != 0) {
+		ISTGT_LOG("failed to resize volume %s new size %s "
+			"is not in multiples of block length %lu\n",
+			volname, size_str, spec->blocklen);
+		istgt_uctl_snprintf(uctl, "new size %s is not in multiples of block length %lu\n", size_str, spec->blocklen);
+		goto error_return;
+	}else {
+		r = istgt_lu_resize_volume(spec, new_size);
+
+		if (r == true) {
+			ISTGT_LOG("Successfully resized volume %s to %s size\n", volname, size_str);
+			istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
+			ret = UCTL_CMD_OK;
+			lu->lun[0].u.storage.size = new_size;
+		}
+		else
+			istgt_uctl_snprintf(uctl, "ERR failed %s\n", uctl->cmd);
+	}
+error_return:
+	rc = istgt_uctl_writeline(uctl);
+	if (rc != UCTL_CMD_OK) {
+		return (rc);
+	}
+	return (ret);
+}
+
+static int
 istgt_uctl_cmd_mempoolstats(UCTL_Ptr uctl)
 {
 	int rc = 0;
@@ -3739,6 +3805,7 @@ static ISTGT_UCTL_CMD_TABLE istgt_uctl_cmd_table[] =
 #ifdef	REPLICATION
 	{ "SNAPCREATE", istgt_uctl_cmd_snap},
 	{ "SNAPDESTROY", istgt_uctl_cmd_snap},
+	{ "RESIZE", istgt_uctl_cmd_resize},
 	{ "REPLICA", istgt_uctl_cmd_replica_stats},
 	{ "MAXIOWAIT", istgt_uctl_cmd_max_io_wait},
 #endif

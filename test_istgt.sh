@@ -57,7 +57,7 @@ logout_of_volume() {
 }
 
 get_scsi_disk() {
-	device_name=$($ISCSIADM -m session -P 3 |grep -i "Attached scsi disk" | awk '{print $4}')
+	local device_name=$($ISCSIADM -m session -P 3 |grep -i "Attached scsi disk" | awk '{print $4}')
 	i=0
 	while [ -z $device_name ]; do
 		sleep 5
@@ -71,6 +71,7 @@ get_scsi_disk() {
 			continue;
 		fi
 	done
+	echo $device_name
 }
 
 start_istgt() {
@@ -123,7 +124,7 @@ run_istgt_integration()
 
 run_and_verify_iostats() {
 	login_to_volume "$CONTROLLER_IP:3260"
-	get_scsi_disk
+	local device_name=$(get_scsi_disk)
 	if [ "$device_name"!="" ]; then
 		sudo mkfs.ext4 -F /dev/$device_name
 		[[ $? -ne 0 ]] && echo "mkfs failed for $device_name" && exit 1
@@ -169,7 +170,7 @@ run_and_verify_iostats() {
 write_and_verify_data(){
 	login_to_volume "$CONTROLLER_IP:3260"
 	sleep 5
-	get_scsi_disk
+	local device_name=$(get_scsi_disk)
 	if [ "$device_name"!="" ]; then
 		mkfs.ext4 -F /dev/$device_name
 		[[ $? -ne 0 ]] && echo "mkfs failed for $device_name" && tail -20 $LOGFILE && exit 1
@@ -219,7 +220,8 @@ write_data()
 setup_test_env() {
 	rm -f /tmp/test_vol*
 	mkdir -p /mnt/store
-	truncate -s 5G /tmp/test_vol1 /tmp/test_vol2 /tmp/test_vol3 $1
+	## We are doing resize to 7G
+	truncate -s 7G /tmp/test_vol1 /tmp/test_vol2 /tmp/test_vol3 $1
 	logout_of_volume
 	sudo killall -9 istgt
 	sudo killall -9 replication_test
@@ -369,6 +371,7 @@ run_read_consistency_test ()
 	local file_name="/root/data_file"
 	local device_file="/root/device_file"
 	local w_pid
+	local device_name=""
 
 	# Test to check if replication module is not initialized then
 	# istgtcontrol should return an error
@@ -403,7 +406,7 @@ run_read_consistency_test ()
 	login_to_volume "$CONTROLLER_IP:3260"
 	sleep 5
 
-	get_scsi_disk
+	device_name=$(get_scsi_disk)
 	if [ "$device_name" == "" ]; then
 		echo "error happened while running read consistency test"
 		pkill -9 -P $replica1_pid
@@ -788,6 +791,7 @@ run_non_quorum_replica_errored_test()
 	local replica1_vdev="/tmp/test_vol1"
 	local replica2_vdev="/tmp/test_vol2"
 	local replica3_vdev="/tmp/test_vol3"
+	local device_name=""
 
 	REPLICATION_FACTOR=3
 	CONSISTENCY_FACTOR=2
@@ -808,7 +812,7 @@ run_non_quorum_replica_errored_test()
 
 	login_to_volume "$CONTROLLER_IP:3260"
 	sleep 5
-	get_scsi_disk
+	device_name=$(get_scsi_disk)
 
 	if [ "$device_name"!="" ]; then
 		mkfs.ext4 -F /dev/$device_name
@@ -892,8 +896,39 @@ kill_non_quorum_replica()
 	echo "Erroring out replica done successfully"
 }
 
+## verify_resize_command will expects the device name to be passed
+verify_resize_command()
+{
+	local disk_name=$1
+	local CONF_FILE="/usr/local/etc/istgt/istgt.conf"
+	old_size=$(lsblk | grep $disk_name |awk -F ' ' '{print $4+0}')
+	new_size=$(( $old_size + 2 ))
+	vol_name=$(cat $CONF_FILE | grep TargetName | awk '{print $2}')
+	$ISTGTCONTROL resize $vol_name "${new_size}G"
+	if [ $? -ne 0 ]
+	then
+		echo "Failed to resize the volume"
+		exit 1
+	else
+		sed -i "s|LUN0 Storage.*|LUN0 Storage ${new_size}G 32k|g" $CONF_FILE
+		sleep 3
+	fi
+	sleep 2
+
+	##Rescan the iscsi session
+	$ISCSIADM -m node -R
+	disk_size=$(lsblk | grep $disk_name |awk -F ' ' '{print $4+0}')
+	if [ $disk_size -ne $new_size ]; then
+		echo "LUN resize failed"
+		exit 1
+	fi
+	echo "Resize passed"
+	sleep 2
+}
+
 data_integrity_with_non_quorum()
 {
+	local device_name=""
 	local replica1_port="6161"
 	local replica2_port="6162"
 	local replica3_port="6163"
@@ -924,7 +959,7 @@ data_integrity_with_non_quorum()
 
 	login_to_volume "$CONTROLLER_IP:3260"
 	sleep 10
-	get_scsi_disk
+	device_name=$(get_scsi_disk)
 
 
 
@@ -966,6 +1001,8 @@ data_integrity_with_non_quorum()
 		sleep 10
 		exit 1
 	fi
+
+	verify_resize_command $device_name
 
 	pkill -9 -P $replica3_pid
 
@@ -1291,6 +1328,7 @@ run_test_env()
 	TEST_ENV=1
 	setup_test_env
 
+	$ISTGTCONTROL dump -a
 	cnt=$(eval $ISTGTCONTROL dump -a | grep "Luworkers:9" | wc -l)
 	if [ $? -ne 0 ] || [ $cnt -ne 1 ]
 	then
@@ -1322,6 +1360,7 @@ run_io_timeout_test()
 	local replica3_ip="127.0.0.1"
 	local replica1_vdev="/tmp/test_vol1"
 	local injected_latency=10
+	local device_name=""
 
 	REPLICATION_FACTOR=3
 	CONSISTENCY_FACTOR=2
@@ -1343,7 +1382,7 @@ run_io_timeout_test()
 	sleep 2
 
 	login_to_volume "$CONTROLLER_IP:3260"
-	get_scsi_disk
+	device_name=$(get_scsi_disk)
 	if [ "$device_name"!="" ]; then
 		# Test to verify impact of replica's delay on volume latency
 		sudo kill -9 $replica1_pid

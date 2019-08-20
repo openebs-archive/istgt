@@ -905,6 +905,59 @@ exec_snap(UCTL_Ptr uctl)
 }
 
 static int
+exec_resize(UCTL_Ptr uctl)
+{
+	const char *delim = ARGS_DELIM;
+	char *arg, *result;
+	int rc = 0, wait_time, io_wait_time;
+	char *name = uctl->setargv[0];
+	char *size = uctl->setargv[1];
+
+	if (uctl->setargcnt >= 3)
+		io_wait_time = atoi(uctl->setargv[2]);
+	else
+		io_wait_time = 10;
+
+	if (uctl->setargcnt >= 4)
+		wait_time = atoi(uctl->setargv[3]);
+	else
+		wait_time = 30;
+
+	uctl_snprintf(uctl, "%s \"%s\" \"%s\" \"%d\" \"%d\"\n",
+		uctl->cmd, name, size, io_wait_time, wait_time);
+
+	rc = uctl_writeline(uctl);
+	if (rc != UCTL_CMD_OK) {
+		return (rc);
+	}
+
+		/* receive result */
+	while (1) {
+		rc = uctl_readline(uctl);
+		if (rc != UCTL_CMD_OK) {
+			return (rc);
+		}
+		arg = trim_string(uctl->recvbuf);
+		result = strsepq(&arg, delim);
+		strupr(result);
+		if (strcmp(result, uctl->cmd) != 0)
+			break;
+		if (uctl->iqn != NULL) {
+			printf("%s\n", arg);
+		} else {
+			printf("%s\n", arg);
+		}
+	}
+	if (strcmp(result, "OK") != 0) {
+		if (is_err_req_auth(uctl, arg))
+			return (UCTL_CMD_REQAUTH);
+		fprintf(stderr, "ERROR %s\n", arg);
+		return (UCTL_CMD_ERR);
+	}
+	return (UCTL_CMD_OK);
+}
+
+static int
 exec_mempool_stats(UCTL_Ptr uctl)
 {
 	const char *delim = ARGS_DELIM;
@@ -1294,6 +1347,7 @@ static EXEC_TABLE exec_table[] =
 #ifdef	REPLICATION
 	{"SNAPCREATE", exec_snap, 2, 0},
 	{"SNAPDESTROY", exec_snap, 2, 0},
+	{"RESIZE", exec_resize, 2, 0},
 	{"REPLICA", exec_replica, 0, 0},
 	{"MAXIOWAIT", exec_max_io_wait, 0, 0},
 #endif
@@ -1783,6 +1837,7 @@ usage(void)
 	printf(" replica    list replica and its stats\n");
 	printf(" mempool    get mempool details\n");
 	printf(" maxiowait  get/set wait time for IO completion in seconds\n");
+	printf(" resize     read the size from command cli and updates the size\n");
 #endif
 	printf(" set        set values for variables:\n");
 	printf("            Syntax: istgtcontrol -t <iqn(ALL to set globally)> \
@@ -2059,7 +2114,8 @@ main(int argc, char *argv[])
 	if ((strcmp(cmd, "SNAPCREATE") == 0) ||
 	(strcmp(cmd, "SNAPDESTROY") == 0) ||
 	    (strcmp(cmd, "REPLICA") == 0) ||
-	    (strcmp(cmd, "MAXIOWAIT") == 0)) {
+	    (strcmp(cmd, "MAXIOWAIT") == 0) ||
+	    (strcmp(cmd, "RESIZE") == 0)) {
 		uctl->setargv = argv;
 		uctl->setargcnt = argc;
 	}
