@@ -932,11 +932,6 @@ exec_resize(UCTL_Ptr uctl)
 		strupr(result);
 		if (strcmp(result, uctl->cmd) != 0)
 			break;
-		if (uctl->iqn != NULL) {
-			printf("%s\n", arg);
-		} else {
-			printf("%s\n", arg);
-		}
 	}
 	if (strcmp(result, "OK") != 0) {
 		if (is_err_req_auth(uctl, arg))

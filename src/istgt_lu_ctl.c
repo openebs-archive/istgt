@@ -619,6 +619,9 @@ istgt_uctl_cmd_resize(UCTL_Ptr uctl)
 	bool r;
 	const char *delim = ARGS_DELIM;
 	arg = uctl->arg;
+	//NOTE: We are hard coding replica block size as of
+	//now we don't have any information related to block size of replica
+	uint64_t replica_block_size = 4096;
 
 	CHECK_ARG_AND_GOTO_ERROR;
 	volname = strsepq(&arg, delim);
@@ -627,10 +630,10 @@ istgt_uctl_cmd_resize(UCTL_Ptr uctl)
 	size_str = strsepq(&arg, delim);
 
 	if (size_str == NULL) {
-		istgt_uctl_snprintf(uctl, "LUN format error\n");
+		istgt_uctl_snprintf(uctl, "ERR LUN format error\n");
 		goto error_return;
 	} else if (*size_str == '-') {
-		istgt_uctl_snprintf(uctl, "invalid size\n");
+		istgt_uctl_snprintf(uctl, "ERR invalid size\n");
 		goto error_return;
 	}
 	ISTGT_LOG("volume(%s) requested to resize %s\n", volname, size_str);
@@ -644,17 +647,24 @@ istgt_uctl_cmd_resize(UCTL_Ptr uctl)
 	//old_size = lu->lun[0].u.storage.size;
 	old_size = spec->size;
 	new_size = istgt_lu_parse_size(size_str);
-	if (old_size >= new_size) {
-		ISTGT_LOG("volume(%s) size is already greater than or equal to requested resize\n", volname);
-		istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
-		ret = UCTL_CMD_OK;
-	} else if ((new_size % spec->blocklen) != 0) {
-		ISTGT_LOG("failed to resize volume %s new size %s "
+
+	if (old_size > new_size) {
+		ISTGT_ERRLOG("volume(%s) size is already greater than requested resize\n", volname);
+		istgt_uctl_snprintf(uctl, "ERR current size is already greater than requested size\n");
+		goto error_return;
+	}
+	if ((new_size % replica_block_size) != 0) {
+		ISTGT_ERRLOG("failed to resize volume %s new size %s "
 			"is not in multiples of block length %lu\n",
 			volname, size_str, spec->blocklen);
-		istgt_uctl_snprintf(uctl, "new size %s is not in multiples of block length %lu\n", size_str, spec->blocklen);
+		istgt_uctl_snprintf(uctl, "ERR new size %s is "
+			"not in multiples of block length %lu\n", size_str, spec->blocklen);
 		goto error_return;
-	}else {
+	}
+	if (old_size == new_size) {
+		ISTGT_LOG("volume(%s) size is already equal to requested resize\n", volname);
+		istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
+	} else {
 		r = istgt_lu_resize_volume(spec, new_size);
 
 		if (r == true) {
