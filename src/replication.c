@@ -1447,8 +1447,7 @@ send_replica_snapshot(spec_t *spec, replica_t *replica, uint64_t io_seq,
 }
 
 static int
-send_replica_resize_operation(spec_t *spec, replica_t *replica, uint64_t io_seq,
-	zvol_op_code_t mgmt_opcode, size_t size, rcommon_mgmt_cmd_t *rcomm_mgmt) {
+send_replica_resize_operation(spec_t *spec, replica_t *replica, zvol_op_code_t mgmt_opcode, size_t size) {
 	zvol_io_hdr_t *rmgmtio = NULL;
 	size_t data_len;
 	zvol_op_resize_data_t *resize_cmd;
@@ -1459,7 +1458,6 @@ send_replica_resize_operation(spec_t *spec, replica_t *replica, uint64_t io_seq,
 
 	mgmt_cmd = malloc(sizeof(mgmt_cmd_t));
 	memset(mgmt_cmd, 0, sizeof(mgmt_cmd_t));
-	mgmt_cmd->rcomm_mgmt = rcomm_mgmt;
 	data_len = sizeof(zvol_op_resize_data_t);
 
 	BUILD_REPLICA_MGMT_HDR(rmgmtio, mgmt_opcode, data_len);
@@ -1469,7 +1467,7 @@ send_replica_resize_operation(spec_t *spec, replica_t *replica, uint64_t io_seq,
 	resize_cmd->size = size;
 	data = resize_cmd;
 
-	rmgmtio->io_seq = io_seq;
+	rmgmtio->io_seq = spec->io_seq;
 	mgmt_cmd->io_hdr = rmgmtio;
 	mgmt_cmd->data = data;
 	mgmt_cmd->mgmt_cmd_state = WRITE_IO_SEND_HDR;
@@ -1484,9 +1482,6 @@ send_replica_resize_operation(spec_t *spec, replica_t *replica, uint64_t io_seq,
 		TAILQ_INSERT_TAIL(&replica->mgmt_cmd_queue, mgmt_cmd, mgmt_cmd_next);
 	}
 	MTX_UNLOCK(&replica->r_mtx);
-
-	if (rcomm_mgmt != NULL)
-		rcomm_mgmt->cmds_sent++;
 
 	if (write(replica->mgmt_eventfd1, &num, sizeof (num)) != sizeof (num)) {
 		REPLICA_ERRLOG("Failed to inform resize request to mgmt_eventfd for "
@@ -1781,7 +1776,6 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 int
 istgt_lu_resize_volume(spec_t *spec, size_t size) {
 	replica_t *replica;
-	uint64_t io_seq;
 	zvol_op_code_t opcode = ZVOL_OPCODE_RESIZE;
 
 	MTX_LOCK(&spec->rq_mtx);
@@ -1792,13 +1786,12 @@ istgt_lu_resize_volume(spec_t *spec, size_t size) {
 		sleep(1);
 		MTX_LOCK(&spec->rq_mtx);
 	}
-	io_seq = ++spec->io_seq;
-	ISTGT_LOG("Updating io_seq: %lu as part of resize operation\n", io_seq)
 
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
-		(void) send_replica_resize_operation(spec, replica, io_seq, opcode, size, NULL);
+		(void) send_replica_resize_operation(spec, replica, opcode, size);
 	}
 
+	ISTGT_LOG("Resized the volume from %lu to %lu io_seq: %lu\n", spec->size, size, spec->io_seq);
 	spec->size = size;
 	// NOTE: Since we are supporting only expansion no need to worry about queued IOs or upcoming IOs
 	spec->blockcnt = (size / spec->blocklen);

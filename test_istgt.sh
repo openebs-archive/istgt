@@ -974,7 +974,7 @@ data_integrity_with_non_quorum()
 		exit 1
 	fi
 
-	if [ "$device_name"!="" ]; then
+	if [ "$device_name" != "" ]; then
 		sudo dd if=/dev/urandom of=$device_name bs=4k count=1000 oflag=direct
                 var1="$($ISTGTCONTROL -q iostats | jq '.TotalWriteBytes')"
 		sleep 5

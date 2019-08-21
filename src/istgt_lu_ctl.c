@@ -658,7 +658,6 @@ istgt_uctl_cmd_resize(UCTL_Ptr uctl)
 		r = istgt_lu_resize_volume(spec, new_size);
 
 		if (r == true) {
-			ISTGT_LOG("Successfully resized volume %s to %s size\n", volname, size_str);
 			istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
 			ret = UCTL_CMD_OK;
 			lu->lun[0].u.storage.size = new_size;
