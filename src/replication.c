@@ -317,6 +317,7 @@ check_header_sanity(zvol_io_hdr_t *resp_hdr)
 		case ZVOL_OPCODE_SNAP_PREPARE:
 		case ZVOL_OPCODE_START_REBUILD:
 		case ZVOL_OPCODE_SNAP_DESTROY:
+		case ZVOL_OPCODE_RESIZE:
 			exp_len = 0;
 			break;
 		default:
@@ -1445,6 +1446,46 @@ send_replica_snapshot(spec_t *spec, replica_t *replica, uint64_t io_seq,
 	return ret;
 }
 
+static int
+send_replica_resize_operation(spec_t *spec, replica_t *replica, zvol_op_code_t mgmt_opcode, size_t size) {
+	zvol_io_hdr_t *rmgmtio = NULL;
+	size_t data_len;
+	zvol_op_resize_data_t *resize_cmd;
+	void *data;
+	int ret = 0;
+	uint64_t num = 1;
+	mgmt_cmd_t *mgmt_cmd;
+
+	mgmt_cmd = malloc(sizeof(mgmt_cmd_t));
+	memset(mgmt_cmd, 0, sizeof(mgmt_cmd_t));
+	data_len = sizeof(zvol_op_resize_data_t);
+
+	BUILD_REPLICA_MGMT_HDR(rmgmtio, mgmt_opcode, data_len);
+	resize_cmd = malloc(data_len);
+	memset(resize_cmd, 0, data_len);
+	strncpy(resize_cmd->volname, spec->volname, MAX_NAME_LEN);
+	resize_cmd->size = size;
+	data = resize_cmd;
+
+	rmgmtio->io_seq = spec->io_seq;
+	mgmt_cmd->io_hdr = rmgmtio;
+	mgmt_cmd->data = data;
+	mgmt_cmd->mgmt_cmd_state = WRITE_IO_SEND_HDR;
+
+	MTX_LOCK(&replica->r_mtx);
+
+	TAILQ_INSERT_TAIL(&replica->mgmt_cmd_queue, mgmt_cmd, mgmt_cmd_next);
+
+	MTX_UNLOCK(&replica->r_mtx);
+
+	if (write(replica->mgmt_eventfd1, &num, sizeof (num)) != sizeof (num)) {
+		REPLICA_ERRLOG("Failed to inform resize request to mgmt_eventfd for "
+		    "replica(%lu)\n", replica->zvol_guid);
+		ret = -1;
+	}
+	return ret;
+}
+
 static void
 disconnect_nonresponding_replica(replica_t *replica, uint64_t io_seq,
     zvol_op_code_t opcode)
@@ -1725,6 +1766,29 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	if (r == false)
 		REPLICA_ERRLOG("snap create ioseq: %lu resp: %d\n", io_seq, r);
 	return (ret);
+}
+
+int
+istgt_lu_resize_volume(spec_t *spec, size_t size) {
+	replica_t *replica;
+	zvol_op_code_t opcode = ZVOL_OPCODE_RESIZE;
+
+	MTX_LOCK(&spec->rq_mtx);
+
+	TAILQ_FOREACH(replica, &spec->rq, r_next)
+		(void) send_replica_resize_operation(spec, replica, opcode, size);
+	TAILQ_FOREACH(replica, &spec->non_quorum_rq, r_non_quorum_next)
+		(void) send_replica_resize_operation(spec, replica, opcode, size);
+
+	ISTGT_LOG("Resized the volume from %lu to %lu io_seq: %lu\n", spec->size, size, spec->io_seq);
+	spec->size = size;
+	// NOTE: Since we are supporting only expansion no need to worry about queued IOs or upcoming IOs
+	spec->blockcnt = (size / spec->blocklen);
+
+	MTX_UNLOCK(&spec->rq_mtx);
+	// TODO: Need to handle response from replicas and decide whether we need to resize to
+	// older size in case of cf number of response are not received
+	return true;
 }
 
 void
@@ -2485,6 +2549,7 @@ read_io_resp_hdr:
 					break;
 
 				case ZVOL_OPCODE_SNAP_DESTROY:
+				case ZVOL_OPCODE_RESIZE:
 					break;
 
 				default:
