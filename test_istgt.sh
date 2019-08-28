@@ -896,6 +896,13 @@ kill_non_quorum_replica()
 	echo "Erroring out replica done successfully"
 }
 
+## Below function covers resize test case
+## 1. Invalid volume name
+## 2. Resize volume with lower size than current size
+## 3. Resize volume with invalid blocksize
+## 4. Reisze volume without passing size
+## 5. Resize volume with same size
+## 6. Resize volume with by expanding the size
 ## verify_resize_command will expects the device name to be passed
 verify_resize_command()
 {
@@ -903,23 +910,39 @@ verify_resize_command()
 	local CONF_FILE="/usr/local/etc/istgt/istgt.conf"
 	old_size=$(lsblk | grep $disk_name |awk -F ' ' '{print $4+0}')
 	new_size=$(( $old_size + 2 ))
+	lower_size=$(( $old_size - 2 ))
+	## Hard coded invalid block size which is more than current size
+	invalid_bs=6442450900
 	vol_name=$(cat $CONF_FILE | grep TargetName | awk '{print $2}')
+
+	$ISTGTCONTROL resize "${vol_name}invalid" "${new_size}G"
+	if [ $? -eq 0 ]; then echo"resize should fail due to invalid volume name"; exit 1; fi
+
+	$ISTGTCONTROL resize ${vol_name} "${lower_size}G"
+	if [ $? -eq 0 ]; then echo"resize should fail due to lower size than current"; exit 1; fi
+
+	$ISTGTCONTROL resize ${vol_name} ${invalid_bs}
+	if [ $? -eq 0 ]; then echo"resize should fail due to invalid block size"; exit 1; fi
+
+	$ISTGTCONTROL resize ${vol_name}
+	if [ $? -eq 0 ]; then echo"resize should fail due to invalid arguments"; exit 1; fi
+
+	$ISTGTCONTROL resize ${vol_name} "${old_size}G"
+	if [ $? -ne 0 ]; then echo"Failed to resize volume with same size"; exit 1; fi
+
 	$ISTGTCONTROL resize $vol_name "${new_size}G"
 	if [ $? -ne 0 ]
 	then
-		echo "Failed to resize the volume"
+		echo "Failed to resize the volume from ${old_size}G to  ${new_size}G"
 		exit 1
-	else
-		sed -i "s|LUN0 Storage.*|LUN0 Storage ${new_size}G 32k|g" $CONF_FILE
-		sleep 3
 	fi
-	sleep 2
 
 	##Rescan the iscsi session
 	$ISCSIADM -m node -R
 	disk_size=$(lsblk | grep $disk_name |awk -F ' ' '{print $4+0}')
 	if [ $disk_size -ne $new_size ]; then
 		echo "LUN resize failed"
+		echo "Failed to resize the volume from ${old_size}G to  ${new_size}G"
 		exit 1
 	fi
 	echo "Resize passed"
