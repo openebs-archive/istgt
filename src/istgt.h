@@ -165,6 +165,9 @@
 
 #define ISTGT_UCTL_UNXPATH "/var/run/istgt_ctl_sock"
 
+/* Update sock file path */
+#define ISTGT_SEND_UNXPATH "/tmp/temp.sock"
+
 #define MTX_LOCK(MTX) \
 	do {								\
 		int _rc_;							\

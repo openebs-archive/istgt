@@ -345,6 +345,7 @@ typedef struct istgt_lu_t {
 	int conns;
 #ifdef REPLICATION
 	uint8_t replication_factor;
+	uint8_t desired_replication_factor;
 	uint8_t consistency_factor;
 #endif
 } ISTGT_LU;
@@ -867,6 +868,7 @@ typedef struct istgt_lu_disk_t {
 	TAILQ_HEAD(, replica_s) rwaitq; //Queue of replicas completed handshake, and yet to have data connection to this spec(volume)
 	TAILQ_HEAD(, replica_s) non_quorum_rq; //Queue of non_quorum replicas connected to this spec
 	TAILQ_HEAD(, known_replica_s) identified_replica;	/* List of replicas known to spec */
+	int desired_replication_factor;
 	int replication_factor;
 	int consistency_factor;
 	int healthy_rcount;

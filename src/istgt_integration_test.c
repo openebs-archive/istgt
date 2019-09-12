@@ -37,6 +37,7 @@
 __thread char tinfo[50] = {0};
 int g_trace_flag = 0;
 pthread_t new_replica[10] = { 0 };
+int desired_replication_factor = 3;
 int replication_factor = 3, consistency_factor = 2;
 int new_replica_count = 3;	/* Assign same number as replication factor */
 
@@ -1490,7 +1491,7 @@ main(int argc, char **argv)
 		return (1);
 	}
 
-	initialize_volume(spec, replication_factor, consistency_factor);
+	initialize_volume(spec, replication_factor, consistency_factor, desired_replication_factor);
 
 	pthread_create(&replica_thread, NULL, &init_replication, (void *)NULL);
 

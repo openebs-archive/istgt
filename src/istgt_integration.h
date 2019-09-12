@@ -104,6 +104,9 @@ typedef struct replica_s {
 
 	int dont_free;
 
+	/* Information to know whether update is success or not */
+	int update_as_known_replica;
+
 	struct timespec create_time;
 
 	/* This is calculated from create time till the queued time into readyQ */

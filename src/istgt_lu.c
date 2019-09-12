@@ -1710,6 +1710,22 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "ReadOnly %s\n",
 	    lu->readonly ? "Yes" : "No");
 #ifdef REPLICATION
+	val = istgt_get_val(sp, "DesiredReplicationFactor");
+	if (val == NULL) {
+		ISTGT_ERRLOG("Desired ReplicationFactor not found in conf file\n");
+		goto error_return;
+	} else {
+		lu->desired_replication_factor = (int) strtol(val, NULL, 10);
+		if (lu->desired_replication_factor > MAXREPLICA) {
+			ISTGT_ERRLOG("Max replication factor is %d.. "
+			    "given %d\n", MAXREPLICA, lu->desired_replication_factor);
+			goto error_return;
+		}
+	}
+
+	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "Desired ReplicationFactor %d\n",
+	    lu->desired_replication_factor);
+
 	val = istgt_get_val(sp, "ReplicationFactor");
 	if (val == NULL) {
 		ISTGT_ERRLOG("ReplicationFactor not found in conf file\n");
@@ -1737,6 +1753,10 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "ConsistencyFactor %d\n",
 	    lu->consistency_factor);
 
+	if (lu->replication_factor > lu->desired_replication_factor) {
+		ISTGT_ERRLOG("Invalid DesiredReplicationFactor and ConsistencyFactor\n");
+		goto error_return;
+	}
 	if (lu->replication_factor <= 0 || lu->consistency_factor <= 0 ||
 		lu->replication_factor < lu->consistency_factor) {
 		ISTGT_ERRLOG("Invalid ReplicationFactor/ConsistencyFactor or their ratio\n");
