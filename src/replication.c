@@ -766,6 +766,131 @@ is_replica_newly_connected(spec_t *spec, replica_t *new_replica)
 	return newly_connected;
 }
 
+static int
+get_known_replica_count(spec_t *spec) {
+	int known_replica_count = 0, i;
+	for (i=0; i<MAXREPLICA; i++) {
+		if (spec->known_replicas_uid[i] != 0)
+			known_replica_count++;
+		else
+			break;
+	}
+	return known_replica_count;
+}
+
+//TODO: Instead of connect each time use epoll to make connection
+// and remove hardcoded values
+// update_persistent_volume must be performed by taking spec lock
+static int
+update_persistent_volume(char *data) {
+	int fd, rc = -1, len;
+	int rtimeout = 50, wtimeout = 20, tmpidx, tmpcnt;
+	char *read_data, *tmp_data;
+	const char err[] = "error";
+
+	fd = istgt_connect_unx(ISTGT_SEND_UNXPATH);
+	if (fd < 0) {
+		ISTGT_ERRLOG("failed to connect to %s", ISTGT_SEND_UNXPATH);
+		goto error_in_update;
+	}
+	len = strlen(data);
+
+       /* set timeout msec. */
+        rc = istgt_set_recvtimeout(fd, rtimeout * 1000);
+        if (rc != 0) {
+                ISTGT_ERRLOG("istgt_set_recvtimeo() failed\n");
+		rc = -1;
+                goto error_in_update;
+        }
+        rc = istgt_set_sendtimeout(fd, wtimeout * 1000);
+        if (rc != 0) {
+                ISTGT_ERRLOG("istgt_set_sendtimeo() failed\n");
+		rc = -1;
+                goto error_in_update;
+        }
+
+	rc = istgt_writeline_socket(fd, data, wtimeout);
+	if (rc < 0) {
+		ISTGT_ERRLOG("failed to write the data on %d no_of_bytes written %d", fd, rc);
+		goto error_in_update;
+	} else if (rc < len) {
+		ISTGT_ERRLOG("partial data written on %d no_of_bytes written %d", fd, rc);
+		rc = -1;
+		goto error_in_update;
+	}
+	//TODO: Improve read code
+	read_data = (char *)malloc(sizeof(char) * 128);
+	tmp_data = (char *)malloc(sizeof(char) * 64);
+	rc = istgt_readline_socket(fd, read_data, 128, tmp_data, 64, &tmpidx, &tmpcnt, rtimeout);
+	if (rc < 0) {
+		ISTGT_ERRLOG("failed to read the data on %d", fd);
+		goto clean_data;
+	}
+	if(strcmp(read_data, err) == 0) {
+		ISTGT_ERRLOG("failed to update %s", data);
+		rc = -1;
+		goto clean_data;
+	}
+	rc = 1;
+clean_data:
+	free(read_data);
+	free(tmp_data);
+error_in_update:
+	close(fd);
+	return rc;
+}
+
+static int
+update_known_replica_list(spec_t *spec, replica_t *rep) {
+	int known_replica_count, data_len, rc;
+	char *data;
+	const char *json_string;
+	struct json_object *jobj;
+
+	known_replica_count = get_known_replica_count(spec);
+
+	if (known_replica_count >= spec->desired_replication_factor) {
+		ISTGT_ERRLOG("current replica count %d is greater "
+		    "than or equal to desired replciation factor %d",
+		    known_replica_count, spec->desired_replication_factor);
+		return -1;
+	}
+
+	jobj = json_object_new_object();
+	json_object_object_add(jobj, "replicaId",
+	    json_object_new_uint64(rep->zvol_guid));
+	json_string = json_object_to_json_string_ext(jobj, JSON_C_TO_STRING_PLAIN);
+
+	data_len = strlen(json_string) + 1;
+	data = (char *) malloc(sizeof(char *)*data_len);
+	memset(data, 0, data_len);
+	strncpy(data, json_string, data_len);
+
+	rc = update_persistent_volume(data);
+	if (rc < 0) {
+		ISTGT_ERRLOG("failed to update replica{%lu} to known replica list", rep->zvol_guid);
+	} else {
+		spec->known_replicas_uid[++known_replica_count] = rep->zvol_guid;
+		rep->updated_as_known_replica = true;
+	}
+
+	free(data);
+	json_object_put(jobj);
+	return rc;
+}
+
+#define check_is_it_known_replica(_spec, _rep, val)		\
+	do {							\
+		int i;						\
+		val = false;					\
+		for(i=0; i<_spec->replication_factor; i++) {	\
+			if (_spec->known_replicas_uid[i] ==	\
+			    _rep->zvol_guid)			\
+				val = true;			\
+			if (_spec->known_replicas_uid[i] == 0)	\
+				break;				\
+		}						\
+	}while(0)
 /*
  * is_known_replica returns true whether the replica is known or not based
  * on below factors
@@ -779,16 +904,28 @@ is_replica_newly_connected(spec_t *spec, replica_t *new_replica)
 static bool
 is_known_replica(spec_t *spec, replica_t *new_replica)
 {
+	int known_replica_count;
+	bool result = true;
+
 	if (new_replica->quorum == 0) {
-		return true;
+		return result;
 	}
 	if (new_replica->initial_checkpointed_io_seq == 0) {
-		return true;
+		return result;
 	}
-	// TODO: If replica is present in spec->know_replica_list
+	//TODO: This is to handle upgrade scenarios should we handle
+	//  in code or in upgrade process?
+	known_replica_count = get_known_replica_count(spec);
+	if (known_replica_count < spec->replication_factor) {
+		return result;
+	}
+	// If replica is present in spec->know_replica_list
 	// then return true else false
-	new_replica->update_as_known_replica = 1;
-	return true;
+	check_is_it_known_replica(spec, new_replica, result);
+	if (result) {
+		new_replica->updated_as_known_replica = true;
+	}
+	return result;
 }
 
 /*
@@ -1314,7 +1451,6 @@ error_out_replica:
 		goto error_out_replica;
 	}
 
-	//TODO: Move to code where it is connecting
 	/* If this replica is quorum replica and no.of connected
 	 * replicas are equal to desired replication factor then
 	 * disconnecting all non-quorum replicas connected to target
@@ -1324,16 +1460,18 @@ error_out_replica:
 		disconnect_non_quorum_replicas(spec);
 	}
 
+	//TODO: Check with replica->update_as_known_replica is only for upgrade
+	// scenarios
 	//Update known replica list by making call to cstor-volume-mgmt
-	if (replica->initial_checkpointed_io_seq == 0 && replica->quorum == 1) {
-		//rc = update_known_replica_list(spec, replica);
-		//if (rc < 0) {
-		//	REPLICA_ERRLOG("Failed to update replica list... "
-		//	    "disconnecting new replica(ip:%s port:%d "
-		//	    "guid:%lu)\n", replica->ip, replica->port,
-		//	    replica->zvol_guid);
-		//	goto error_out_replica;
-		//}
+	if (replica->quorum == 1 && !replica->updated_as_known_replica) {
+		rc = update_known_replica_list(spec, replica);
+		if (rc < 0) {
+			REPLICA_ERRLOG("Failed to update replica list... "
+			    "disconnecting new replica(ip:%s port:%d "
+			    "guid:%lu)\n", replica->ip, replica->port,
+			    replica->zvol_guid);
+			goto error_out_replica;
+		}
 	}
 	MTX_UNLOCK(&replica->r_mtx);
 
@@ -2154,7 +2292,7 @@ wait_for_ongoing_ios_on_replica(spec_t *spec, replica_t *replica, int sec) {
 	int retry_count_for_ongoing_ios;
 	bool ret = false;
 	struct timespec last, now, diff;
-	bool io_found = false, is_value_changed;	/* Write or Sync IOs */
+	bool io_found = false;	/* Write or Sync IOs */
 
 	ISTGT_LOG("Waiting for IO's to flush\n");
 	// To check whether IO's are flushing to replica or not
@@ -2212,66 +2350,68 @@ wait_for_ongoing_ios_on_replica(spec_t *spec, replica_t *replica, int sec) {
  * must be done by taking spec lock and pause IOs until timeout
  * or operation completes.
  */
-//TODO: Update via structures instead of buffers
-//static void
-//update_replication_factor(spec_t *spec, replica_t *replica) {
-//	int rc, sock;
-//	int rf, cf, expect_len, total;
-//	//TODO: Maintain some structures
-//	char buf[1024], recv_buf[512];
-//	//struct timespec last;
-//
-//	ASSERT(MTX_LOCKED(&spec->rq_mtx));
-//	//clock_gettime(CLOCK_MONOTONIC_COARSE, &last);
-//	if (spec->replication_factor >= spec->desired_replication_factor)
-//		return;
-//
-//	/* Pause ongoing IOs */
-//	spec->quiesce = 1;
-//	sock = istgt_connect_unx(ISTGT_SEND_UNXPATH);
-//	if (sock < 0) {
-//		ISTGT_ERRLOG("failed to connect to %s", ISTGT_SEND_UNXPATH);
-//		return;
-//	}
-//	/* Update RF and CF */
-//	rf = spec->replication_factor + 1;
-//	cf = (rf/2) + 1;
-//	sprintf(buf, "update volume rf=%d cf=%d\0", rf, cf);
-//	expect_len = strlen(buf);
-//	total = istgt_write_socket(sock, buf, expect_len, 10);
-//	if (total < 0) {
-//		spec->quiesce = 0;
-//		ISTGT_ERRLOG("failed to inform changes of replication factor");
-//		return;
-//	}
-//	if (expect_len != total) {
-//		spec->quiesce = 0;
-//		ISTGT_ERRLOG("partial information is written expected: %d got: %d", expect_len, total);
-//		return;
-//	}
-//	ISTGT_LOG("Reading from wire");
-//	total = istgt_read_socket(sock, recv_buf, 10, 10);
-//	if (total < 0) {
-//		spec->quiesce = 0;
-//		ISTGT_ERRLOG("failed to read data");
-//		return;
-//	}
-//	ISTGT_LOG("Read from wire");
-//	if (strcmp(recv_buf, "ok") < 1) {
-//		spec->quiesce = 0;
-//		ISTGT_ERRLOG("updating volume failed");
-//		return;
-//	}
-//	ISTGT_LOG("Updated the replication_factor: %d to %d and consistency_factor: %d to %d",
-//	    spec->replication_factor, rf, spec->consistency_factor, cf);
-//	/* Update inmemory RF and CF */
-//	spec->replication_factor = rf;
-//	spec->consistency_factor = cf;
-//	spec->quiesce = 0;
-//	replica->update_as_known_replica = 0;
-//	close(close);
-//	return;
-//}
+static void
+update_replication_factor(spec_t *spec, replica_t *replica) {
+	int known_replica_count, data_len;
+	char *data;
+	const char *json_string;
+	struct json_object *jobj;
+	int rf, cf, rc;
+
+	known_replica_count = get_known_replica_count(spec);
+
+	//TODO: No need of below check
+	if (known_replica_count >= spec->desired_replication_factor) {
+		ISTGT_ERRLOG("current replica count %d is greater "
+		    "than or equal to desired replciation factor %d",
+		    known_replica_count, spec->desired_replication_factor);
+		return;
+	}
+
+	ASSERT(MTX_LOCKED(&spec->rq_mtx));
+	ASSERT(spec->quiesce == 1);
+	MTX_LOCK(&replica->r_mtx);
+
+	/* Update RF, CF and known replica list*/
+	rf = spec->replication_factor + 1;
+	cf = (rf/2) + 1;
+	jobj = json_object_new_object();
+	json_object_object_add(jobj, "replicationFactor",
+	    json_object_new_int(rf));
+	json_object_object_add(jobj, "consistencyFactor",
+	    json_object_new_int(cf));
+	json_object_object_add(jobj, "replicaId",
+	    json_object_new_uint64(replica->zvol_guid));
+	json_string = json_object_to_json_string_ext(jobj, JSON_C_TO_STRING_PLAIN);
+
+	data_len = strlen(json_string) + 1;
+	data = (char *) malloc(sizeof(char *)*data_len);
+	memset(data, 0, data_len);
+	strncpy(data, json_string, data_len);
+
+	rc = update_persistent_volume(data);
+	if (rc < 0) {
+		ISTGT_ERRLOG("failed to update replica{%lu} to known "
+		    "replica list", replica->zvol_guid);
+	} else {
+		ISTGT_LOG("Updated the replication_factor: from %d to %d "
+		    ",consistency_factor: from %d to %d and replica known list {%lu}",
+		    spec->replication_factor, rf, spec->consistency_factor, cf, replica->zvol_guid);
+
+		spec->known_replicas_uid[known_replica_count + 1] = replica->zvol_guid;
+		replica->updated_as_known_replica = true;
+		/* Update inmemory RF and CF */
+		spec->replication_factor = rf;
+		spec->consistency_factor = cf;
+		replica->updated_as_known_replica = true;
+	}
+	MTX_UNLOCK(&replica->r_mtx);
+
+	free(data);
+	json_object_put(jobj);
+
+	return;
+}
 
 static int
 update_replica_status(spec_t *spec, zvol_io_hdr_t *hdr, replica_t *replica)
@@ -2349,6 +2489,8 @@ update_replica_status(spec_t *spec, zvol_io_hdr_t *hdr, replica_t *replica)
 				spec->degraded_rcount--;
 			else {
 				//TODO: Remove hard coded value
+				// pause ongoing IOs
+				spec->quiesce = 1;
 				wait_for_ongoing_ios_on_replica(spec, replica, 20);
 				TAILQ_REMOVE(&spec->non_quorum_rq, replica, r_non_quorum_next);
 				TAILQ_INSERT_TAIL(&spec->rq, replica, r_next);
@@ -2356,7 +2498,8 @@ update_replica_status(spec_t *spec, zvol_io_hdr_t *hdr, replica_t *replica)
 				// TODO: Should we need to keep on trying until
 				// updating is success at volume-mgmt (or) go away
 				// for the next rebuild come and update rf and cf
-				//update_replication_factor(spec, replica);
+				update_replication_factor(spec, replica);
+				spec->quiesce = 0;
 			}
 			spec->healthy_rcount++;
 			replica->quorum = 1;
@@ -2382,9 +2525,12 @@ disconnect_all_non_quorum_replicas:
 		spec->rebuild_info.rebuild_in_progress = false;
 		spec->rebuild_info.dw_replica = NULL;
 		spec->rebuild_info.healthy_replica = NULL;
-	} else if (replica->update_as_known_replica == 0 &&
+	} else if (!replica->updated_as_known_replica &&
 		    replica->state == ZVOL_STATUS_HEALTHY) {
-		//update_known_replica_list(spec, replica);
+		spec->quiesce = 1;
+		wait_for_ongoing_ios_on_replica(spec, replica, 20);
+		update_replication_factor(spec, replica);
+		spec->quiesce = 0;
 	}
 
 	/*Trigger rebuild if possible */

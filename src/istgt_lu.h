@@ -892,6 +892,8 @@ typedef struct istgt_lu_disk_t {
 		uint64_t	used;
 		struct timespec	updated_stats_time;
 	} stats;
+	/* To maintain in memory replica uid's */
+	uint64_t known_replicas_uid[MAXREPLICA];
 #endif
 
 	/*Queue containing all the tasks. Instead of going to separate 
