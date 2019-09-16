@@ -63,6 +63,7 @@ size_t mdlist_size = 0;
 uint64_t read_ios;
 uint64_t write_ios;
 int replica_quorum_state = 0;
+int initial_quorum_state;
 
 static void
 sig_handler(int sig)
@@ -281,7 +282,9 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 		mgmt_ack_hdr->len = 0;
 	} else if (opcode == ZVOL_OPCODE_REPLICA_STATUS) {
 		if (((*zrepl_status_msg_cnt) >= 2) &&
-		    (zrepl_status->state != ZVOL_STATUS_HEALTHY) &&
+		    ((initial_quorum_state == 0 &&
+		    zrepl_status->state == ZVOL_STATUS_HEALTHY) ||
+		    (zrepl_status->state != ZVOL_STATUS_HEALTHY)) &&
 		    !degraded_mode) {
 			zrepl_status->state = ZVOL_STATUS_HEALTHY;
 			zrepl_status->rebuild_status = ZVOL_REBUILDING_DONE;
@@ -302,14 +305,22 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 		iovec[1].iov_base = zrepl_status;
 		iovec[1].iov_len = sizeof (zrepl_status_ack_t);
 	} else if (opcode == ZVOL_OPCODE_START_REBUILD) {
-		if (zrepl_status->state != ZVOL_STATUS_DEGRADED) {
+		// Since we are triggering rebuilding on transition
+		// healthy replica if it failed to update as known replica
+		// to volume_mgmt.
+		if (zrepl_status->state != ZVOL_STATUS_DEGRADED &&
+		    initial_quorum_state == 0) {
+			mgmt_ack_hdr->len = 0;
+			iovec_count = 1;
+		} else if (zrepl_status->state != ZVOL_STATUS_DEGRADED) {
 			REPLICA_ERRLOG("START_REBUILD is on invalid repl "
 			    "status %d\n", zrepl_status->state);
 			exit(1);
+		} else {
+			zrepl_status->rebuild_status = ZVOL_REBUILDING_SNAP;
+			mgmt_ack_hdr->len = 0;
+			iovec_count = 1;
 		}
-		zrepl_status->rebuild_status = ZVOL_REBUILDING_SNAP;
-		mgmt_ack_hdr->len = 0;
-		iovec_count = 1;
 	} else if (opcode == ZVOL_OPCODE_STATS) {
 		strcpy(stats.label, "used");
 		stats.value = 10000;
@@ -544,6 +555,7 @@ main(int argc, char **argv)
 		close(vol_fd);
 		exit(EXIT_FAILURE);
 	}
+	initial_quorum_state = replica_quorum_state;
 
 	clock_gettime(CLOCK_MONOTONIC_RAW, &now);
 	srandom(now.tv_sec);
