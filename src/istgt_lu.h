@@ -347,9 +347,16 @@ typedef struct istgt_lu_t {
 	uint8_t replication_factor;
 	uint8_t desired_replication_factor;
 	uint8_t consistency_factor;
+	TAILQ_HEAD(, trusty_replica_s) known_replica_head; //Contains list of known replicas
 #endif
 } ISTGT_LU;
 typedef ISTGT_LU *ISTGT_LU_Ptr;
+
+typedef struct trusty_replica_s {
+	char *replica_id;
+	uint64_t zvol_guid;
+	TAILQ_ENTRY(trusty_replica_s) next;
+} trusty_replica_t;
 
 typedef enum {
 	ISTGT_TAG_UNTAGGED,
@@ -892,8 +899,6 @@ typedef struct istgt_lu_disk_t {
 		uint64_t	used;
 		struct timespec	updated_stats_time;
 	} stats;
-	/* To maintain in memory replica uid's */
-	uint64_t known_replicas_uid[MAXREPLICA];
 #endif
 
 	/*Queue containing all the tasks. Instead of going to separate 

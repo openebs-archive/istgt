@@ -766,14 +766,13 @@ is_replica_newly_connected(spec_t *spec, replica_t *new_replica)
 	return newly_connected;
 }
 
+// get_known_replica_count return no.of known replicas
 static int
 get_known_replica_count(spec_t *spec) {
-	int known_replica_count = 0, i;
-	for (i=0; i<MAXREPLICA; i++) {
-		if (spec->known_replicas_uid[i] != 0)
-			known_replica_count++;
-		else
-			break;
+	int known_replica_count = 0;
+	trusty_replica_t *knr;
+	TAILQ_FOREACH(knr, &spec->lu->known_replica_head, next) {
+		known_replica_count++;
 	}
 	return known_replica_count;
 }
@@ -841,24 +840,57 @@ error_in_update:
 }
 
 static int
+update_in_memory_known_replica_list(spec_t *spec, replica_t *replica) {
+	trusty_replica_t *knr;
+	int key_len;
+
+	ASSERT(MTX_LOCKED(&spec->rq_mtx));
+
+	TAILQ_FOREACH(knr, &spec->lu->known_replica_head, next) {
+		if (strcmp(knr->replica_id, replica->replica_id) == 0) {
+			knr->zvol_guid = replica->zvol_guid;
+			return 0;
+		}
+	}
+
+	knr = xmalloc(sizeof (trusty_replica_t));
+	memset(knr, 0, sizeof(trusty_replica_t));
+	key_len = strlen(replica->replica_id);
+	knr->replica_id = (char *)malloc(sizeof(char) * key_len);
+	if (knr->replica_id == NULL) {
+		ISTGT_ERRLOG("failed to allocate memory for",
+		    " known replicaId %s\n", replica->replica_id);
+		return -1;
+	}
+	strncpy(knr->replica_id, replica->replica_id, key_len);
+	knr->zvol_guid = replica->zvol_guid;
+	TAILQ_INSERT_TAIL(&spec->lu->known_replica_head, knr, next);
+	return 0;
+}
+
+static int
 update_known_replica_list(spec_t *spec, replica_t *rep) {
-	int known_replica_count, data_len, rc;
+	int replica_count, data_len, rc;
 	char *data;
 	const char *json_string;
 	struct json_object *jobj;
 
-	known_replica_count = get_known_replica_count(spec);
+	replica_count = spec->healthy_rcount + spec->degraded_rcount;
 
-	if (known_replica_count >= spec->desired_replication_factor) {
-		ISTGT_ERRLOG("current replica count %d is greater "
-		    "than or equal to desired replciation factor %d\n",
-		    known_replica_count, spec->desired_replication_factor);
+	if (replica_count >= spec->replication_factor) {
+		ISTGT_ERRLOG("known replica count %d is greater "
+		    "than or equal to replciation factor %d\n",
+		    replica_count, spec->replication_factor);
 		return -1;
 	}
 
 	jobj = json_object_new_object();
 	json_object_object_add(jobj, "replicaId",
+	    json_object_new_string(rep->replica_id));
+	json_object_object_add(jobj, "replicaZvolGuid",
 	    json_object_new_uint64(rep->zvol_guid));
+	json_object_object_add(jobj, "volumeName",
+	    json_object_new_string(spec->volname));
 	json_string = json_object_to_json_string_ext(jobj, JSON_C_TO_STRING_PLAIN);
 
 	data_len = strlen(json_string) + 1;
@@ -868,9 +900,10 @@ update_known_replica_list(spec_t *spec, replica_t *rep) {
 
 	rc = update_persistent_volume(data);
 	if (rc < 0) {
-		ISTGT_ERRLOG("failed to update replica{%lu} to known replica list\n", rep->zvol_guid);
+		ISTGT_ERRLOG("failed to update replica(%s:%lu) to known replica list\n",
+		    rep->replica_id, rep->zvol_guid);
 	} else {
-		spec->known_replicas_uid[++known_replica_count] = rep->zvol_guid;
+		(void) update_in_memory_known_replica_list(spec, rep);
 	}
 
 	free(data);
@@ -878,28 +911,33 @@ update_known_replica_list(spec_t *spec, replica_t *rep) {
 	return rc;
 }
 
-#define check_is_it_known_replica(_spec, _rep, val)		\
-	do {							\
-		int i;						\
-		val = false;					\
-		for(i=0; i<_spec->replication_factor; i++) {	\
-			if (_spec->known_replicas_uid[i] ==	\
-			    _rep->zvol_guid)			\
-				val = true;			\
-				break;				\
-			if (_spec->known_replicas_uid[i] == 0)	\
-				break;				\
-		}						\
+/* check_is_it_known_replica returns true if replica_id and replica_zvol_guid
+ * is matched with any of replica_id and replica_zvol_guid of known_replica list
+ */
+#define check_is_it_known_replica(_spec, _rep, val)				\
+	do {									\
+		val = false;							\
+		trusty_replica_t *knr;						\
+		TAILQ_FOREACH(knr, &_spec->lu->known_replica_head, next){	\
+			if (strcmp(knr->replica_id, _rep->replica_id) == 0 &&	\
+			    knr->zvol_guid == _rep->zvol_guid) {		\
+				val = true;					\
+				break;						\
+			}							\
+		}								\
 	}while(0)
+
 /*
  * is_known_replica returns true whether the replica is known or not based
  * on below factors
- * 1) If quorum is off, then treat it as a known replica.
- * 2) If quorum is on, and replicas checkpointed nums is zero then
- *    treat it as a known replica.
- * 3) If quorum is on and its checkpointed nums are not zero check whether
- *    current replica is present in known list, if it present treat as known
- *    replica else unknown replica.
+ * return value true --> known replica
+ * return value false --> unknown replica
+ * 1) If quorum is off, then treat then return true.
+ * 2) If known replica count is less than replication factor
+ *    return true(newly created volume/upgrade scenarios).
+ * 3) Check whether replicaId and zvol guid of replica
+ *    is present in known replica list return based on output
+ *    of condition
  */
 static bool
 is_known_replica(spec_t *spec, replica_t *new_replica)
@@ -907,22 +945,34 @@ is_known_replica(spec_t *spec, replica_t *new_replica)
 	int known_replica_count;
 	bool result = true;
 
+	// Replica scale up case and replica movement cases
 	if (new_replica->quorum == 0) {
-		return result;
+		return false;
 	}
-	if (new_replica->initial_checkpointed_io_seq == 0) {
-		return result;
-	}
-	//TODO: This is to handle upgrade scenarios should we handle
-	//  in code or in upgrade process?
+	// This is to handle upgrade scenarios and newely
+	// connected volume
 	known_replica_count = get_known_replica_count(spec);
 	if (known_replica_count < spec->replication_factor) {
 		return result;
 	}
-	// If replica is present in spec->know_replica_list
+	// Check If replica is present in spec->lu->know_replica_list
 	// then return true else false
 	check_is_it_known_replica(spec, new_replica, result);
 	return result;
+}
+
+/* is_replica_update_required returns true if replica_id is not present
+ * in known_replica_list.
+ */
+static int
+is_replica_update_required(spec_t *spec, char *replica_id) {
+	trusty_replica_t *knr;
+	TAILQ_FOREACH(knr, &spec->lu->known_replica_head, next) {
+		if (strcmp(knr->replica_id, replica_id) == 0) {
+			return false;
+		}
+	}
+	return true;
 }
 
 /*
@@ -952,32 +1002,35 @@ can_replica_connect(spec_t *spec, replica_t *replica)
 {
 	int replica_count, non_quorum_count;
 	bool ret = true;
+	bool known_replica;
 
 	ASSERT(MTX_LOCKED(&spec->rq_mtx));
+	known_replica = is_known_replica(spec, replica);
+	non_quorum_count = get_non_quorum_replica_count(spec);
 
-	/* Instead of checking with RF we need to check it with DRF
-	 * there might be case where rebuilding is done at replica and
-	 * marked quorum on. After that target or replica is restarted,
-	 * in these scenario we need to allow replica to connect to update
-	 * known list.
+	//TODO: Change non_quorum variables to unknown_quorum
+	/* We need to allow DRF replicas to connect to target there might
+	 * be case where rebuilding is done at replica and marked quorum=on,
+	 * immediately after that target or replica is restarted,
+	 * in this scenario we need to allow replica to connect and update
+	 * in non-quorum list and another use case in replica scale up scenarios.
 	 */
 	replica_count = spec->healthy_rcount + spec->degraded_rcount;
 	if (replica_count >= spec->desired_replication_factor) {
 		REPLICA_ERRLOG("removing replica(%s:%d) since healthy: %d"
-		    " degraded: %d connected >= (%d)\n", replica->ip,
-		    replica->port, spec->healthy_rcount,
-		    spec->degraded_rcount, spec->replication_factor);
+		    " degraded: %d non_quorum: %d connected >= (%d)\n",
+		    replica->ip, replica->port, spec->healthy_rcount,
+		    spec->degraded_rcount, get_non_quorum_replica_count(spec),
+		    spec->desired_replication_factor);
 		ret = false;
-	} else {
-		non_quorum_count = get_non_quorum_replica_count(spec);
-		if ((non_quorum_count + replica_count) >= MAXREPLICA) {
-			REPLICA_ERRLOG("erroring replica(%s:%d) since "
-			    "non_quorum: %d healthy: %d degraded: %d are"
-			    " connected >= %d\n", replica->ip, replica->port,
-			    non_quorum_count, spec->healthy_rcount,
-			    spec->degraded_rcount, spec->desired_replication_factor);
-			ret = false;
-		}
+	} else if (!known_replica && (replica_count + non_quorum_count) >=
+		    spec->desired_replication_factor) {
+		REPLICA_ERRLOG("removing replica(%s:%d) since healthy: %d"
+		    " degraded: %d non_quorum: %d connected >= (%d)\n",
+		    replica->ip, replica->port, spec->healthy_rcount,
+		    spec->degraded_rcount, get_non_quorum_replica_count(spec),
+		    spec->desired_replication_factor);
+		ret = false;
 	}
 
 	return ret;
@@ -1262,7 +1315,8 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	zvol_io_hdr_t *ack_hdr;
 	mgmt_ack_t *ack_data;
 	zvol_op_open_data_t *rio_payload = NULL;
-	int i, replica_count;
+	int i, replica_count, non_quorum_replica_count;
+	bool known_replica;
 
 	ack_hdr = replica->mgmt_io_resp_hdr;	
 	ack_data = (mgmt_ack_t *)replica->mgmt_io_resp_data;
@@ -1286,20 +1340,14 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 
 	replica->pool_guid = ack_data->pool_guid;
 	replica->zvol_guid = ack_data->zvol_guid;
+	replica->replica_id = malloc(strlen(ack_data->replica_id)+1);
+	strncpy(replica->replica_id, ack_data->replica_id, strlen(ack_data->replica_id)+1);
 
-	ISTGT_LOG("--Initial checked io_seq %lu--\n", replica->initial_checkpointed_io_seq);
 	MTX_LOCK(&spec->rq_mtx);
 	if (!is_replica_newly_connected(spec, replica)) {
 		MTX_UNLOCK(&spec->rq_mtx);
 		REPLICA_ERRLOG("replica(ip:%s port:%d "
 		    "guid:%lu) is not permitted to connect\n", replica->ip, replica->port,
-		    replica->zvol_guid);
-		goto replica_error;
-	}
-	if (!is_known_replica(spec, replica)) {
-		MTX_UNLOCK(&spec->rq_mtx);
-		REPLICA_ERRLOG("replica(ip:%s port:%d "
-		    "guid:%lu) is not known replica to connect\n", replica->ip, replica->port,
 		    replica->zvol_guid);
 		goto replica_error;
 	}
@@ -1395,6 +1443,8 @@ replica_error:
 		destroy_mempool(&replica->cmdq);
 		replica->iofd = -1;
 		close(iofd);
+		free(replica->ip);
+		free(replica->replica_id);
 		if (rio_hdr)
 			free(rio_hdr);
 		if (rio_payload)
@@ -1433,7 +1483,7 @@ error_out_replica:
 	/*
 	 * After can_replica_connect check above, 
          * there might be any non_quorum replicas became healthy. 
-         * If (healthy+degraded) reaches replication_factor, 
+         * If (healthy+degraded) reaches desired replication factor,
          * this replica addition won't be required. 
          * So, same check required here with the spec lock.
 	 */
@@ -1449,37 +1499,59 @@ error_out_replica:
 		goto error_out_replica;
 	}
 
-	/* If this replica is quorum replica and no.of connected
-	 * replicas are equal to desired replication factor then
-	 * disconnecting all non-quorum replicas connected to target
-	 */
-	replica_count = spec->degraded_rcount + spec->healthy_rcount + 1;
-	if (replica->quorum == 1 && replica_count >= spec->desired_replication_factor) {
-		disconnect_non_quorum_replicas(spec);
-	}
+	known_replica = is_known_replica(spec, replica);
 
-	//Update known replica list by making call to cstor-volume-mgmt
-	if (replica->quorum == 1 && replica->initial_checkpointed_io_seq == 0) {
-		ISTGT_LOG("Updating known replica list\n");
+	//TODO: There is a case where user scaled up the replcias (created new cvr)
+	// but he did not update the desired replication factor in that time one of the
+	// known replica is not connected.(Handeled but need to cross verify)
+
+	/* Below snippet is to update known replica list if replica is not present
+	 * known replica list by making call to volume mgmt on succcess update inmemory
+	 * data structure.
+	 */
+	if (known_replica && is_replica_update_required(spec, replica->replica_id)) {
+		// update known replcia list
 		rc = update_known_replica_list(spec, replica);
 		if (rc < 0) {
-			REPLICA_ERRLOG("Failed to update replica list... "
+			REPLICA_ERRLOG("Failed to update known replica list... "
 			    "disconnecting new replica(ip:%s port:%d "
-			    "guid:%lu)\n", replica->ip, replica->port,
-			    replica->zvol_guid);
+			    "guid:%lu replica_id: %s)\n", replica->ip, replica->port,
+			    replica->zvol_guid, replica->replica_id);
 			goto error_out_replica;
 		}
 	}
+
 	MTX_UNLOCK(&replica->r_mtx);
 
 	TAILQ_REMOVE(&spec->rwaitq, replica, r_waitnext);
 
-	if (replica->quorum == 1) {
+	if (known_replica) {
 		TAILQ_INSERT_TAIL(&spec->rq, replica, r_next);
 		spec->degraded_rcount++;
-	} else
-		TAILQ_INSERT_TAIL(&spec->non_quorum_rq, replica, r_non_quorum_next);
+	} else {
+		if (replica->quorum == 1) {
+			TAILQ_INSERT_HEAD(&spec->non_quorum_rq, replica, r_non_quorum_next);
+		} else {
+			TAILQ_INSERT_TAIL(&spec->non_quorum_rq, replica, r_non_quorum_next);
+		}
+	}
 
+	/* If no.of known replica connections are more than desired
+	 * replication factor then disconnecting all non-quorum replicas
+	 * connected to target
+	 */
+	non_quorum_replica_count = get_non_quorum_replica_count(spec);
+	replica_count = spec->degraded_rcount + spec->healthy_rcount +
+	     non_quorum_replica_count;
+	// This thing is not possible if it happen during rebuilding time we are
+	// disconnection non quorum replicas
+	if (replica_count > spec->desired_replication_factor &&
+	    get_non_quorum_replica_count(spec) != 0) {
+		ISTGT_ERRLOG("too many(%d) replicas are connected Healthy count(%d) "
+		    "degraded count(%d) non_quorum count(%d) but required only (%d) replicas\n",
+		    replica_count+ spec->healthy_rcount, spec->degraded_rcount,
+		    non_quorum_replica_count, spec->desired_replication_factor);
+	}
 
 	/* Update the volume ready state */
 	update_volstate(spec);
@@ -2346,10 +2418,10 @@ wait_for_ongoing_ios_on_replica(spec_t *spec, replica_t *replica, int sec) {
 }
 
 /*
- * Update_replication_factor updates the replication factor by one
- * and consistency factor accordingly (n/2 + 1). This operation
- * must be done by taking spec lock and pause IOs until timeout
- * or operation completes.
+ * Update_replication_factor updates the replication factor by one,
+ * consistency factor accordingly (n/2 + 1) and known replcia list.
+ * This operation must be performed by taking spec lock and pause IOs
+ * until timeout or operation completes.
  */
 static int
 update_replication_factor(spec_t *spec, replica_t *replica) {
@@ -2359,16 +2431,20 @@ update_replication_factor(spec_t *spec, replica_t *replica) {
 	struct json_object *jobj;
 	int rf, cf, rc = -1;
 
+	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 	known_replica_count = get_known_replica_count(spec);
 
-	if (known_replica_count >= spec->desired_replication_factor) {
-		ISTGT_ERRLOG("current replica count %d is greater "
-		    "than or equal to desired replciation factor %d\n",
+	// If is_replica_update return true then we need to check
+	// desired replication factor should be updated before scale up
+	if (is_replica_update_required(spec, replica->replica_id) &&
+	    known_replica_count >= spec->desired_replication_factor) {
+		ISTGT_ERRLOG("failed to update replication/consistency factor "
+		    "known replica count %d is greater than or equal to "
+		    "desired replciation factor %d\n",
 		    known_replica_count, spec->desired_replication_factor);
 		return rc;
 	}
 
-	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 	ASSERT(spec->quiesce == 1);
 	MTX_LOCK(&replica->r_mtx);
 
@@ -2380,7 +2456,11 @@ update_replication_factor(spec_t *spec, replica_t *replica) {
 	    json_object_new_int(rf));
 	json_object_object_add(jobj, "consistencyFactor",
 	    json_object_new_int(cf));
+	json_object_object_add(jobj, "volumeName",
+	    json_object_new_string(spec->volname));
 	json_object_object_add(jobj, "replicaId",
+	    json_object_new_string(replica->replica_id));
+	json_object_object_add(jobj, "replicaZvolGuid",
 	    json_object_new_uint64(replica->zvol_guid));
 	json_string = json_object_to_json_string_ext(jobj, JSON_C_TO_STRING_PLAIN);
 
@@ -2389,23 +2469,27 @@ update_replication_factor(spec_t *spec, replica_t *replica) {
 	memset(data, 0, data_len);
 	strncpy(data, json_string, data_len);
 
-	ISTGT_LOG("updating non-quorum replica{%lu} as quorum replica\n", replica->zvol_guid);
+	ISTGT_LOG("updating non-quorum replica(%s:%lu) to known replica list\n",
+	    replica->replica_id, replica->zvol_guid);
 	rc = update_persistent_volume(data);
 	if (rc < 0) {
 		MTX_UNLOCK(&replica->r_mtx);
-		ISTGT_ERRLOG("failed to update replica{%lu} to known "
-		    "replica list\n", replica->zvol_guid);
+		ISTGT_ERRLOG("failed to update replica(%s:%lu) to known "
+		    "replica list\n", replica->replica_id, replica->zvol_guid);
 		free(data);
+		json_object_put(jobj);
 		return rc;
 	}
 	ISTGT_LOG("Updated the replication_factor: from %d to %d "
 	    ",consistency_factor: from %d to %d and replica known list {%lu}\n",
 	    spec->replication_factor, rf, spec->consistency_factor, cf, replica->zvol_guid);
 
-	spec->known_replicas_uid[known_replica_count + 1] = replica->zvol_guid;
 	/* Update inmemory RF and CF */
 	spec->replication_factor = rf;
 	spec->consistency_factor = cf;
+	spec->lu->replication_factor = rf;
+	spec->lu->consistency_factor = cf;
+	(void) update_in_memory_known_replica_list(spec, replica);
 	rc = 1;
 	MTX_UNLOCK(&replica->r_mtx);
 

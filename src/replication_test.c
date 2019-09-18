@@ -52,6 +52,7 @@ __thread char  tinfo[50] =  {0};
 	mgmt_ack_data->pool_guid = replica_port;\
 	mgmt_ack_data->checkpointed_io_seq = 1000;\
 	mgmt_ack_data->zvol_guid = replica_port;\
+	strcpy(mgmt_ack_data->replica_id, replica_id);\
 	mgmt_ack_data->quorum = replica_quorum_state;\
 }
 
@@ -64,6 +65,7 @@ uint64_t read_ios;
 uint64_t write_ios;
 int replica_quorum_state = 0;
 int initial_quorum_state;
+char replica_id[MAX_IP_LEN];
 
 static void
 sig_handler(int sig)
@@ -500,6 +502,7 @@ main(int argc, char **argv)
 				check |= 1 << 3;
 				break;
 			case 'P':
+				strncpy(replica_id, optarg, sizeof(replica_id));
 				replica_port = atoi(optarg);
 				check |= 1 << 4;
 				break;
