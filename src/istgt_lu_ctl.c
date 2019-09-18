@@ -684,6 +684,73 @@ error_return:
 }
 
 static int
+istgt_uctl_cmd_desired_rf(UCTL_Ptr uctl)
+{
+	ISTGT_LU_Ptr lu = NULL;
+	ISTGT_LU_DISK *spec = NULL;
+	int rc = 0, ret = UCTL_CMD_ERR;
+	char *volname, *arg, *s_drf;
+	int drf;
+	const char *delim = ARGS_DELIM;
+	arg = uctl->arg;
+
+	CHECK_ARG_AND_GOTO_ERROR;
+	volname = strsepq(&arg, delim);
+
+	CHECK_ARG_AND_GOTO_ERROR;
+	s_drf = strsepq(&arg, delim);
+	drf = strtol(s_drf, NULL, 10);
+	if (errno) {
+		istgt_uctl_snprintf(uctl, "ERR error code:%d\n", errno);
+		(void) istgt_uctl_writeline(uctl);
+		return (UCTL_CMD_ERR);
+	}
+	if (drf > MAXREPLICA) {
+		ISTGT_ERRLOG("desired replication factor(%d) can not "
+		    "be greater than MAXREPLICAS(%d)\n", drf, MAXREPLICA);
+		istgt_uctl_snprintf(uctl, "ERR desired replication factor(%d)"
+		    " can not be greater than MAXREPLICA(%d)\n", drf, (int)MAXREPLICA);
+		goto error_return;
+	}
+
+	lu = istgt_lu_find_target_by_volname(uctl->istgt, volname);
+	if (lu == NULL) {
+		istgt_uctl_snprintf(uctl, "ERR target not found\n");
+		goto error_return;
+	}
+	spec = lu->lun[0].spec;
+
+	if (drf < spec->desired_replication_factor) {
+		ISTGT_ERRLOG("desired replication factor(%d) is greater than"
+		    " requested desired replication factor(%d)\n",
+		    spec->desired_replication_factor, drf);
+		istgt_uctl_snprintf(uctl, "ERR current desired replication factor"
+		    " is already greater than existing desiredRF\n");
+		goto error_return;
+	}
+	if (drf == spec->desired_replication_factor) {
+		ISTGT_LOG("desired replication factor is already equal to "
+		    "requested desired replication factor\n", volname);
+		istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
+	} else {
+		MTX_LOCK(&spec->rq_mtx);
+		spec->desired_replication_factor = drf;
+		spec->lu->desired_replication_factor = drf;
+		MTX_UNLOCK(&spec->rq_mtx);
+		ISTGT_LOG("successfully updated the desired replication factor to %d\n", drf);
+		istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
+		ret = UCTL_CMD_OK;
+	}
+error_return:
+	rc = istgt_uctl_writeline(uctl);
+	if (rc != UCTL_CMD_OK) {
+		return (rc);
+	}
+	return (ret);
+}
+
+
+static int
 istgt_uctl_cmd_mempoolstats(UCTL_Ptr uctl)
 {
 	int rc = 0;
@@ -3815,6 +3882,7 @@ static ISTGT_UCTL_CMD_TABLE istgt_uctl_cmd_table[] =
 	{ "SNAPCREATE", istgt_uctl_cmd_snap},
 	{ "SNAPDESTROY", istgt_uctl_cmd_snap},
 	{ "RESIZE", istgt_uctl_cmd_resize},
+	{ "DRF", istgt_uctl_cmd_desired_rf},
 	{ "REPLICA", istgt_uctl_cmd_replica_stats},
 	{ "MAXIOWAIT", istgt_uctl_cmd_max_io_wait},
 #endif

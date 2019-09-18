@@ -911,6 +911,44 @@ exec_resize(UCTL_Ptr uctl)
 	char *arg, *result;
 	int rc = 0;
 	char *name = uctl->setargv[0];
+	char *s_drf = uctl->setargv[1];
+
+	uctl_snprintf(uctl, "%s \"%s\" \"%s\" \n",
+		uctl->cmd, name, s_drf);
+
+	rc = uctl_writeline(uctl);
+	if (rc != UCTL_CMD_OK) {
+		return (rc);
+	}
+
+		/* receive result */
+	while (1) {
+		rc = uctl_readline(uctl);
+		if (rc != UCTL_CMD_OK) {
+			return (rc);
+		}
+		arg = trim_string(uctl->recvbuf);
+		result = strsepq(&arg, delim);
+		strupr(result);
+		if (strcmp(result, uctl->cmd) != 0)
+			break;
+	}
+	if (strcmp(result, "OK") != 0) {
+		if (is_err_req_auth(uctl, arg))
+			return (UCTL_CMD_REQAUTH);
+		fprintf(stderr, "ERROR %s\n", arg);
+		return (UCTL_CMD_ERR);
+	}
+	return (UCTL_CMD_OK);
+}
+
+static int
+exec_desired_rf(UCTL_Ptr uctl)
+{
+	const char *delim = ARGS_DELIM;
+	char *arg, *result;
+	int rc = 0;
+	char *name = uctl->setargv[0];
 	char *size = uctl->setargv[1];
 
 	uctl_snprintf(uctl, "%s \"%s\" \"%s\" \n",
@@ -1333,6 +1371,7 @@ static EXEC_TABLE exec_table[] =
 	{"SNAPCREATE", exec_snap, 2, 0},
 	{"SNAPDESTROY", exec_snap, 2, 0},
 	{"RESIZE", exec_resize, 2, 0},
+	{"DRF", exec_desired_rf, 2, 0},
 	{"REPLICA", exec_replica, 0, 0},
 	{"MAXIOWAIT", exec_max_io_wait, 0, 0},
 #endif
@@ -1823,6 +1862,7 @@ usage(void)
 	printf(" mempool    get mempool details\n");
 	printf(" maxiowait  get/set wait time for IO completion in seconds\n");
 	printf(" resize     read the size from command cli and updates the size\n");
+	printf(" drf        read the desired replication factor from command cli and update in memory\n");
 #endif
 	printf(" set        set values for variables:\n");
 	printf("            Syntax: istgtcontrol -t <iqn(ALL to set globally)> \
@@ -2100,7 +2140,8 @@ main(int argc, char *argv[])
 	(strcmp(cmd, "SNAPDESTROY") == 0) ||
 	    (strcmp(cmd, "REPLICA") == 0) ||
 	    (strcmp(cmd, "MAXIOWAIT") == 0) ||
-	    (strcmp(cmd, "RESIZE") == 0)) {
+	    (strcmp(cmd, "RESIZE") == 0) ||
+	    (strcmp(cmd, "DRF") == 0)) {
 		uctl->setargv = argv;
 		uctl->setargcnt = argc;
 	}
