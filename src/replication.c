@@ -779,13 +779,13 @@ get_known_replica_count(spec_t *spec) {
 
 //TODO: Instead of connect each time use epoll to make connection
 // and remove hardcoded values
-// update_persistent_volume must be performed by taking spec lock
+// update_volume_config must be performed by taking spec lock
 static int
-update_persistent_volume(char *data) {
+update_volume_config(char *data) {
 	int fd, rc = -1, len;
 	int rtimeout = 20, wtimeout = 10, tmpidx = 0, tmpcnt = 0;
 	char *read_data, *tmp_data;
-	const char err[] = "Err";
+	const char err[] = "Err\n";
 
 	fd = istgt_connect_unx(ISTGT_MGMT_UNXPATH);
 	if (fd < 0) {
@@ -826,7 +826,7 @@ update_persistent_volume(char *data) {
 		goto clean_data;
 	}
 	if(strcmp(read_data, err) == 0 || strlen(read_data) == 0) {
-		ISTGT_ERRLOG("failed to update %s\n", data);
+		ISTGT_ERRLOG("failed to update %s\n", read_data);
 		rc = -1;
 		goto clean_data;
 	}
@@ -903,7 +903,7 @@ update_known_replica_list(spec_t *spec, replica_t *rep) {
 	memset(data, 0, data_len);
 	strncpy(data, json_string, data_len);
 
-	rc = update_persistent_volume(data);
+	rc = update_volume_config(data);
 	if (rc < 0) {
 		ISTGT_ERRLOG("failed to update replica(%s:%lu) to known replica list\n",
 		    rep->replica_id, rep->zvol_guid);
@@ -1559,7 +1559,7 @@ error_out_replica:
 	    get_non_quorum_replica_count(spec) != 0) {
 		ISTGT_ERRLOG("too many(%d) replicas are connected Healthy count(%d) "
 		    "degraded count(%d) non_quorum count(%d) but required only (%d) replicas\n",
-		    replica_count+ spec->healthy_rcount, spec->degraded_rcount,
+		    replica_count, spec->healthy_rcount, spec->degraded_rcount,
 		    non_quorum_replica_count, spec->desired_replication_factor);
 	}
 
@@ -2481,7 +2481,7 @@ update_replication_factor(spec_t *spec, replica_t *replica) {
 
 	ISTGT_LOG("updating non-quorum replica(%s:%lu) to known replica list\n",
 	    replica->replica_id, replica->zvol_guid);
-	rc = update_persistent_volume(data);
+	rc = update_volume_config(data);
 	if (rc < 0) {
 		MTX_UNLOCK(&replica->r_mtx);
 		ISTGT_ERRLOG("failed to update replica(%s:%lu) to known "
@@ -2568,7 +2568,6 @@ update_replica_status(spec_t *spec, zvol_io_hdr_t *hdr, replica_t *replica)
 			if (r1 == NULL) {
 				TAILQ_FOREACH(r1, &(spec->non_quorum_rq), r_non_quorum_next) {
 					if (r1 == replica) {
-						assert(replica->quorum == 0);
 						found_in_list = 2;
 						break;
 					}
@@ -2577,9 +2576,6 @@ update_replica_status(spec_t *spec, zvol_io_hdr_t *hdr, replica_t *replica)
 
 			assert(r1 != NULL);
 			assert((spec->rebuild_info.dw_replica == replica) || (spec->replication_factor == 1));
-			spec->rebuild_info.dw_replica = NULL;
-			spec->rebuild_info.healthy_replica = NULL;
-			spec->rebuild_info.rebuild_in_progress = false;
 			if (found_in_list == 2) {
 				replica_count = spec->healthy_rcount + spec->degraded_rcount;
 				/* Error out if already quorum replicas are connected */
@@ -2634,6 +2630,9 @@ update_replica_status(spec_t *spec, zvol_io_hdr_t *hdr, replica_t *replica)
 disconnect_all_non_quorum_replicas:
 				DISCONNECT_NON_QUORUM_REPLICAS(spec);
 			}
+			spec->rebuild_info.dw_replica = NULL;
+			spec->rebuild_info.healthy_replica = NULL;
+			spec->rebuild_info.rebuild_in_progress = false;
 			/* There may be chance of change due to non_quorum replica */
 			update_volstate(spec);
 		}
