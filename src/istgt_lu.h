@@ -347,7 +347,7 @@ typedef struct istgt_lu_t {
 	uint8_t replication_factor;
 	uint8_t desired_replication_factor;
 	uint8_t consistency_factor;
-	TAILQ_HEAD(, trusty_replica_s) known_replica_head; //Contains list of known replicas
+	TAILQ_HEAD(, trusty_replica_s) known_replica; //Contains list of known replicas
 #endif
 } ISTGT_LU;
 typedef ISTGT_LU *ISTGT_LU_Ptr;

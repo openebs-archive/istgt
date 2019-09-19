@@ -259,7 +259,7 @@ do {									\
 		spec->degraded_rcount, 					\
 		get_non_quorum_replica_count(spec));			\
 
-#define disconnect_non_quorum_replicas(_spec)				\
+#define DISCONNECT_NON_QUORUM_REPLICAS(_spec)				\
 	do {								\
 		replica_t *temp_r; 					\
 		TAILQ_FOREACH(temp_r, &(_spec->non_quorum_rq),		\
@@ -771,7 +771,7 @@ static int
 get_known_replica_count(spec_t *spec) {
 	int known_replica_count = 0;
 	trusty_replica_t *knr;
-	TAILQ_FOREACH(knr, &spec->lu->known_replica_head, next) {
+	TAILQ_FOREACH(knr, &spec->lu->known_replica, next) {
 		known_replica_count++;
 	}
 	return known_replica_count;
@@ -783,13 +783,13 @@ get_known_replica_count(spec_t *spec) {
 static int
 update_persistent_volume(char *data) {
 	int fd, rc = -1, len;
-	int rtimeout = 50, wtimeout = 20, tmpidx = 0, tmpcnt = 0;
+	int rtimeout = 20, wtimeout = 10, tmpidx = 0, tmpcnt = 0;
 	char *read_data, *tmp_data;
-	const char err[] = "error";
+	const char err[] = "Err";
 
-	fd = istgt_connect_unx(ISTGT_SEND_UNXPATH);
+	fd = istgt_connect_unx(ISTGT_MGMT_UNXPATH);
 	if (fd < 0) {
-		ISTGT_ERRLOG("failed to connect to %s\n", ISTGT_SEND_UNXPATH);
+		ISTGT_ERRLOG("failed to connect to %s\n", ISTGT_MGMT_UNXPATH);
 		goto error_in_update;
 	}
 	len = strlen(data);
@@ -839,6 +839,8 @@ error_in_update:
 	return rc;
 }
 
+// update_in_memory_known_replica_list will update replica zvol guid
+// if replicaId is already exist else it will add new known replica to list
 static int
 update_in_memory_known_replica_list(spec_t *spec, replica_t *replica) {
 	trusty_replica_t *knr;
@@ -846,7 +848,7 @@ update_in_memory_known_replica_list(spec_t *spec, replica_t *replica) {
 
 	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 
-	TAILQ_FOREACH(knr, &spec->lu->known_replica_head, next) {
+	TAILQ_FOREACH(knr, &spec->lu->known_replica, next) {
 		if (strcmp(knr->replica_id, replica->replica_id) == 0) {
 			knr->zvol_guid = replica->zvol_guid;
 			return 0;
@@ -864,10 +866,13 @@ update_in_memory_known_replica_list(spec_t *spec, replica_t *replica) {
 	}
 	strncpy(knr->replica_id, replica->replica_id, key_len);
 	knr->zvol_guid = replica->zvol_guid;
-	TAILQ_INSERT_TAIL(&spec->lu->known_replica_head, knr, next);
+	TAILQ_INSERT_TAIL(&spec->lu->known_replica, knr, next);
 	return 0;
 }
 
+/* update_known_replica_list will be called only once in replicas
+ * life time (even it is disconnected or connected back n times)
+ */
 static int
 update_known_replica_list(spec_t *spec, replica_t *rep) {
 	int replica_count, data_len, rc;
@@ -911,14 +916,14 @@ update_known_replica_list(spec_t *spec, replica_t *rep) {
 	return rc;
 }
 
-/* check_is_it_known_replica returns true if replica_id and replica_zvol_guid
- * is matched with any of replica_id and replica_zvol_guid of known_replica list
+/* CHECK_IS_IT_KNOWN_REPLICA returns true if replica_id and replica_zvol_guid
+ * is matched with any of known replicas replica_id and replica_zvol_guid
  */
-#define check_is_it_known_replica(_spec, _rep, val)				\
+#define CHECK_IS_IT_KNOWN_REPLICA(_spec, _rep, val)				\
 	do {									\
 		val = false;							\
 		trusty_replica_t *knr;						\
-		TAILQ_FOREACH(knr, &_spec->lu->known_replica_head, next){	\
+		TAILQ_FOREACH(knr, &_spec->lu->known_replica, next){	\
 			if (strcmp(knr->replica_id, _rep->replica_id) == 0 &&	\
 			    knr->zvol_guid == _rep->zvol_guid) {		\
 				val = true;					\
@@ -932,12 +937,12 @@ update_known_replica_list(spec_t *spec, replica_t *rep) {
  * on below factors
  * return value true --> known replica
  * return value false --> unknown replica
- * 1) If quorum is off, then treat then return true.
+ * 1) If quorum is off, then treat as unknown replica.
  * 2) If known replica count is less than replication factor
  *    return true(newly created volume/upgrade scenarios).
  * 3) Check whether replicaId and zvol guid of replica
- *    is present in known replica list return based on output
- *    of condition
+ *    is present in known replica list return based on
+ *    that condition
  */
 static bool
 is_known_replica(spec_t *spec, replica_t *new_replica)
@@ -957,22 +962,22 @@ is_known_replica(spec_t *spec, replica_t *new_replica)
 	}
 	// Check If replica is present in spec->lu->know_replica_list
 	// then return true else false
-	check_is_it_known_replica(spec, new_replica, result);
+	CHECK_IS_IT_KNOWN_REPLICA(spec, new_replica, result);
 	return result;
 }
 
-/* is_replica_update_required returns true if replica_id is not present
- * in known_replica_list.
+/* is_replica_exist returns true if replica_id is present
+ * in known replica list else return false.
  */
 static int
-is_replica_update_required(spec_t *spec, char *replica_id) {
+is_replica_exist(spec_t *spec, char *replica_id) {
 	trusty_replica_t *knr;
-	TAILQ_FOREACH(knr, &spec->lu->known_replica_head, next) {
+	TAILQ_FOREACH(knr, &spec->lu->known_replica, next) {
 		if (strcmp(knr->replica_id, replica_id) == 0) {
-			return false;
+			return true;
 		}
 	}
-	return true;
+	return false;
 }
 
 /*
@@ -1509,7 +1514,7 @@ error_out_replica:
 	 * known replica list by making call to volume mgmt on succcess update inmemory
 	 * data structure.
 	 */
-	if (known_replica && is_replica_update_required(spec, replica->replica_id)) {
+	if (known_replica && !is_replica_exist(spec, replica->replica_id)) {
 		// update known replcia list
 		rc = update_known_replica_list(spec, replica);
 		if (rc < 0) {
@@ -1525,10 +1530,15 @@ error_out_replica:
 
 	TAILQ_REMOVE(&spec->rwaitq, replica, r_waitnext);
 
+	/* If replica is a known replica then allow replica to enter into spec->rq list
+	 * else if replica is unknown replica (it might be due to scale up/ replica movement)
+	 * then add them to spec->non_quorum_rq list (means data written to it is lost)
+	 */
 	if (known_replica) {
 		TAILQ_INSERT_TAIL(&spec->rq, replica, r_next);
 		spec->degraded_rcount++;
 	} else {
+		/* Add unkown replica with quorum 1 as HEAD */
 		if (replica->quorum == 1) {
 			TAILQ_INSERT_HEAD(&spec->non_quorum_rq, replica, r_non_quorum_next);
 		} else {
@@ -2357,7 +2367,7 @@ handle_update_spec_stats(spec_t *spec, zvol_io_hdr_t *hdr, void *resp)
 
 /*
  * wait_for_ongoing_ios_on_replica pause the IOs and it's caller
- * responsibility to resume the IO's in case of success response from IOs
+ * responsibility to pause IO's and call this function
  */
 static int
 wait_for_ongoing_ios_on_replica(spec_t *spec, replica_t *replica, int sec) {
@@ -2367,12 +2377,12 @@ wait_for_ongoing_ios_on_replica(spec_t *spec, replica_t *replica, int sec) {
 	struct timespec last, now, diff;
 	bool io_found = false;	/* Write or Sync IOs */
 
-	ISTGT_LOG("Waiting for IO's to flush\n");
+	ISTGT_LOG("Waiting for IO's to flush on replica(%s:%lu)\n",
+	    replica->replica_id, replica->zvol_guid);
 	// To check whether IO's are flushing to replica or not
 	retry_count_for_ongoing_ios = 5;
 	ASSERT(MTX_LOCKED(&spec->rq_mtx));
-	/* Pausing IOs */
-	spec->quiesce = 1;
+	ASSERT(spec->quiesce == 1);
 	no_of_ios_left = replica->replica_inflight_write_io_cnt;
 
 	clock_gettime(CLOCK_MONOTONIC_COARSE, &last);
@@ -2411,9 +2421,6 @@ wait_for_ongoing_ios_on_replica(spec_t *spec, replica_t *replica, int sec) {
 		timesdiff(CLOCK_MONOTONIC_COARSE, last, now, diff);
 	}
 
-	if (ret == -1)
-		spec->quiesce = 0;
-
 	return ret;
 }
 
@@ -2434,9 +2441,12 @@ update_replication_factor(spec_t *spec, replica_t *replica) {
 	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 	known_replica_count = get_known_replica_count(spec);
 
-	// If is_replica_update return true then we need to check
-	// desired replication factor should be updated before scale up
-	if (is_replica_update_required(spec, replica->replica_id) &&
+	/* If is_replica_exist return true then it is a kind of replica replace
+	 * or replica movement scenarios. If it return false then it is a replica
+	 * scale up case then to add replica into known replica list current known 
+	 * replica count should be less than desired replication factor.
+	 */
+	if (!is_replica_exist(spec, replica->replica_id) &&
 	    known_replica_count >= spec->desired_replication_factor) {
 		ISTGT_ERRLOG("failed to update replication/consistency factor "
 		    "known replica count %d is greater than or equal to "
@@ -2505,7 +2515,7 @@ update_replica_status(spec_t *spec, zvol_io_hdr_t *hdr, replica_t *replica)
 	zrepl_status_ack_t *repl_status;
 	replica_state_t last_state;
 	int found_in_list = 0;
-	int pause_io_wait_time = 30;
+	int pause_io_wait_time = 20;
 	replica_t *r1;
 	int replica_count, rc;
 
@@ -2580,8 +2590,11 @@ update_replica_status(spec_t *spec, zvol_io_hdr_t *hdr, replica_t *replica)
 				spec->degraded_rcount--;
 			else {
 				/* Pause ongoing IO's */
+				spec->quiesce = 1;
 				rc = wait_for_ongoing_ios_on_replica(spec, replica, pause_io_wait_time);
 				if (rc < 0) {
+					/* Resume ongoing IO's in case of error*/
+					spec->quiesce = 0;
 					ISTGT_ERRLOG("failed to flush the IO's on replica{%lu}"
 					    " (%s:%d) during replica mgmt_fd: %d set replica state as"
 					    " as %s\n", replica->zvol_guid, replica->ip,
@@ -2592,6 +2605,8 @@ update_replica_status(spec_t *spec, zvol_io_hdr_t *hdr, replica_t *replica)
 				/* Update known replica list, replication and consistency factor*/
 				rc = update_replication_factor(spec, replica);
 				if (rc < 0) {
+					/* Resume ongoing IO's in case of error*/
+					spec->quiesce = 0;
 					ISTGT_ERRLOG("failed to update replication and "
 					    " consistency factor of replica{%lu}"
 					    " (%s:%d) replica mgmt_fd: %d set replica state"
@@ -2617,7 +2632,7 @@ update_replica_status(spec_t *spec, zvol_io_hdr_t *hdr, replica_t *replica)
 			if (spec->healthy_rcount >= spec->desired_replication_factor) {
 				assert(spec->degraded_rcount == 0);
 disconnect_all_non_quorum_replicas:
-				disconnect_non_quorum_replicas(spec);
+				DISCONNECT_NON_QUORUM_REPLICAS(spec);
 			}
 			/* There may be chance of change due to non_quorum replica */
 			update_volstate(spec);

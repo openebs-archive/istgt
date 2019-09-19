@@ -1766,12 +1766,12 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 		ISTGT_ERRLOG("Invalid ReplicationFactor/ConsistencyFactor or their ratio\n");
 		goto error_return;
 	}
-	/* Read and build known replica list from conf file */
+	/* Read known replica details from conf file and maintain in memory structure*/
 	val = istgt_get_val(sp, "Replica");
 	if (val == NULL) {
-		TAILQ_INIT(&lu->known_replica_head);
+		TAILQ_INIT(&lu->known_replica);
 	} else {
-		TAILQ_INIT(&lu->known_replica_head);
+		TAILQ_INIT(&lu->known_replica);
 		for (i=0; ; i++) {
 			key = istgt_get_nmval(sp, "Replica", i, 0);
 			if (key == NULL) {
@@ -1788,13 +1788,16 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 			}
 			strncpy(knr->replica_id, key, len);
 			knr->zvol_guid = (uint64_t) strtol(val, NULL, 10);
-			TAILQ_INSERT_TAIL(&lu->known_replica_head, knr, next);
+			TAILQ_INSERT_TAIL(&lu->known_replica, knr, next);
 			ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "known replica key {%s} and"
 			    " zvol guid {%lu}\n",knr->replica_id, knr->zvol_guid);
 		}
 	}
-	if (i > lu->replication_factor) {
-		ISTGT_ERRLOG("known replica count %d is greater than replication"
+	// It is useful in case where multiple copies of data
+	// is lost and to reconstruct the data into other replicas
+	// RF and CF will be updated to correspondig values
+	if (i > lu->desired_replication_factor) {
+		ISTGT_ERRLOG("known replica count %d is greater than desired replication"
 		    " factor %d\n",i, lu->replication_factor);
 		goto error_return;
 	}
@@ -2372,9 +2375,10 @@ error_return:
 		}
 		MTX_UNLOCK(&istgt->mutex);
 	}
-	while (knr = TAILQ_FIRST(&lu->known_replica_head)) {
+	/* Releasing in memory details */
+	while (knr = TAILQ_FIRST(&lu->known_replica)) {
 		xfree(knr->replica_id);
-                TAILQ_REMOVE(&lu->known_replica_head, knr, next);
+                TAILQ_REMOVE(&lu->known_replica, knr, next);
                 xfree(knr);
         }
 
