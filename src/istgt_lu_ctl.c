@@ -730,7 +730,7 @@ istgt_uctl_cmd_desired_rf(UCTL_Ptr uctl)
 	}
 	if (drf == spec->desired_replication_factor) {
 		ISTGT_LOG("desired replication factor is already equal to "
-		    "requested desired replication factor\n", volname);
+		    "requested desired replication factor\n");
 		istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
 	} else {
 		MTX_LOCK(&spec->rq_mtx);

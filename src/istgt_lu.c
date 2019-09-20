@@ -1451,7 +1451,6 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	ISTGT_LU_Ptr lu;
 	PORTAL_GROUP *pgp;
 	INITIATOR_GROUP *igp;
-	trusty_replica_t *knr;
 	const char *vendor, *product, *revision, *serial;
 	const char *pg_tag, *ig_tag;
 	const char *ag_tag;
@@ -1469,6 +1468,9 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	int rc;
 	int len;
 	int gotstorage = 0;
+#ifdef REPLICATION
+	trusty_replica_t *knr;
+#endif
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "add unit %d\n", sp->num);
 
 	if (sp->num >= MAX_LOGICAL_UNIT) {
@@ -1719,8 +1721,8 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	} else {
 		lu->desired_replication_factor = (int) strtol(val, NULL, 10);
 		if (lu->desired_replication_factor > MAXREPLICA) {
-			ISTGT_ERRLOG("Max replication factor is %d.. "
-			    "given desired replication factor %d\n",
+			ISTGT_ERRLOG("Max replication factor is %d.."
+			    " given desired replication factor %d\n",
 			    MAXREPLICA, lu->desired_replication_factor);
 			goto error_return;
 		}
@@ -1736,8 +1738,8 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	} else {
 		lu->replication_factor = (int) strtol(val, NULL, 10);
 		if (lu->replication_factor > MAXREPLICA) {
-			ISTGT_ERRLOG("Max replication factor is %d.. "
-			    "given %d\n", MAXREPLICA, lu->replication_factor);
+			ISTGT_ERRLOG("Max replication factor is %d.. given %d\n",
+			    MAXREPLICA, lu->replication_factor);
 			goto error_return;
 		}
 	}
@@ -1757,8 +1759,8 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	    lu->consistency_factor);
 
 	if (lu->replication_factor > lu->desired_replication_factor) {
-		ISTGT_ERRLOG("Invalid config ReplicationFactor is greater "
-		    " than ReplicationFactor\n");
+		ISTGT_ERRLOG("Invalid config ReplicationFactor is"
+		    " greater than Desired ReplicationFactor\n");
 		goto error_return;
 	}
 	if (lu->replication_factor <= 0 || lu->consistency_factor <= 0 ||
@@ -1783,8 +1785,8 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 			len = strlen(key);
 			knr->replica_id = (char *)malloc(sizeof(char)*len);
 			if (knr->replica_id == NULL) {
-				ISTGT_ERRLOG("failed to allocate memory for",
-				    " known replicaId %s\n", key);
+				ISTGT_ERRLOG("failed to allocate memory"
+				    " for known replicaId %s\n", key);
 			}
 			strncpy(knr->replica_id, key, len);
 			knr->zvol_guid = (uint64_t) strtol(val, NULL, 10);
@@ -1797,8 +1799,8 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	// is lost and to reconstruct the data into other replicas
 	// RF and CF will be updated to correspondig values
 	if (i > lu->desired_replication_factor) {
-		ISTGT_ERRLOG("known replica count %d is greater than desired replication"
-		    " factor %d\n",i, lu->replication_factor);
+		ISTGT_ERRLOG("known replica count %d is greater than desired replication factor %d\n",
+		    i, lu->replication_factor);
 		goto error_return;
 	}
 #endif
@@ -2375,12 +2377,14 @@ error_return:
 		}
 		MTX_UNLOCK(&istgt->mutex);
 	}
+#ifdef REPLCIATION
 	/* Releasing in memory details */
 	while (knr = TAILQ_FIRST(&lu->known_replica)) {
 		xfree(knr->replica_id);
                 TAILQ_REMOVE(&lu->known_replica, knr, next);
                 xfree(knr);
         }
+#endif
 
 	xfree(lu);
 	return (-1);

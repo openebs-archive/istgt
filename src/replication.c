@@ -782,6 +782,10 @@ get_known_replica_count(spec_t *spec) {
 // update_volume_config must be performed by taking spec lock
 static int
 update_volume_config(char *data) {
+#ifdef DEBUG
+	return 1;
+	ISTGT_LOG("successfully updated the volume into etcd\n");
+#else
 	int fd, rc = -1, len;
 	int rtimeout = 20, wtimeout = 10, tmpidx = 0, tmpcnt = 0;
 	char *read_data, *tmp_data;
@@ -837,6 +841,7 @@ clean_data:
 error_in_update:
 	close(fd);
 	return rc;
+#endif
 }
 
 // update_in_memory_known_replica_list will update replica zvol guid
@@ -860,8 +865,8 @@ update_in_memory_known_replica_list(spec_t *spec, replica_t *replica) {
 	key_len = strlen(replica->replica_id);
 	knr->replica_id = (char *)malloc(sizeof(char) * key_len);
 	if (knr->replica_id == NULL) {
-		ISTGT_ERRLOG("failed to allocate memory for",
-		    " known replicaId %s\n", replica->replica_id);
+		ISTGT_ERRLOG("failed to allocate memory for known"
+		    " replicaId %s\n", replica->replica_id);
 		return -1;
 	}
 	strncpy(knr->replica_id, replica->replica_id, key_len);
@@ -1448,8 +1453,6 @@ replica_error:
 		destroy_mempool(&replica->cmdq);
 		replica->iofd = -1;
 		close(iofd);
-		free(replica->ip);
-		free(replica->replica_id);
 		if (rio_hdr)
 			free(rio_hdr);
 		if (rio_payload)
@@ -2437,17 +2440,19 @@ update_replication_factor(spec_t *spec, replica_t *replica) {
 	const char *json_string;
 	struct json_object *jobj;
 	int rf, cf, rc = -1;
+	bool old_replica;
 
 	ASSERT(MTX_LOCKED(&spec->rq_mtx));
+
 	known_replica_count = get_known_replica_count(spec);
+	old_replica = is_replica_exist(spec, replica->replica_id);
 
 	/* If is_replica_exist return true then it is a kind of replica replace
 	 * or replica movement scenarios. If it return false then it is a replica
 	 * scale up case then to add replica into known replica list current known 
 	 * replica count should be less than desired replication factor.
 	 */
-	if (!is_replica_exist(spec, replica->replica_id) &&
-	    known_replica_count >= spec->desired_replication_factor) {
+	if (!old_replica && known_replica_count >= spec->desired_replication_factor) {
 		ISTGT_ERRLOG("failed to update replication/consistency factor "
 		    "known replica count %d is greater than or equal to "
 		    "desired replciation factor %d\n",
@@ -2490,15 +2495,18 @@ update_replication_factor(spec_t *spec, replica_t *replica) {
 		json_object_put(jobj);
 		return rc;
 	}
-	ISTGT_LOG("Updated the replication_factor: from %d to %d "
-	    ",consistency_factor: from %d to %d and replica known list {%lu}\n",
-	    spec->replication_factor, rf, spec->consistency_factor, cf, replica->zvol_guid);
 
 	/* Update inmemory RF and CF */
-	spec->replication_factor = rf;
-	spec->consistency_factor = cf;
-	spec->lu->replication_factor = rf;
-	spec->lu->consistency_factor = cf;
+	if (!old_replica) {
+		ISTGT_LOG("Updated the replication_factor: from %d to %d "
+		    ",consistency_factor: from %d to %d and replica known list {%lu}\n",
+		    spec->replication_factor, rf, spec->consistency_factor,
+		    cf, replica->zvol_guid);
+		spec->replication_factor = rf;
+		spec->consistency_factor = cf;
+		spec->lu->replication_factor = rf;
+		spec->lu->consistency_factor = cf;
+	}
 	(void) update_in_memory_known_replica_list(spec, replica);
 	rc = 1;
 	MTX_UNLOCK(&replica->r_mtx);
@@ -2576,12 +2584,13 @@ update_replica_status(spec_t *spec, zvol_io_hdr_t *hdr, replica_t *replica)
 
 			assert(r1 != NULL);
 			assert((spec->rebuild_info.dw_replica == replica) || (spec->replication_factor == 1));
-			if (found_in_list == 2) {
-				replica_count = spec->healthy_rcount + spec->degraded_rcount;
-				/* Error out if already quorum replicas are connected */
-				if (replica_count >= spec->desired_replication_factor)
-					goto disconnect_all_non_quorum_replicas;
+			replica_count = spec->healthy_rcount + spec->degraded_rcount;
+
+			/* Error out if already quorum replicas are connected */
+			if (replica_count >= spec->desired_replication_factor) {
+				goto disconnect_all_non_quorum_replicas;
 			}
+
 			if (found_in_list == 1)
 				spec->degraded_rcount--;
 			else {
@@ -3127,6 +3136,8 @@ free_replica(replica_t *r)
 
 	if (r->ip)
 		free(r->ip);
+	if (r->replica_id)
+		free(r->replica_id);
 	free(r);
 }
 
@@ -3730,8 +3741,9 @@ handle_mgmt_conn_error(replica_t *r, int sfd, struct epoll_event *events, int ev
 	r->mgmt_eventfd1 = -1;
 	close_fd(epollfd, mgmt_eventfd1);
 
-	REPLICA_NOTICELOG("Replica(%lu) got disconnected from %s:%d "
-	    "mgmt_fd:%d\n", r->zvol_guid, r->ip, r->port, r->mgmt_fd);
+	REPLICA_NOTICELOG("Replica(%s:%lu) got disconnected from %s:%d "
+	    "mgmt_fd:%d\n", r->replica_id, r->zvol_guid, r->ip, r->port,
+	    r->mgmt_fd);
 
 	for (i = 0; i < ev_count; i++) {
 		if (events[i].data.fd == sfd) {

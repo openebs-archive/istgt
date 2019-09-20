@@ -303,7 +303,6 @@ handle_data_conn_error(replica_t *r)
 	if (r1 == NULL)
 		TAILQ_FOREACH(r1, &(spec->non_quorum_rq), r_non_quorum_next)
 			if (r1 == r) {
-				assert(r->quorum == 0);
 				found_in_list = 2;
 				break;
 			}
