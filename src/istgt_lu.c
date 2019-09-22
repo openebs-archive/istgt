@@ -1469,7 +1469,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	int len;
 	int gotstorage = 0;
 #ifdef REPLICATION
-	trusty_replica_t *knr;
+	trusty_replica_t *trusty_replica;
 #endif
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "add unit %d\n", sp->num);
 
@@ -1759,8 +1759,9 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	    lu->consistency_factor);
 
 	if (lu->replication_factor > lu->desired_replication_factor) {
-		ISTGT_ERRLOG("Invalid config ReplicationFactor is"
-		    " greater than Desired ReplicationFactor\n");
+		ISTGT_ERRLOG("Invalid config ReplicationFactor(%d) is"
+		    " greater than Desired ReplicationFactor(%d)\n",
+		    lu->replication_factor, lu->desired_replication_factor);
 		goto error_return;
 	}
 	if (lu->replication_factor <= 0 || lu->consistency_factor <= 0 ||
@@ -1768,31 +1769,32 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 		ISTGT_ERRLOG("Invalid ReplicationFactor/ConsistencyFactor or their ratio\n");
 		goto error_return;
 	}
-	/* Read known replica details from conf file and maintain in memory structure*/
+	/* Read trusty replica details from conf file and maintain in memory structure*/
 	val = istgt_get_val(sp, "Replica");
 	if (val == NULL) {
-		TAILQ_INIT(&lu->known_replica);
+		TAILQ_INIT(&lu->trusty_replica);
 	} else {
-		TAILQ_INIT(&lu->known_replica);
+		TAILQ_INIT(&lu->trusty_replica);
 		for (i=0; ; i++) {
 			key = istgt_get_nmval(sp, "Replica", i, 0);
 			if (key == NULL) {
 				break;
 			}
-			knr = xmalloc(sizeof (trusty_replica_t));
-			memset(knr, 0, sizeof(trusty_replica_t));
+			trusty_replica = xmalloc(sizeof (trusty_replica_t));
+			memset(trusty_replica, 0, sizeof(trusty_replica_t));
 			val = istgt_get_nmval(sp, "Replica", i, 1);
-			len = strlen(key);
-			knr->replica_id = (char *)malloc(sizeof(char)*len);
-			if (knr->replica_id == NULL) {
+			len = strlen(key) + 1;
+			trusty_replica->replica_id = (char *)malloc(sizeof(char)*len);
+			if (trusty_replica->replica_id == NULL) {
 				ISTGT_ERRLOG("failed to allocate memory"
 				    " for known replicaId %s\n", key);
 			}
-			strncpy(knr->replica_id, key, len);
-			knr->zvol_guid = (uint64_t) strtol(val, NULL, 10);
-			TAILQ_INSERT_TAIL(&lu->known_replica, knr, next);
+			memset(trusty_replica->replica_id, 0, len);
+			strncpy(trusty_replica->replica_id, key, len-1);
+			trusty_replica->zvol_guid = (uint64_t) strtol(val, NULL, 10);
+			TAILQ_INSERT_TAIL(&lu->trusty_replica, trusty_replica, next);
 			ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "known replica key {%s} and"
-			    " zvol guid {%lu}\n",knr->replica_id, knr->zvol_guid);
+			    " zvol guid {%lu}\n",trusty_replica->replica_id, trusty_replica->zvol_guid);
 		}
 	}
 	// It is useful in case where multiple copies of data
@@ -2377,12 +2379,12 @@ error_return:
 		}
 		MTX_UNLOCK(&istgt->mutex);
 	}
-#ifdef REPLCIATION
+#ifdef REPLICATION
 	/* Releasing in memory details */
-	while (knr = TAILQ_FIRST(&lu->known_replica)) {
-		xfree(knr->replica_id);
-                TAILQ_REMOVE(&lu->known_replica, knr, next);
-                xfree(knr);
+	while (trusty_replica = TAILQ_FIRST(&lu->trusty_replica)) {
+		xfree(trusty_replica->replica_id);
+                TAILQ_REMOVE(&lu->trusty_replica, trusty_replica, next);
+                xfree(trusty_replica);
         }
 #endif
 
