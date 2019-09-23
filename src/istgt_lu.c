@@ -1772,9 +1772,9 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	/* Read trusty replica details from conf file and maintain in memory structure*/
 	val = istgt_get_val(sp, "Replica");
 	if (val == NULL) {
-		TAILQ_INIT(&lu->trusty_replica);
+		TAILQ_INIT(&lu->trusty_replicas);
 	} else {
-		TAILQ_INIT(&lu->trusty_replica);
+		TAILQ_INIT(&lu->trusty_replicas);
 		for (i=0; ; i++) {
 			key = istgt_get_nmval(sp, "Replica", i, 0);
 			if (key == NULL) {
@@ -1787,21 +1787,21 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 			trusty_replica->replica_id = (char *)malloc(sizeof(char)*len);
 			if (trusty_replica->replica_id == NULL) {
 				ISTGT_ERRLOG("failed to allocate memory"
-				    " for known replicaId %s\n", key);
+				    " for trusty replica %s\n", key);
 			}
 			memset(trusty_replica->replica_id, 0, len);
 			strncpy(trusty_replica->replica_id, key, len-1);
 			trusty_replica->zvol_guid = (uint64_t) strtol(val, NULL, 10);
-			TAILQ_INSERT_TAIL(&lu->trusty_replica, trusty_replica, next);
-			ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "known replica key {%s} and"
+			TAILQ_INSERT_TAIL(&lu->trusty_replicas, trusty_replica, next);
+			ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "trusty replica key {%s} and"
 			    " zvol guid {%lu}\n",trusty_replica->replica_id, trusty_replica->zvol_guid);
 		}
 	}
 	// It is useful in case where multiple copies of data
-	// is lost and to reconstruct the data into other replicas
+	// is lost and to reconstruct the data from other replicas
 	// RF and CF will be updated to correspondig values
 	if (i > lu->desired_replication_factor) {
-		ISTGT_ERRLOG("known replica count %d is greater than desired replication factor %d\n",
+		ISTGT_ERRLOG("trusty replica count %d is greater than desired replication factor %d\n",
 		    i, lu->replication_factor);
 		goto error_return;
 	}
@@ -2381,9 +2381,9 @@ error_return:
 	}
 #ifdef REPLICATION
 	/* Releasing in memory details */
-	while (trusty_replica = TAILQ_FIRST(&lu->trusty_replica)) {
+	while (trusty_replica = TAILQ_FIRST(&lu->trusty_replicas)) {
 		xfree(trusty_replica->replica_id);
-                TAILQ_REMOVE(&lu->trusty_replica, trusty_replica, next);
+                TAILQ_REMOVE(&lu->trusty_replicas, trusty_replica, next);
                 xfree(trusty_replica);
         }
 #endif

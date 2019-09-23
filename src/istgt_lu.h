@@ -347,7 +347,7 @@ typedef struct istgt_lu_t {
 	uint8_t replication_factor;
 	uint8_t desired_replication_factor;
 	uint8_t consistency_factor;
-	TAILQ_HEAD(, trusty_replica_s) trusty_replica; //Contains list of trusty replicas
+	TAILQ_HEAD(, trusty_replica_s) trusty_replicas; //Contains list of trusty replicas
 #endif
 } ISTGT_LU;
 typedef ISTGT_LU *ISTGT_LU_Ptr;
@@ -887,6 +887,7 @@ typedef struct istgt_lu_disk_t {
 		bool rebuild_in_progress;
 	} rebuild_info;
 
+	struct replica_s *transition_replica;
 	/*Common for both the above queues,
 	Since same cmd is part of both the queues*/
 	pthread_mutex_t rq_mtx; 
