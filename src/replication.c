@@ -3316,21 +3316,21 @@ handle_read_consistency(rcommon_cmd_t *rcomm_cmd, ssize_t block_len,
 	return dataptr;
 }
 
-/* can_transition_resp_ignore return true if transition replica 
- * response is not considered for IO failure else false if IO is
- * important to success on this replica
- */
-static bool
-can_transition_resp_ignore(spec_t *spec) {
-	int rf, df, cf;
-
-	rf = spec->replication_factor;
-	cf = spec->consistency_factor;
-	df = spec->desired_replication_factor;
-	if (rf == df || spec->rebuild_info.dw_replica == NULL)
-		return true;
-	return (cf == ((rf+1)/2)+1);
-}
+///* can_transition_resp_ignore return true if transition replica 
+// * response is not considered for IO failure else false if IO is
+// * important to success on this replica
+// */
+//static bool
+//can_transition_resp_ignore(spec_t *spec) {
+//	int rf, df, cf;
+//
+//	rf = spec->replication_factor;
+//	cf = spec->consistency_factor;
+//	df = spec->desired_replication_factor;
+//	if (rf == df || spec->rebuild_info.dw_replica == NULL)
+//		return true;
+//	return (cf == ((rf+1)/2)+1);
+//}
 
 static int
 check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CMD_Ptr cmd)
@@ -3340,10 +3340,10 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 	uint8_t success = 0, failure = 0, healthy_response = 0, response_received;
 	int min_response;
 	int healthy_replica = 0;
-	int found_in_list = 0;
-	bool transition_io_failed = false;
-	bool ignore_transition_state_resp = true;
-	int total_copies_sent;
+	//int found_in_list = 0;
+	//bool transition_io_failed = false;
+	//bool ignore_transition_state_resp = true;
+	//int total_copies_sent;
 
 	for (i = 0; i < rcomm_cmd->copies_sent; i++) {
 		if (rcomm_cmd->resp_list[i].status & RECEIVED_OK) {
@@ -3357,27 +3357,27 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 		if (rcomm_cmd->resp_list[i].status & SENT_TO_HEALTHY)
 			healthy_replica++;
 
-		if (spec->rebuild_info.dw_replica != NULL &&
-		    rcomm_cmd->resp_list[i].replica == spec->rebuild_info.dw_replica) {
-			found_in_list = 1;
-		}
+	//	if (spec->rebuild_info.dw_replica != NULL &&
+	//	    rcomm_cmd->resp_list[i].replica == spec->rebuild_info.dw_replica) {
+	//		found_in_list = 1;
+	//	}
 	}
 	/* In scale up replica cases there is reason to
 	 */
-	if (found_in_list == 0) {
-		ignore_transition_state_resp = can_transition_resp_ignore(spec);
-	}
-	if (!ignore_transition_state_resp) {
-		i = rcomm_cmd->copies_sent;
-		total_copies_sent = rcomm_cmd->non_quorum_copies_sent +
-		    rcomm_cmd->copies_sent;
-		for (; i < total_copies_sent; i++) {
-			if (spec->rebuild_info.dw_replica ==
-			    rcomm_cmd->resp_list[i].replica &&
-			    rcomm_cmd->resp_list[i].status & RECEIVED_ERR)
-				transition_io_failed = true;
-		}
-	}
+	//if (found_in_list == 0) {
+	//	ignore_transition_state_resp = can_transition_resp_ignore(spec);
+	//}
+	//if (!ignore_transition_state_resp) {
+	//	i = rcomm_cmd->copies_sent;
+	//	total_copies_sent = rcomm_cmd->non_quorum_copies_sent +
+	//	    rcomm_cmd->copies_sent;
+	//	for (; i < total_copies_sent; i++) {
+	//		if (spec->rebuild_info.dw_replica ==
+	//		    rcomm_cmd->resp_list[i].replica &&
+	//		    rcomm_cmd->resp_list[i].status & RECEIVED_ERR)
+	//			transition_io_failed = true;
+	//	}
+	//}
 
 	response_received = success + failure;
 	min_response = MAX_OF(rcomm_cmd->replication_factor -
@@ -3444,11 +3444,11 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 			    " cmd:write io(%lu) cs(%d)\n", rcomm_cmd->io_seq,
 			    rcomm_cmd->copies_sent);
 		}
-		if (transition_io_failed) {
-			REPLICA_ERRLOG("didn't receive success from transition"
-			    " replica.. cmd:write io(%lu)\n", rcomm_cmd->io_seq);
-			rc = -1;
-		}
+		//if (transition_io_failed) {
+		//	REPLICA_ERRLOG("didn't receive success from transition"
+		//	    " replica.. cmd:write io(%lu)\n", rcomm_cmd->io_seq);
+		//	rc = -1;
+		//}
 	}
 
 	return rc;
@@ -3456,6 +3456,17 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 
 #define	ADD_TIMESPEC(var, s, d)	\
 	(var) += (uint64_t)(d.tv_sec - s.tv_sec) * (uint64_t)SEC_IN_NS + d.tv_nsec - s.tv_nsec;
+
+static int
+get_new_cf(spec_t *spec) {
+	int rf = spec->replication_factor;
+	ASSERT(MTX_LOCKED(&spec->rq_mtx));
+
+	if (spec->transition_replica != NULL) {
+		return ((rf+1)/2) + 1;
+	}
+	return spec->consistency_factor;
+}
 
 int64_t
 replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t nbytes)
@@ -3474,6 +3485,7 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	uint64_t inflight_read_ios = 0;
 	int count = 0 ;
 	bool replica_exists;
+	int cf, success_count = 0;
 
 	(void) cmd_read;
 	CHECK_IO_TYPE(cmd, cmd_read, cmd_write, cmd_sync);
@@ -3588,6 +3600,7 @@ retry_read:
 	while (1) {
 		timesdiff(CLOCK_MONOTONIC_RAW, queued_time, now, diff);
 		count = 0;
+		success_count = 0;
 		copies_sent = rcomm_cmd->copies_sent + rcomm_cmd->non_quorum_copies_sent;
 
 		for (i = 0; i < copies_sent; i++) {
@@ -3620,13 +3633,16 @@ retry_read:
 
 				count++;
 			}
-			//if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) {
-			//	if (i < rcomm_cmd->copies_sent &&
-			//	    (rcomm_cmd->resp_list[i].status & RECEIVED_OK))
-			//		success_count++;
-			//	if (i > rcomm_cmd->copies_sent
-			//	
-			//}
+			if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) {
+				if (i < rcomm_cmd->copies_sent &&
+				    (rcomm_cmd->resp_list[i].status & RECEIVED_OK))
+					success_count++;
+				if (i >= rcomm_cmd->copies_sent &&
+				    rcomm_cmd->resp_list[i].replica == spec->transition_replica &&
+				    rcomm_cmd->resp_list[i].status & RECEIVED_OK ) {
+					success_count++;
+				}
+			}
 		}
 
 		if (count != copies_sent)
@@ -3664,6 +3680,11 @@ retry_read:
 #endif
 
 			MTX_LOCK(&spec->rq_mtx);
+			cf = get_new_cf(spec);
+			if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE &&
+			    cf == spec->consistency_factor && success_count >= cf) {
+				rc = -1;
+			}
 			TAILQ_REMOVE(&spec->rcommon_waitq, rcomm_cmd, wait_cmd_next);
 			UPDATE_INFLIGHT_SPEC_IO_CNT(spec, cmd, -1);
 			MTX_UNLOCK(&spec->rq_mtx);
