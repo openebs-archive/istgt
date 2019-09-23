@@ -3493,7 +3493,7 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	uint64_t inflight_read_ios = 0;
 	int count = 0 ;
 	bool replica_exists;
-	int cf, success_count = 0;
+	int new_cf, success_wcount = 0;
 
 	(void) cmd_read;
 	CHECK_IO_TYPE(cmd, cmd_read, cmd_write, cmd_sync);
@@ -3608,7 +3608,7 @@ retry_read:
 	while (1) {
 		timesdiff(CLOCK_MONOTONIC_RAW, queued_time, now, diff);
 		count = 0;
-		success_count = 0;
+		success_wcount = 0;
 		copies_sent = rcomm_cmd->copies_sent + rcomm_cmd->non_quorum_copies_sent;
 
 		for (i = 0; i < copies_sent; i++) {
@@ -3644,12 +3644,14 @@ retry_read:
 			if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) {
 				if (i < rcomm_cmd->copies_sent &&
 				    (rcomm_cmd->resp_list[i].status & RECEIVED_OK))
-					success_count++;
-				if (i >= rcomm_cmd->copies_sent &&
+					success_wcount++;
+				MTX_LOCK(&spec->rq_mtx);
+				if (i >= rcomm_cmd->copies_sent && spec->transition_replica != NULL &&
 				    rcomm_cmd->resp_list[i].replica == spec->transition_replica &&
-				    rcomm_cmd->resp_list[i].status & RECEIVED_OK ) {
-					success_count++;
+				    (rcomm_cmd->resp_list[i].status & RECEIVED_OK)) {
+					success_wcount++;
 				}
+				MTX_UNLOCK(&spec->rq_mtx);
 			}
 		}
 
@@ -3688,11 +3690,13 @@ retry_read:
 #endif
 
 			MTX_LOCK(&spec->rq_mtx);
-			cf = get_new_cf(spec);
+			new_cf = get_new_cf(spec);
 			if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE &&
-			    cf == spec->consistency_factor && success_count >= cf) {
+			    spec->transition_replica != NULL &&
+			    new_cf == spec->consistency_factor && success_wcount < new_cf) {
+				MTX_UNLOCK(&spec->rq_mtx);
 				rc = -1;
-				goto wait_for_other_responses;
+				break;
 			}
 			TAILQ_REMOVE(&spec->rcommon_waitq, rcomm_cmd, wait_cmd_next);
 			UPDATE_INFLIGHT_SPEC_IO_CNT(spec, cmd, -1);
@@ -4131,6 +4135,7 @@ initialize_volume(spec_t *spec, int replication_factor, int consistency_factor, 
 	spec->ready = false;
 	spec->rebuild_info.dw_replica = NULL;
 	spec->rebuild_info.healthy_replica = NULL;
+	spec->transition_replica = NULL;
 
 	rc = pthread_mutex_init(&spec->rcommonq_mtx, NULL);
 	if (rc != 0) {
