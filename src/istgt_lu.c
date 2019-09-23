@@ -1783,14 +1783,15 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 			trusty_replica = xmalloc(sizeof (trusty_replica_t));
 			memset(trusty_replica, 0, sizeof(trusty_replica_t));
 			val = istgt_get_nmval(sp, "Replica", i, 1);
-			len = strlen(key) + 1;
-			trusty_replica->replica_id = (char *)malloc(sizeof(char)*len);
+			len = strlen(key);
+			trusty_replica->replica_id = xmalloc(len + 1);
 			if (trusty_replica->replica_id == NULL) {
 				ISTGT_ERRLOG("failed to allocate memory"
 				    " for trusty replica %s\n", key);
+				goto error_return;
 			}
-			memset(trusty_replica->replica_id, 0, len);
-			strncpy(trusty_replica->replica_id, key, len-1);
+			memset(trusty_replica->replica_id, 0, len + 1);
+			strncpy(trusty_replica->replica_id, key, len);
 			trusty_replica->zvol_guid = (uint64_t) strtol(val, NULL, 10);
 			TAILQ_INSERT_TAIL(&lu->trusty_replicas, trusty_replica, next);
 			ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "trusty replica key {%s} and"

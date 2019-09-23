@@ -835,7 +835,9 @@ update_volume_config(char *data) {
 	// tmp_data is used to read chunks of data(64 bytes) from the wire and store it
 	// in read_data
 	read_data = (char *)malloc(sizeof(char) * 128);
+	memset(read_data, 0, 128);
 	tmp_data = (char *)malloc(sizeof(char) * 64);
+	memset(tmp_data, 0, 64);
 	rc = istgt_readline_socket(fd, read_data, 128, tmp_data, 64, &tmpidx, &tmpcnt, rtimeout);
 	if (rc < 0) {
 		ISTGT_ERRLOG("failed to read the data on %d\n", fd);
@@ -889,15 +891,15 @@ update_in_memory_trusty_replica_list(spec_t *spec, replica_t *replica) {
 
 	trusty_replica = xmalloc(sizeof (trusty_replica_t));
 	memset(trusty_replica, 0, sizeof(trusty_replica_t));
-	key_len = strlen(replica->replica_id) + 1;
-	trusty_replica->replica_id = (char *)malloc(sizeof(char) * key_len);
+	key_len = strlen(replica->replica_id);
+	trusty_replica->replica_id = xmalloc(key_len + 1);
 	if (trusty_replica->replica_id == NULL) {
 		ISTGT_ERRLOG("failed to allocate memory for known"
 		    " replicaId %s\n", replica->replica_id);
 		return -1;
 	}
-	memset(trusty_replica->replica_id, 0, key_len);
-	strncpy(trusty_replica->replica_id, replica->replica_id, key_len - 1);
+	memset(trusty_replica->replica_id, 0, key_len + 1);
+	strncpy(trusty_replica->replica_id, replica->replica_id, key_len);
 	trusty_replica->zvol_guid = replica->zvol_guid;
 	TAILQ_INSERT_TAIL(&spec->lu->trusty_replicas, trusty_replica, next);
 	return 0;
@@ -937,9 +939,9 @@ update_trusty_replica_list(spec_t *spec, replica_t *rep) {
 	BUILD_REPLICA_DATA(spec, rep, jobj);
 	json_string = json_object_to_json_string_ext(jobj, JSON_C_TO_STRING_PLAIN);
 
-	data_len = strlen(json_string) + 1;
-	data = malloc(sizeof(char *)*data_len);
-	memset(data, 0, data_len);
+	data_len = strlen(json_string);
+	data = xmalloc(data_len + 1);
+	memset(data, 0, data_len + 1);
 	strncpy(data, json_string, data_len);
 
 	rc = update_volume_config(data);
@@ -1054,6 +1056,10 @@ can_replica_connect(spec_t *spec, replica_t *replica)
 	non_quorum_count = get_non_quorum_replica_count(spec);
 
 	//TODO: Change non_quorum variables to unknown_quorum
+	//TODO: If DRF unknown replicas are already connected to the target.
+	//      If known replica came to connect we need to remove connected
+	//      replicas(in the order non-quorum, not-in-the-known-list)
+
 	/* We need to allow DRF replicas to connect to target there might
 	 * be case where rebuilding is done at replica and marked quorum=on,
 	 * immediately after that target or replica is restarted,
@@ -1360,7 +1366,7 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	zvol_io_hdr_t *ack_hdr;
 	mgmt_ack_t *ack_data;
 	zvol_op_open_data_t *rio_payload = NULL;
-	int i;
+	int i, replica_id_len;
 	bool trusty_replica;
 
 	ack_hdr = replica->mgmt_io_resp_hdr;	
@@ -1385,9 +1391,10 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 
 	replica->pool_guid = ack_data->pool_guid;
 	replica->zvol_guid = ack_data->zvol_guid;
-	replica->replica_id = malloc(strlen(ack_data->replica_id)+1);
-	memset(replica->replica_id, 0, MAX_NAME_LEN);
-	strncpy(replica->replica_id, ack_data->replica_id, strlen(ack_data->replica_id));
+	replica_id_len = strlen(ack_data->replica_id);
+	replica->replica_id = xmalloc(replica_id_len + 1);
+	memset(replica->replica_id, 0, replica_id_len + 1);
+	strncpy(replica->replica_id, ack_data->replica_id, replica_id_len);
 
 	MTX_LOCK(&spec->rq_mtx);
 	if (!is_replica_newly_connected(spec, replica)) {
@@ -2427,7 +2434,7 @@ wait_for_ongoing_ios_on_replica(spec_t *spec, replica_t *replica, int sec) {
 		 * inflight write/sync IOs in spec, or in replica,
 		 * so, wait for some time
 		 */
-		sleep (3);
+		sleep (1);
 		MTX_LOCK(&spec->rq_mtx);
 		timesdiff(CLOCK_MONOTONIC_COARSE, last, now, diff);
 	}
@@ -2494,9 +2501,9 @@ update_replication_factor(spec_t *spec, replica_t *replica) {
 	}
 	json_string = json_object_to_json_string_ext(jobj, JSON_C_TO_STRING_PLAIN);
 
-	data_len = strlen(json_string) + 1;
-	data = malloc(sizeof(char *)*data_len);
-	memset(data, 0, data_len);
+	data_len = strlen(json_string);
+	data = xmalloc(data_len + 1);
+	memset(data, 0, data_len + 1);
 	strncpy(data, json_string, data_len);
 
 	ISTGT_LOG("updating replica(%s:%lu) to trusty replica list\n",
@@ -2599,13 +2606,14 @@ update_replica_status(spec_t *spec, zvol_io_hdr_t *hdr, replica_t *replica)
 
 			assert(r1 != NULL);
 			assert((spec->rebuild_info.dw_replica == replica) || (spec->replication_factor == 1));
-			replica_count = spec->healthy_rcount + spec->degraded_rcount;
+			if (found_in_list == 2) {
+				replica_count = spec->healthy_rcount + spec->degraded_rcount;
 
-			/* Error out if already quorum replicas are connected */
-			if (replica_count >= spec->desired_replication_factor) {
-				goto disconnect_all_non_quorum_replicas;
+				/* Error out if already quorum replicas are connected */
+				if (replica_count >= spec->desired_replication_factor) {
+					goto disconnect_all_non_quorum_replicas;
+				}
 			}
-
 			if (found_in_list == 1)
 				spec->degraded_rcount--;
 			else {
@@ -2617,27 +2625,25 @@ update_replica_status(spec_t *spec, zvol_io_hdr_t *hdr, replica_t *replica)
 				if (rc < 0) {
 					/* Resume ongoing IO's in case of error*/
 					spec->quiesce = 0;
-					MTX_UNLOCK(&spec->rq_mtx);
 					ISTGT_ERRLOG("failed to flush the IO's on replica{%lu}"
 					    " (%s:%d) during replica mgmt_fd: %d set replica state as"
 					    " as %s\n", replica->zvol_guid, replica->ip,
 					    replica->port, replica->mgmt_fd, (replica->state
 					    == ZVOL_STATUS_HEALTHY) ? "healthy" : "degraded");
-					return 0;
+					goto trigger_rebuild;
 				}
 				/* Update trusty replica list, replication and consistency factor*/
 				rc = update_replication_factor(spec, replica);
 				if (rc < 0) {
 					/* Resume ongoing IO's in case of error*/
 					spec->quiesce = 0;
-					MTX_UNLOCK(&spec->rq_mtx);
 					ISTGT_ERRLOG("failed to update replication and "
 					    " consistency factor of replica{%lu}"
 					    " (%s:%d) replica mgmt_fd: %d set replica state"
 					    " as %s\n", replica->zvol_guid, replica->ip,
 					    replica->port, replica->mgmt_fd, (replica->state
 					    == ZVOL_STATUS_HEALTHY) ? "healthy" : "degraded");
-					return 0;
+					goto trigger_rebuild;
 				}
 				TAILQ_REMOVE(&spec->non_quorum_rq, replica, r_non_quorum_next);
 				TAILQ_INSERT_TAIL(&spec->rq, replica, r_next);
@@ -2675,8 +2681,10 @@ disconnect_all_non_quorum_replicas:
 		spec->rebuild_info.rebuild_in_progress = false;
 		spec->rebuild_info.dw_replica = NULL;
 		spec->rebuild_info.healthy_replica = NULL;
+		spec->transition_replica = NULL;
 	}
 
+trigger_rebuild:
 	/*Trigger rebuild if possible */
 	trigger_rebuild(spec);
 	MTX_UNLOCK(&spec->rq_mtx);
