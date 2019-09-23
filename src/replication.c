@@ -3684,6 +3684,7 @@ retry_read:
 			if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE &&
 			    cf == spec->consistency_factor && success_count >= cf) {
 				rc = -1;
+				goto wait_for_other_responses;
 			}
 			TAILQ_REMOVE(&spec->rcommon_waitq, rcomm_cmd, wait_cmd_next);
 			UPDATE_INFLIGHT_SPEC_IO_CNT(spec, cmd, -1);
