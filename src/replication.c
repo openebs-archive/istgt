@@ -951,13 +951,16 @@ update_trusty_replica_list(spec_t *spec, replica_t *rep) {
 }
 
 /* check_is_it_trusty_replica returns true if replica_id and replica_zvol_guid
- * is matched with any of trusty replicas replica_id and replica_zvol_guid
+ * is matched with any of trusty replicas replica_id and replica_zvol_guid.
+ * This should be invoke by holding spec->rq_mtx lock
  */
 static bool
 check_is_it_trusty_replica(spec_t *spec, replica_t *rep) {
 	bool ret = false;
+
+	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 	trusty_replica_t *trusty_replica;
-	TAILQ_FOREACH(trusty_replica, &_spec->lu->trusty_replicas, next){
+	TAILQ_FOREACH(trusty_replica, &spec->lu->trusty_replicas, next){
 		if ((strcmp(trusty_replica->replica_id, rep->replica_id) == 0) &&
 		    (trusty_replica->zvol_guid == rep->zvol_guid)) {
 			ret = true;
@@ -965,39 +968,6 @@ check_is_it_trusty_replica(spec_t *spec, replica_t *rep) {
 		}
 	}
 	return ret;
-}
-
-/*
- * is_trusty_replica returns true whether the replica is trusty or not based
- * on below factors
- * return value true --> trusty replica
- * return value false --> unknown replica
- * 1) If quorum is off, then treat as unknown replica.
- * 2) If trusty replica count is less than replication factor
- *    return true(newly created volume/upgrade scenarios).
- * 3) Check whether replicaId and zvol guid of replica
- *    is present in trusty replica list return based on
- *    that condition
- */
-static bool
-is_trusty_replica(spec_t *spec, replica_t *new_replica)
-{
-	int trusty_replica_count;
-	bool result = true;
-
-	// Replica scale up case and replica movement cases
-	if (new_replica->quorum == 0) {
-		return false;
-	}
-	// This is to handle upgrade scenarios and newely
-	// connected volume
-	trusty_replica_count = get_trusty_replica_count(spec);
-	if (trusty_replica_count < spec->replication_factor) {
-		return result;
-	}
-	// Check If replica is present in spec->lu->know_replica_list
-	// then return true else false
-	return check_is_it_trusty_replica(spec, new_replica);
 }
 
 /* is_trusted_replicas_contain_replicaid returns true if replica_id is present
@@ -1030,10 +1000,14 @@ get_non_quorum_replica_count(spec_t *spec)
 
 /*
  * This will return true if given replica need to be updated to vol_mgmt
- * as trusty one during replica connect phase
+ * as trusty one during replica connect phase. This should be called by
+ * holding spec->rq_mtx lock
  */
 static bool
 needs_trusty_replica_update_during_connect(spec_t *spec, replica_t *replica) {
+	int trusty_replica_count = 0;
+
+	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 	/*
 	 * Update trusty replica if its count < RF and quorum on
 	 * and ID also doesn't exist in list yet
@@ -1064,7 +1038,7 @@ needs_trusty_replica_update_during_connect(spec_t *spec, replica_t *replica) {
 static bool
 can_replica_connect(spec_t *spec, replica_t *replica)
 {
-	int replica_count, non_quorum_count;
+	int replica_count, non_quorum_count, trusty_replica_count;
 	bool ret = true;
 
 	ASSERT(MTX_LOCKED(&spec->rq_mtx));
@@ -1126,6 +1100,10 @@ can_replica_connect(spec_t *spec, replica_t *replica)
 static bool
 can_be_trusty_replica(spec_t *spec, replica_t *replica)
 {
+	bool ret;
+	int trusty_replica_count;
+
+	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 	/* known and trusty replica */
  	ret = check_is_it_trusty_replica(spec, replica);
 	if (ret == true)
@@ -1436,7 +1414,7 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	mgmt_ack_t *ack_data;
 	zvol_op_open_data_t *rio_payload = NULL;
 	int i, replica_id_len;
-	bool trusty_replica;
+	bool needs_update, can_be_trusty;
 
 	ack_hdr = replica->mgmt_io_resp_hdr;	
 	ack_data = (mgmt_ack_t *)replica->mgmt_io_resp_data;
