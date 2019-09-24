@@ -2506,6 +2506,7 @@ update_unknown_as_trusty_replica(spec_t *spec, replica_t *replica) {
 	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 
 	trusty_replica_count = get_trusty_replica_count(spec);
+	MTX_LOCK(&replica->r_mtx);
 	old_replica = is_trusted_replicas_contain_replicaid(spec, replica->replica_id);
 
 	/* If is_trusted_replicas_contain_replicaid return true then it might be replica replace
@@ -2515,6 +2516,7 @@ update_unknown_as_trusty_replica(spec_t *spec, replica_t *replica) {
 	 * this replica as trusty replica.
 	 */
 	if (!old_replica && trusty_replica_count >= spec->desired_replication_factor) {
+		MTX_UNLOCK(&replica->r_mtx);
 		ISTGT_ERRLOG("failed to update replication/consistency factor "
 		    "trusty replica count %d is greater than or equal to "
 		    "desired replication factor %d\n",
@@ -2523,7 +2525,6 @@ update_unknown_as_trusty_replica(spec_t *spec, replica_t *replica) {
 	}
 
 	ASSERT(spec->quiesce == 1);
-	MTX_LOCK(&replica->r_mtx);
 
 	/* Update RF, CF and trusty replica list*/
 	rf = spec->replication_factor + 1;
@@ -2531,6 +2532,7 @@ update_unknown_as_trusty_replica(spec_t *spec, replica_t *replica) {
 
 	/* Build data required to send on wire*/
 	BUILD_REPLICA_DATA(spec, replica, jobj);
+	MTX_UNLOCK(&replica->r_mtx);
 	/* Update RF and CF only if it is not old replica*/
 	if (!old_replica) {
 		json_object_object_add(jobj, "replicationFactor",
@@ -2549,7 +2551,6 @@ update_unknown_as_trusty_replica(spec_t *spec, replica_t *replica) {
 	    replica->replica_id, replica->zvol_guid);
 	rc = update_volume_config(data);
 	if (rc < 0) {
-		MTX_UNLOCK(&replica->r_mtx);
 		ISTGT_ERRLOG("failed to update replica(%s:%lu) to trusty "
 		    "replica list\n", replica->replica_id, replica->zvol_guid);
 		free(data);
@@ -2570,7 +2571,6 @@ update_unknown_as_trusty_replica(spec_t *spec, replica_t *replica) {
 	}
 	(void) update_in_memory_trusty_replica_list(spec, replica);
 	rc = 1;
-	MTX_UNLOCK(&replica->r_mtx);
 
 	free(data);
 	json_object_put(jobj);
@@ -2606,10 +2606,10 @@ update_replica_status(spec_t *spec, zvol_io_hdr_t *hdr, replica_t *replica)
 	 * and replica->state is update only when state changed and
 	 * connected time
 	 */
-	//MTX_LOCK(&replica->r_mtx);
+	MTX_LOCK(&replica->r_mtx);
 	last_state = replica->state;
 	//replica->state = (replica_state_t) repl_status->state;
-	//MTX_UNLOCK(&replica->r_mtx);
+	MTX_UNLOCK(&replica->r_mtx);
 
 	if(last_state != repl_status->state) {
 		REPLICA_NOTICELOG("Replica(%lu) (%s:%d) mgmt_fd:%d state "

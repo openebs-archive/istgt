@@ -77,6 +77,8 @@ typedef struct rargs_s {
 	/* IP:Port on which replica is listening */
 	char replica_ip[MAX_IP_LEN];
 	uint16_t replica_port;
+	uint64_t zvol_guid;
+	char replica_id[MAX_NAME_LEN];
 
 	/* IP:Port on which controller is listening */
 	char ctrl_ip[MAX_IP_LEN];
@@ -511,6 +513,7 @@ handle_handshake(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 	mgmt_ack->quorum = 1;
 	strncpy(mgmt_ack->ip, rargs->replica_ip, sizeof (mgmt_ack->ip));
 	strncpy(mgmt_ack->volname, rargs->volname, sizeof (mgmt_ack->volname));
+	strncpy(mgmt_ack->replica_id, rargs->replica_id, sizeof (rargs->replica_id));
 	hdr->status = ZVOL_OP_STATUS_OK;
 	hdr->len = sizeof (mgmt_ack_t);
 
@@ -1183,6 +1186,8 @@ create_mock_replicas(int r_factor, char *volname)
 		rargs->replica_port = 6061 + i;
 		rargs->kill_replica = false;
 		rargs->kill_is_over = false;
+		rargs->zvol_guid = rargs->replica_port;
+		sprintf(rargs->replica_id, "%d", rargs->replica_port);
 
 		strncpy(rargs->ctrl_ip, "127.0.0.1", MAX_IP_LEN);
 		rargs->ctrl_port = 6060;
@@ -1432,6 +1437,7 @@ main(int argc, char **argv)
 {
 	int rc;
 	spec_t *spec = (spec_t *)malloc(sizeof (spec_t));
+	ISTGT_LU_Ptr lu = (ISTGT_LU_Ptr)malloc(sizeof (ISTGT_LU));
 	pthread_t replica_thread;
 	struct stat sbuf;
 	pthread_t rebuild_test_thread;
@@ -1491,6 +1497,10 @@ main(int argc, char **argv)
 		return (1);
 	}
 
+	// Assign desired_replication_facto as replication factor
+	lu->desired_replication_factor = desired_replication_factor;
+	TAILQ_INIT(&lu->trusty_replicas);
+	spec->lu = lu;
 	initialize_volume(spec, replication_factor, consistency_factor, desired_replication_factor);
 
 	pthread_create(&replica_thread, NULL, &init_replication, (void *)NULL);
