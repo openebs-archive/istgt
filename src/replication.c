@@ -1077,7 +1077,7 @@ can_replica_connect(spec_t *spec, replica_t *replica)
 		return true;
 
 	/*
-	 * Unknown replica and its ID (replica GUID may be known - but doesn't matter)
+	 * Unknown replica and its ID (replica ID may be known - but doesn't matter)
 	 * i.e., new volume case, or, upgrade from 1.2 to 1.3
 	 * or scaleup if RF < DRF
 	 */
@@ -1115,7 +1115,7 @@ can_be_trusty_replica(spec_t *spec, replica_t *replica)
 		return false;
 
 	/*
-	 * Unknown replica and its ID (replica GUID may be known - but doesn't matter)
+	 * Unknown replica and its ID (replica ID may be known - but doesn't matter)
 	 * i.e., new volume case, or, upgrade from 1.2 to 1.3
 	 * or scaleup if RF < DRF
 	 */
@@ -1630,6 +1630,8 @@ error_out_replica:
 			TAILQ_INSERT_TAIL(&spec->non_quorum_rq, replica, r_non_quorum_next);
 	}
 
+	ISTGT_LOG("added replica(%s:%lu) with needs_update: %d can_be_trusty: %d\n",
+	    replica->replica_id, replica->zvol_guid, needs_update, can_be_trusty)
 	//TODO: Add a log with these variables (needs_update, can_be_trusty)
 	/* Update the volume ready state */
 	update_volstate(spec);
@@ -2480,7 +2482,7 @@ wait_for_ongoing_ios_on_replica(spec_t *spec, replica_t *replica, int sec) {
 }
 
 /*
- * Update_replication_factor updates the replication factor by one,
+ * Update_unknown_as_trusty_replica updates the replication factor by one,
  * consistency factor accordingly (n/2 + 1) only if it is replica
  * scaleup scenario. If it is replica replacememt/movement scenario
  * just update trusty replica list with corresponding replica zvol GUID.
@@ -2493,7 +2495,7 @@ wait_for_ongoing_ios_on_replica(spec_t *spec, replica_t *replica, int sec) {
  * 3. On success update in-memory data structures.
  */
 static int
-update_replication_factor(spec_t *spec, replica_t *replica) {
+update_unknown_as_trusty_replica(spec_t *spec, replica_t *replica) {
 	int trusty_replica_count, data_len;
 	char *data;
 	const char *json_string;
@@ -2670,7 +2672,7 @@ update_replica_status(spec_t *spec, zvol_io_hdr_t *hdr, replica_t *replica)
 					goto trigger_rebuild;
 				}
 				/* Update trusty replica list, replication and consistency factor*/
-				rc = update_replication_factor(spec, replica);
+				rc = update_unknown_as_trusty_replica(spec, replica);
 				if (rc < 0) {
 					/* Resume ongoing IO's in case of error*/
 					spec->quiesce = 0;
@@ -3361,22 +3363,6 @@ handle_read_consistency(rcommon_cmd_t *rcomm_cmd, ssize_t block_len,
 	return dataptr;
 }
 
-///* can_transition_resp_ignore return true if transition replica 
-// * response is not considered for IO failure else false if IO is
-// * important to success on this replica
-// */
-//static bool
-//can_transition_resp_ignore(spec_t *spec) {
-//	int rf, df, cf;
-//
-//	rf = spec->replication_factor;
-//	cf = spec->consistency_factor;
-//	df = spec->desired_replication_factor;
-//	if (rf == df || spec->rebuild_info.dw_replica == NULL)
-//		return true;
-//	return (cf == ((rf+1)/2)+1);
-//}
-
 static int
 check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CMD_Ptr cmd)
 {
@@ -3385,10 +3371,9 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 	uint8_t success = 0, failure = 0, healthy_response = 0, response_received;
 	int min_response;
 	int healthy_replica = 0;
-	//int found_in_list = 0;
-	//bool transition_io_failed = false;
-	//bool ignore_transition_state_resp = true;
-	//int total_copies_sent;
+	int cf;
+
+	cf = rcomm_cmd->consistency_factor;
 
 	for (i = 0; i < rcomm_cmd->copies_sent; i++) {
 		if (rcomm_cmd->resp_list[i].status & RECEIVED_OK) {
@@ -3402,31 +3387,26 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 		if (rcomm_cmd->resp_list[i].status & SENT_TO_HEALTHY)
 			healthy_replica++;
 
-	//	if (spec->rebuild_info.dw_replica != NULL &&
-	//	    rcomm_cmd->resp_list[i].replica == spec->rebuild_info.dw_replica) {
-	//		found_in_list = 1;
-	//	}
 	}
-	/* In scale up replica cases there is reason to
-	 */
-	//if (found_in_list == 0) {
-	//	ignore_transition_state_resp = can_transition_resp_ignore(spec);
-	//}
-	//if (!ignore_transition_state_resp) {
-	//	i = rcomm_cmd->copies_sent;
-	//	total_copies_sent = rcomm_cmd->non_quorum_copies_sent +
-	//	    rcomm_cmd->copies_sent;
-	//	for (; i < total_copies_sent; i++) {
-	//		if (spec->rebuild_info.dw_replica ==
-	//		    rcomm_cmd->resp_list[i].replica &&
-	//		    rcomm_cmd->resp_list[i].status & RECEIVED_ERR)
-	//			transition_io_failed = true;
-	//	}
-	//}
+
+	MTX_LOCK(&spec->rq_mtx);
+		// We will set transition_replica only when there is cf change
+		// due to scaleup scenario
+		if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE &&
+		    spec->transition_replica != NULL) {
+			i = rcomm_cmd->copies_sent;
+			for (; i < (i < rcomm_cmd->copies_sent +
+			    rcomm_cmd->non_quorum_copies_sent); i++) {
+				if (rcomm_cmd->resp_list[i].status & RECEIVED_OK)
+					success++;
+			}
+			cf = (rcomm_cmd->replication_factor + 1)/2;
+		}
+	MTX_UNLOCK(&spec->rq_mtx);
 
 	response_received = success + failure;
 	min_response = MAX_OF(rcomm_cmd->replication_factor -
-	    rcomm_cmd->consistency_factor + 1, rcomm_cmd->consistency_factor);
+	    rcomm_cmd->consistency_factor + 1, cf);
 
 	rc = 0;
 	if (rcomm_cmd->opcode == ZVOL_OPCODE_READ) {
@@ -3469,14 +3449,15 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 		}
 	} else if ((rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) ||
 		   (rcomm_cmd->opcode == ZVOL_OPCODE_SYNC)) {
-		if (healthy_response >= rcomm_cmd->consistency_factor) {
-			/*
-			 * We got the successful response from required healthy
-			 * replicas.
-			 */
-			ASSERT(healthy_replica >= rcomm_cmd->consistency_factor);
-			rc = 1;
-		} else if (success >= min_response) {
+		//if (healthy_response >= rcomm_cmd->consistency_factor) {
+		//	/*
+		//	 * We got the successful response from required healthy
+		//	 * replicas.
+		//	 */
+		//	ASSERT(healthy_replica >= rcomm_cmd->consistency_factor);
+		//	rc = 1;
+		//} else
+		if (success >= min_response) {
 			/*
 			 * If we didn't get the required number of response
 			 * from healthy replica's but success response matches
@@ -3489,11 +3470,6 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 			    " cmd:write io(%lu) cs(%d)\n", rcomm_cmd->io_seq,
 			    rcomm_cmd->copies_sent);
 		}
-		//if (transition_io_failed) {
-		//	REPLICA_ERRLOG("didn't receive success from transition"
-		//	    " replica.. cmd:write io(%lu)\n", rcomm_cmd->io_seq);
-		//	rc = -1;
-		//}
 	}
 
 	return rc;
@@ -3501,17 +3477,6 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 
 #define	ADD_TIMESPEC(var, s, d)	\
 	(var) += (uint64_t)(d.tv_sec - s.tv_sec) * (uint64_t)SEC_IN_NS + d.tv_nsec - s.tv_nsec;
-
-static int
-get_new_cf(spec_t *spec) {
-	int rf = spec->replication_factor;
-	ASSERT(MTX_LOCKED(&spec->rq_mtx));
-
-	if (spec->transition_replica != NULL) {
-		return ((rf+1)/2) + 1;
-	}
-	return spec->consistency_factor;
-}
 
 int64_t
 replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t nbytes)
@@ -3530,7 +3495,6 @@ replicate(ISTGT_LU_DISK *spec, ISTGT_LU_CMD_Ptr cmd, uint64_t offset, uint64_t n
 	uint64_t inflight_read_ios = 0;
 	int count = 0 ;
 	bool replica_exists;
-	int new_cf, success_wcount = 0;
 
 	(void) cmd_read;
 	CHECK_IO_TYPE(cmd, cmd_read, cmd_write, cmd_sync);
@@ -3645,7 +3609,7 @@ retry_read:
 	while (1) {
 		timesdiff(CLOCK_MONOTONIC_RAW, queued_time, now, diff);
 		count = 0;
-		success_wcount = 0;
+		//success_wcount = 0;
 		copies_sent = rcomm_cmd->copies_sent + rcomm_cmd->non_quorum_copies_sent;
 
 		for (i = 0; i < copies_sent; i++) {
@@ -3677,18 +3641,6 @@ retry_read:
 				MTX_UNLOCK(&spec->rq_mtx);
 
 				count++;
-			}
-			if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) {
-				if (i < rcomm_cmd->copies_sent &&
-				    (rcomm_cmd->resp_list[i].status & RECEIVED_OK))
-					success_wcount++;
-				MTX_LOCK(&spec->rq_mtx);
-				if (i >= rcomm_cmd->copies_sent && spec->transition_replica != NULL &&
-				    rcomm_cmd->resp_list[i].replica == spec->transition_replica &&
-				    (rcomm_cmd->resp_list[i].status & RECEIVED_OK)) {
-					success_wcount++;
-				}
-				MTX_UNLOCK(&spec->rq_mtx);
 			}
 		}
 
@@ -3727,14 +3679,6 @@ retry_read:
 #endif
 
 			MTX_LOCK(&spec->rq_mtx);
-			new_cf = get_new_cf(spec);
-			if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE &&
-			    spec->transition_replica != NULL &&
-			    new_cf == spec->consistency_factor && success_wcount < new_cf) {
-				MTX_UNLOCK(&spec->rq_mtx);
-				rc = -1;
-				break;
-			}
 			TAILQ_REMOVE(&spec->rcommon_waitq, rcomm_cmd, wait_cmd_next);
 			UPDATE_INFLIGHT_SPEC_IO_CNT(spec, cmd, -1);
 			MTX_UNLOCK(&spec->rq_mtx);
