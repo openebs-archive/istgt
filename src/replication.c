@@ -924,57 +924,48 @@ update_trusty_replica_list(spec_t *spec, replica_t *rep) {
 	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 
 	replica_count = spec->healthy_rcount + spec->degraded_rcount;
-
-	// After returning success from this call we are updating
-	// spec->degraded_rcount So it is requierd to have a check
-	// whether current connected replica count is greater than or
-	// equal to replication factor.
-	if (replica_count >= spec->replication_factor) {
-		ISTGT_ERRLOG("trusty replica count %d is greater "
-		    "than or equal to replication factor %d\n",
-		    replica_count, spec->replication_factor);
-		return -1;
-	}
+	ASSERT(replica_count < spec->replication_factor);
 
 	BUILD_REPLICA_DATA(spec, rep, jobj);
-	json_string = json_object_to_json_string_ext(jobj, JSON_C_TO_STRING_PLAIN);
+	MTX_UNLOCK(&spec->rq_mtx);
 
+	json_string = json_object_to_json_string_ext(jobj, JSON_C_TO_STRING_PLAIN);
 	data_len = strlen(json_string);
 	data = xmalloc(data_len + 1);
 	memset(data, 0, data_len + 1);
 	strncpy(data, json_string, data_len);
 
 	rc = update_volume_config(data);
+	free(data);
+	json_object_put(jobj);
+
+	MTX_LOCK(&spec->rq_mtx);
 	if (rc < 0) {
 		ISTGT_ERRLOG("failed to update replica(%s:%lu) as trusty replica\n",
 		    rep->replica_id, rep->zvol_guid);
-		free(data);
-		json_object_put(jobj);
 		return rc;
 	}
 
-	(void) update_in_memory_trusty_replica_list(spec, rep);
-
-	free(data);
-	json_object_put(jobj);
+	rc = update_in_memory_trusty_replica_list(spec, rep);
 	return rc;
 }
 
-/* CHECK_IS_IT_TRUSTY_REPLICA returns true if replica_id and replica_zvol_guid
+/* check_is_it_trusty_replica returns true if replica_id and replica_zvol_guid
  * is matched with any of trusty replicas replica_id and replica_zvol_guid
  */
-#define CHECK_IS_IT_TRUSTY_REPLICA(_spec, _rep, val)					\
-	do {										\
-		val = false;								\
-		trusty_replica_t *trusty_replica;					\
-		TAILQ_FOREACH(trusty_replica, &_spec->lu->trusty_replicas, next){	\
-			if (strcmp(trusty_replica->replica_id, _rep->replica_id) == 0 &&\
-			    trusty_replica->zvol_guid == _rep->zvol_guid) {		\
-				val = true;						\
-				break;							\
-			}								\
-		}									\
-	}while(0)
+static bool
+check_is_it_trusty_replica(spec_t *spec, replica_t *rep) {
+	bool ret = false;
+	trusty_replica_t *trusty_replica;
+	TAILQ_FOREACH(trusty_replica, &_spec->lu->trusty_replicas, next){
+		if ((strcmp(trusty_replica->replica_id, rep->replica_id) == 0) &&
+		    (trusty_replica->zvol_guid == rep->zvol_guid)) {
+			ret = true;
+			break;
+		}
+	}
+	return ret;
+}
 
 /*
  * is_trusty_replica returns true whether the replica is trusty or not based
@@ -1006,14 +997,13 @@ is_trusty_replica(spec_t *spec, replica_t *new_replica)
 	}
 	// Check If replica is present in spec->lu->know_replica_list
 	// then return true else false
-	CHECK_IS_IT_TRUSTY_REPLICA(spec, new_replica, result);
-	return result;
+	return check_is_it_trusty_replica(spec, new_replica);
 }
 
 /* is_trusted_replicas_contain_replicaid returns true if replica_id is present
  * in trusty replica list else return false.
  */
-static int
+static bool
 is_trusted_replicas_contain_replicaid(spec_t *spec, char *replica_id) {
 	trusty_replica_t *trusty_replica;
 	TAILQ_FOREACH(trusty_replica, &spec->lu->trusty_replicas, next) {
@@ -1036,6 +1026,31 @@ get_non_quorum_replica_count(spec_t *spec)
 	TAILQ_FOREACH(replica, &spec->non_quorum_rq, r_non_quorum_next)
 		replica_count++;
 	return replica_count;
+}
+
+/*
+ * This will return true if given replica need to be updated to vol_mgmt
+ * as trusty one during replica connect phase
+ */
+static bool
+needs_trusty_replica_update_during_connect(spec_t *spec, replica_t *replica) {
+	/*
+	 * Update trusty replica if its count < RF and quorum on
+	 * and ID also doesn't exist in list yet
+	 * i.e., new volume or upgrade from 1.2 to 1.3
+	 */
+	trusty_replica_count = get_trusty_replica_count(spec);
+ 	if ((is_trusted_replicas_contain_replicaid(spec, replica->replica_id) == false) &&
+	    (trusty_replica_count < spec->replication_factor) &&
+            (replica->quorum == 1)) {
+		return true;
+	}
+
+	/*
+	 * nothing else
+	 * No need of updating for replica replacement or scaleup
+	 */
+	return false;
 }
 
 /*
@@ -1067,24 +1082,78 @@ can_replica_connect(spec_t *spec, replica_t *replica)
 	 * in non-quorum list and another use case in replica scale up scenarios.
 	 */
 	replica_count = spec->healthy_rcount + spec->degraded_rcount;
-	if (replica_count >= spec->desired_replication_factor) {
+	if ((replica_count >= spec->desired_replication_factor) ||
+	    ((replica_count + non_quorum_count) >= spec->desired_replication_factor)) {
 		REPLICA_ERRLOG("removing replica(%s:%d) since healthy: %d"
 		    " degraded: %d non_quorum: %d connected >= (%d)\n",
 		    replica->ip, replica->port, spec->healthy_rcount,
-		    spec->degraded_rcount, get_non_quorum_replica_count(spec),
+		    spec->degraded_rcount, non_quorum_count,
 		    spec->desired_replication_factor);
-		ret = false;
-	} else if (replica_count + non_quorum_count >=
-		    spec->desired_replication_factor) {
-		REPLICA_ERRLOG("removing replica(%s:%d) since healthy: %d"
-		    " degraded: %d non_quorum: %d connected >= (%d)\n",
-		    replica->ip, replica->port, spec->healthy_rcount,
-		    spec->degraded_rcount, get_non_quorum_replica_count(spec),
-		    spec->desired_replication_factor);
-		ret = false;
+		return false;
 	}
 
-	return ret;
+	/* known and trusty replica */
+ 	ret = check_is_it_trusty_replica(spec, replica);
+	if (ret == true)
+		return true;
+
+	/* replica replacement case */
+	ret = is_trusted_replicas_contain_replicaid(spec, replica->replica_id);
+	if (ret == true)
+		return true;
+
+	/*
+	 * Unknown replica and its ID (replica GUID may be known - but doesn't matter)
+	 * i.e., new volume case, or, upgrade from 1.2 to 1.3
+	 * or scaleup if RF < DRF
+	 */
+	/* Allow if trusty_count < RF */
+	trusty_replica_count = get_trusty_replica_count(spec);
+	if (trusty_replica_count < spec->replication_factor)
+		return true;
+
+	/*
+	 * Unknown replica and its ID
+	 * trusty count == RF
+	 * this can be scale up case if RF < DRF
+	 */
+	if (spec->replication_factor < spec->desired_replication_factor)
+		return true;
+
+	return false;
+}
+
+static bool
+can_be_trusty_replica(spec_t *spec, replica_t *replica)
+{
+	/* known and trusty replica */
+ 	ret = check_is_it_trusty_replica(spec, replica);
+	if (ret == true)
+		return true;
+
+	/* replica replacement case */
+	ret = is_trusted_replicas_contain_replicaid(spec, replica->replica_id);
+	if (ret == true)
+		return false;
+
+	/*
+	 * Unknown replica and its ID (replica GUID may be known - but doesn't matter)
+	 * i.e., new volume case, or, upgrade from 1.2 to 1.3
+	 * or scaleup if RF < DRF
+	 */
+	/* Allow if trusty_count < RF */
+	trusty_replica_count = get_trusty_replica_count(spec);
+	if (trusty_replica_count < spec->replication_factor) {
+		if (replica->quorum == 1)
+			return true;
+	}
+
+	/*
+	 * Unknown replica and its ID
+	 * trusty count == RF (or) quorum off
+	 * this can be scale up case if RF < DRF
+	 */
+	return false;
 }
 
 /*
@@ -1485,6 +1554,18 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 		goto replica_error;
 	}
 
+	needs_update = needs_trusty_replica_update_during_connect(spec, replica);
+	if (needs_update) {
+		rc = update_trusty_replica_list(spec, replica);
+		if (rc < 0) {
+			REPLICA_ERRLOG("Failed to update known trusty list... "
+			    "disconnecting new replica(ip:%s port:%d "
+			    "guid:%lu replica_id: %s)\n", replica->ip, replica->port,
+			    replica->zvol_guid, replica->replica_id);
+			MTX_UNLOCK(&spec->rq_mtx);
+			goto replica_error;
+		}
+	}
 	MTX_UNLOCK(&spec->rq_mtx);
 
 	rc = pthread_create(&r_thread, NULL, &replica_thread,
@@ -1550,50 +1631,28 @@ error_out_replica:
 		goto error_out_replica;
 	}
 
-	//TODO: Update variable name and function name
-	/* Here trusty_replica doesn't mean that it is exist in
-	 * trusty replica list. is_trusty_replica func  will
-	 * return true even if trusty replica count is less than RF
-	 */
-	trusty_replica = is_trusty_replica(spec, replica);
-
-	/* Below snippet is to update trusty replica list if replica is not present in
-	 * trusty replica list by making call to volume mgmt on succcess update inmemory
-	 * data structure.
-	 */
-	if (trusty_replica && !is_trusted_replicas_contain_replicaid(spec, replica->replica_id)) {
-		// update known replcia list
-		rc = update_trusty_replica_list(spec, replica);
-		if (rc < 0) {
-			REPLICA_ERRLOG("Failed to update known trusty list... "
-			    "disconnecting new replica(ip:%s port:%d "
-			    "guid:%lu replica_id: %s)\n", replica->ip, replica->port,
-			    replica->zvol_guid, replica->replica_id);
-			goto error_out_replica;
-		}
-	}
-
 	MTX_UNLOCK(&replica->r_mtx);
 
 	TAILQ_REMOVE(&spec->rwaitq, replica, r_waitnext);
 
-	/* If replica is trusty replica then allow replica to enter into spec->rq list
+	/*
+	 * If replica can be trusty replica then allow it into spec->rq list
 	 * else if replica is unknown replica (it might be due to scale up/ replica movement/
-	 * replica replace) then add them to spec->non_quorum_rq list (means data written
-	 * to it is lost)
+	 * replica replace) then add them to spec->non_quorum_rq list
 	 */
-	if (trusty_replica) {
+	can_be_trusty = can_be_trusty_replica(spec, replica);
+	if (can_be_trusty) {
 		TAILQ_INSERT_TAIL(&spec->rq, replica, r_next);
 		spec->degraded_rcount++;
 	} else {
 		/* Add unkown replica with quorum 1 as starting of list */
-		if (replica->quorum == 1) {
+		if (replica->quorum == 1)
 			TAILQ_INSERT_HEAD(&spec->non_quorum_rq, replica, r_non_quorum_next);
-		} else {
+		else
 			TAILQ_INSERT_TAIL(&spec->non_quorum_rq, replica, r_non_quorum_next);
-		}
 	}
 
+	//TODO: Add a log with these variables (needs_update, can_be_trusty)
 	/* Update the volume ready state */
 	update_volstate(spec);
 	MTX_UNLOCK(&spec->rq_mtx);
