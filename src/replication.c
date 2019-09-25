@@ -82,6 +82,8 @@ static int get_non_quorum_replica_count(spec_t *spec);
 		    spec->replication_factor;				\
 		rcomm_cmd->consistency_factor =				\
 		    spec->consistency_factor;				\
+		rcomm_cmd->scalingup_replica =				\
+		    spec->scalingup_replica;				\
 		rcomm_cmd->state = CMD_ENQUEUED_TO_WAITQ;		\
 		switch (cmd->cdb0) {					\
 			case SBC_WRITE_6:				\
@@ -419,6 +421,7 @@ send_prepare_for_rebuild_or_trigger_rebuild(spec_t *spec,
 	spec->rebuild_info.dw_replica = dw_replica;
 	spec->rebuild_info.healthy_replica = healthy_replica;
 	spec->rebuild_info.rebuild_in_progress = true;
+	spec->rebuild_info.transition_replica = NULL;
 	ASSERT(spec->rebuild_info.dw_replica);
 
 	replica_cnt = count_of_replicas_helping_rebuild(spec, healthy_replica);
@@ -440,6 +443,7 @@ send_prepare_for_rebuild_or_trigger_rebuild(spec_t *spec,
 		ret = start_rebuild(mgmt_data,
 		    spec->rebuild_info.dw_replica, sizeof (*mgmt_data));
 		if (ret == -1) {
+			spec->rebuild_info.transition_replica = NULL;
 			spec->rebuild_info.dw_replica = NULL;
 			spec->rebuild_info.healthy_replica = NULL;
 			spec->rebuild_info.rebuild_in_progress = false;
@@ -483,6 +487,7 @@ exit:
 	if (ret == -1) {
 		if (rcomm_mgmt->cmds_failed == rcomm_mgmt->cmds_sent) {
 			free_rcommon_mgmt_cmd(rcomm_mgmt);
+			spec->rebuild_info.transition_replica = NULL;
 			spec->rebuild_info.dw_replica = NULL;
 			spec->rebuild_info.healthy_replica = NULL;
 			spec->rebuild_info.rebuild_in_progress = false;
@@ -919,10 +924,11 @@ update_in_memory_trusty_replica_list(spec_t *spec, replica_t *replica) {
  * life time (even if it disconnected or connected back n times).
  * This should be called by holding spec->rq_mtx lock
  * This is done in following way
- * 1. Verify whether it is valid to update or not.
- * 2. Build replica details to make it persistent in etcd.
- * 3. Make call to cstor-volume-mgmt to update in etcd.
- * 4. On success update in memory data structures.
+ * 1. Build replica details to make it persistent in etcd.
+ * 2. Make call to cstor-volume-mgmt to update in etcd.
+ * 3. On success update in memory data structures.
+ * Note: This releases the spec's rq_mtx to send data to vol_mgmt.
+ * Caller should handle accordingly. Look for update_replica_status for ex
  * Returns:
  * = 0 - on sucess
  * < 0 - on failure
@@ -2379,6 +2385,7 @@ handle_start_rebuild_resp(spec_t *spec, zvol_io_hdr_t *hdr)
 		return;
 
 	MTX_LOCK(&spec->rq_mtx);
+	spec->rebuild_info.transition_replica = NULL;
 	spec->rebuild_info.dw_replica = NULL;
 	spec->rebuild_info.healthy_replica = NULL;
 	spec->rebuild_info.rebuild_in_progress = false;
@@ -2420,6 +2427,7 @@ handle_prepare_for_rebuild_resp(spec_t *spec, zvol_io_hdr_t *hdr,
 				REPLICA_LOG("Unable to start rebuild on Replica(%lu)"
 				    " state:%d\n", dw_replica->zvol_guid,
 				    dw_replica->state);
+				spec->rebuild_info.transition_replica = NULL;
 				spec->rebuild_info.dw_replica = NULL;
 				spec->rebuild_info.healthy_replica = NULL;
 				spec->rebuild_info.rebuild_in_progress = false;
@@ -2441,6 +2449,7 @@ handle_prepare_for_rebuild_resp(spec_t *spec, zvol_io_hdr_t *hdr,
 			    "state:%d\n",
 			    spec->rebuild_info.dw_replica->zvol_guid,
 			    spec->rebuild_info.dw_replica->state);
+		spec->rebuild_info.transition_replica = NULL;
 		spec->rebuild_info.dw_replica = NULL;
 		spec->rebuild_info.healthy_replica = NULL;
 		spec->rebuild_info.rebuild_in_progress = false;
@@ -2519,103 +2528,6 @@ wait_for_ongoing_ios_on_replica(spec_t *spec, replica_t *replica, int sec) {
 	}
 
 	return ret;
-}
-
-/*
- * Update_replication_factor updates the replication factor by one,
- * consistency factor accordingly (n/2 + 1) only if it is replica
- * scaleup scenario. If it is replica replacememt/movement scenario
- * just update trusty replica list with corresponding replica zvol GUID.
- * This operation must be performed by taking spec lock and pause IOs
- * until timeout or operation completes.
- * It is achieved by implementing following process
- * 1. Identify whether it is(scaleup/replica movement/replica recreation)
- *    verify whether it is valid to perform corresponding operation.
- * 2. Build data based on scenario and send it on wire regarding config updation.
- * 3. On success update in-memory data structures.
- */
-static int
-update_replication_factor(spec_t *spec, replica_t *replica) {
-	int trusty_replica_count, data_len;
-	char *data;
-	const char *json_string;
-	struct json_object *jobj;
-	int rf, cf, rc = -1;
-	bool old_replica;
-
-	ASSERT(MTX_LOCKED(&spec->rq_mtx));
-
-	trusty_replica_count = get_trusty_replica_count(spec);
-	old_replica = is_trusted_replicas_contain_replicaid(spec, replica->replica_id);
-
-	/* If is_trusted_replicas_contain_replicaid return true then it might be replica replace
-	 * or replica movement scenarios. If it return false then scenario might be
-	 * replica scaleup case so add this replica into trusty replica list. Current
-	 * trusty replica count should be less than desired replication factor to add
-	 * this replica as trusty replica.
-	 */
-	if (!old_replica && trusty_replica_count >= spec->desired_replication_factor) {
-		ISTGT_ERRLOG("failed to update replication/consistency factor "
-		    "trusty replica count %d is greater than or equal to "
-		    "desired replication factor %d\n",
-		    trusty_replica_count, spec->desired_replication_factor);
-		return rc;
-	}
-
-	ASSERT(spec->quiesce == 1);
-	MTX_LOCK(&replica->r_mtx);
-
-	/* Update RF, CF and trusty replica list*/
-	rf = spec->replication_factor + 1;
-	cf = (rf/2) + 1;
-
-	/* Build data required to send on wire*/
-	BUILD_REPLICA_DATA(spec, replica, jobj);
-	/* Update RF and CF only if it is not old replica*/
-	if (!old_replica) {
-		json_object_object_add(jobj, "replicationFactor",
-		    json_object_new_int(rf));
-		json_object_object_add(jobj, "consistencyFactor",
-		    json_object_new_int(cf));
-	}
-	json_string = json_object_to_json_string_ext(jobj, JSON_C_TO_STRING_PLAIN);
-
-	data_len = strlen(json_string);
-	data = xmalloc(data_len + 1);
-	memset(data, 0, data_len + 1);
-	strncpy(data, json_string, data_len);
-
-	ISTGT_LOG("updating replica(%s:%lu) to trusty replica list\n",
-	    replica->replica_id, replica->zvol_guid);
-	rc = update_volume_config(data);
-	if (rc < 0) {
-		MTX_UNLOCK(&replica->r_mtx);
-		ISTGT_ERRLOG("failed to update replica(%s:%lu) to trusty "
-		    "replica list\n", replica->replica_id, replica->zvol_guid);
-		free(data);
-		json_object_put(jobj);
-		return rc;
-	}
-
-	/* Update inmemory RF and CF */
-	if (!old_replica) {
-		ISTGT_LOG("Updated the replication_factor: from %d to %d "
-		    ",consistency_factor: from %d to %d and replica known list {%lu}\n",
-		    spec->replication_factor, rf, spec->consistency_factor,
-		    cf, replica->zvol_guid);
-		spec->replication_factor = rf;
-		spec->consistency_factor = cf;
-		spec->lu->replication_factor = rf;
-		spec->lu->consistency_factor = cf;
-	}
-	(void) update_in_memory_trusty_replica_list(spec, replica);
-	rc = 1;
-	MTX_UNLOCK(&replica->r_mtx);
-
-	free(data);
-	json_object_put(jobj);
-
-	return rc;
 }
 
 /*
@@ -3577,7 +3489,31 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 		}
 	} else if ((rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) ||
 		   (rcomm_cmd->opcode == ZVOL_OPCODE_SYNC)) {
-		if (healthy_response >= rcomm_cmd->consistency_factor) {
+		rf = rcomm_cmd->replication_factor;
+		copies_sent = rcomm_cmd->copies_sent;
+		if (rcomm_cmd->scalingup_replica) {
+			rf = rf + 1;
+			total_copies_sent = rcomm_cmd->copies_sent +
+			    rcomm_cmd->non_quorum_copies_sent;
+			for (i = 0; i < total_copies_sent; i++) {
+				if (rcomm_cmd->resp_list[i].replica == replica) {
+					if (rcomm_cmd->resp_list[i].status &
+					    RECEIVED_OK) {
+						healthy_response++;
+						success++;
+						healthy_replica++;
+						response_received++;
+					} else if (rcomm_cmd->resp_list[i].status
+					    & RECEIVED_ERR) {
+						response_received++;
+					}
+					copies_sent++;
+					break;
+				}
+			}
+		}
+		cf = (rf / 2) + 1;
+		if (healthy_response >= cf) {
 			/*
 			 * We got the successful response from required healthy
 			 * replicas.
@@ -3591,7 +3527,7 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 			 * with min_response.
 			 */
 			rc = 1;
-		} else if (response_received == rcomm_cmd->copies_sent) {
+		} else if (response_received == copies_sent) {
 			rc = -1;
 			REPLICA_ERRLOG("didn't receive success from replica.."
 			    " cmd:write io(%lu) cs(%d)\n", rcomm_cmd->io_seq,
