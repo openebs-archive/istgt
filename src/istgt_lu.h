@@ -352,11 +352,13 @@ typedef struct istgt_lu_t {
 } ISTGT_LU;
 typedef ISTGT_LU *ISTGT_LU_Ptr;
 
+#ifdef REPLICATION
 typedef struct trusty_replica_s {
 	char replica_id[REPLICA_ID_LEN];
 	uint64_t zvol_guid;
 	TAILQ_ENTRY(trusty_replica_s) next;
 } trusty_replica_t;
+#endif
 
 typedef enum {
 	ISTGT_TAG_UNTAGGED,

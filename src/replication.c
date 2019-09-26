@@ -1449,6 +1449,13 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	replica->zvol_guid = ack_data->zvol_guid;
 	strncpy(replica->replica_id, ack_data->replica_id, REPLICA_ID_LEN);
 
+	if (strlen(replica->replica_id) == 0) {
+		REPLICA_ERRLOG("replicas(ip:%s port:%d "
+		    "guid:%lu) replica_id is empty so not permitted to connect\n",
+		    replica->ip, replica->port,
+		    replica->zvol_guid);
+		goto replica_error;
+	}
 	MTX_LOCK(&spec->rq_mtx);
 	if (!is_replica_newly_connected(spec, replica)) {
 		MTX_UNLOCK(&spec->rq_mtx);
@@ -2727,7 +2734,7 @@ update_replica_status(spec_t *spec, zvol_io_hdr_t *hdr, replica_t *replica)
 				}
 
 				ISTGT_LOG("successfully transformed replica(%s:%lu) from "
-				    " unkown to trusty replication factor %d consistency "
+				    " unkown to trusty replica replication factor %d consistency "
 				    " factor %d desired replication factor %d\n",
 				    replica->replica_id, replica->zvol_guid,
 				    spec->replication_factor, spec->consistency_factor,
