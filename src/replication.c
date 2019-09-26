@@ -3478,6 +3478,7 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 	} else if ((rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) ||
 		   (rcomm_cmd->opcode == ZVOL_OPCODE_SYNC)) {
 		rf = rcomm_cmd->replication_factor;
+		cf = rcomm_cmd->consistency_factor;
 		copies_sent = rcomm_cmd->copies_sent;
 		/* If scaleup replica is not null and to meet new
 		 * consistency model
@@ -3503,8 +3504,9 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 					break;
 				}
 			}
+			cf = (rf / 2) + 1;
+			min_response = MAX_OF(rf - cf + 1, cf);
 		}
-		cf = (rf / 2) + 1;
 		if (healthy_response >= cf) {
 			/*
 			 * We got the successful response from required healthy
