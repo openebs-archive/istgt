@@ -253,8 +253,8 @@ do {									\
 /* PRINT_ALL_REPLICA_COUNT macro can be used only
  * when the spec->rq_mtx lock is available
  */
-#define PRINT_ALL_REPLICA_COUNT					\
-	REPLICA_NOTICELOG("Healthy count:(%d) Degraded count:(%d)"	\
+#define PRINT_ALL_REPLICA_COUNT						\
+	REPLICA_NOTICELOG("Healthy count:(%d) Degraded count:(%d) "	\
 		"Non-quorum-replica count:(%d)\n", spec->healthy_rcount,\
 		spec->degraded_rcount, 					\
 		get_non_quorum_replica_count(spec));			\
@@ -888,7 +888,6 @@ error_in_update:
 static int
 update_in_memory_trusty_replica_list(spec_t *spec, replica_t *replica) {
 	trusty_replica_t *trusty_replica;
-	int key_len;
 
 	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 
@@ -901,15 +900,7 @@ update_in_memory_trusty_replica_list(spec_t *spec, replica_t *replica) {
 
 	trusty_replica = xmalloc(sizeof (trusty_replica_t));
 	memset(trusty_replica, 0, sizeof(trusty_replica_t));
-	key_len = strlen(replica->replica_id);
-	trusty_replica->replica_id = xmalloc(key_len + 1);
-	if (trusty_replica->replica_id == NULL) {
-		ISTGT_ERRLOG("failed to allocate memory for known"
-		    " replicaId %s\n", replica->replica_id);
-		return -1;
-	}
-	memset(trusty_replica->replica_id, 0, key_len + 1);
-	strncpy(trusty_replica->replica_id, replica->replica_id, key_len);
+	strncpy(trusty_replica->replica_id, replica->replica_id, REPLICA_ID_LEN);
 	trusty_replica->zvol_guid = replica->zvol_guid;
 	TAILQ_INSERT_TAIL(&spec->lu->trusty_replicas, trusty_replica, next);
 	return 0;
@@ -929,14 +920,15 @@ update_in_memory_trusty_replica_list(spec_t *spec, replica_t *replica) {
 */
 static int
 update_trusty_replica_list(spec_t *spec, replica_t *rep, int rf) {
-	int replica_count, data_len, rc;
+	int data_len, rc;
 	char *data;
 	const char *json_string;
 	struct json_object *jobj;
+	int cf = (rf/2) + 1;
 
 	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 
-	BUILD_REPLICA_DATA(spec, rf, (rf/2) + 1, rep, jobj);
+	BUILD_REPLICA_DATA(spec, rf, cf, rep, jobj);
 	MTX_UNLOCK(&spec->rq_mtx);
 
 	json_string = json_object_to_json_string_ext(jobj, JSON_C_TO_STRING_PLAIN);
@@ -1424,7 +1416,7 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	zvol_io_hdr_t *ack_hdr;
 	mgmt_ack_t *ack_data;
 	zvol_op_open_data_t *rio_payload = NULL;
-	int i, replica_id_len;
+	int i;
 	bool needs_update, can_be_trusty;
 
 	ack_hdr = replica->mgmt_io_resp_hdr;	
@@ -1449,10 +1441,7 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 
 	replica->pool_guid = ack_data->pool_guid;
 	replica->zvol_guid = ack_data->zvol_guid;
-	replica_id_len = strlen(ack_data->replica_id);
-	replica->replica_id = xmalloc(replica_id_len + 1);
-	memset(replica->replica_id, 0, replica_id_len + 1);
-	strncpy(replica->replica_id, ack_data->replica_id, replica_id_len);
+	strncpy(replica->replica_id, ack_data->replica_id, REPLICA_ID_LEN);
 
 	MTX_LOCK(&spec->rq_mtx);
 	if (!is_replica_newly_connected(spec, replica)) {
@@ -1586,7 +1575,7 @@ replica_error:
 
 	if (replica->mgmt_eventfd2 == -1) {
 		REPLICA_ERRLOG("unable to set mgmteventfd2 for more than 10 "
-		    "seconds for replica(%lu)\n", replica->zvol_guid);
+		    "seconds for replica(%s:%lu)\n", replica->replica_id, replica->zvol_guid);
 		/*
 		 * as this function doesn't run in parallel with handle_mgmt_conn
 		 * for given replica, its fine to set these values to -1 here.
@@ -2470,7 +2459,7 @@ wait_for_ongoing_ios_on_replica(spec_t *spec, replica_t *replica, int sec) {
 
 		/*
 		 * Check on spec is required as these IOs as well
-		 * need to be pushed to replica before setting transition_replica
+		 * need to be pushed to replica before setting scaleup_replica
 		 * to replica.
 		 */
 		if (spec->inflight_write_io_cnt != 0 ||
@@ -2488,11 +2477,11 @@ wait_for_ongoing_ios_on_replica(spec_t *spec, replica_t *replica, int sec) {
 		MTX_UNLOCK(&spec->rq_mtx);
 
 		ISTGT_LOG("Waiting for IO's to flush on replica(%s:%lu) "
-		    "spec write_io_cnt: %d and sync_io_cnt: %d replica "
-		    "write_io_cnt: %d sync_io_cnt: %d\n",
+		    "spec write_io_cnt: %lu and sync_io_cnt: %lu replica "
+		    "write_io_cnt: %lu sync_io_cnt: %lu\n",
 	   	    replica->replica_id, replica->zvol_guid,
 		    spec->inflight_write_io_cnt, spec->inflight_sync_io_cnt,
-		    replica->inflight_write_io_cnt, replica->inflight_sync_io_cnt);
+		    replica->replica_inflight_write_io_cnt, replica->replica_inflight_sync_io_cnt);
 		/*
 		 * inflight write/sync IOs in spec, or in replica,
 		 * so, wait for some time
@@ -2505,6 +2494,65 @@ wait_for_ongoing_ios_on_replica(spec_t *spec, replica_t *replica, int sec) {
 	return ret;
 }
 
+//TODO: Need to restructure handle_scaleup_replica_transition and
+// handle_transition_from_unknown_to_known
+
+/* handle_scaleup_replica_transition should be called only when
+ * there is replica scaleup case
+ * Returns
+ * = 0 if success
+ * < 0 for caller to retry
+ */
+static int
+handle_scaleup_replica_transition(spec_t *spec, replica_t *replica)
+{
+	int rf, cf, rc;
+	int pause_io_wait_time = 10;
+	/*
+	 * Check if there is no change in CF wrt new RF, i.e., (RF + 1)
+	 */
+	rf = spec->replication_factor + 1;
+	cf = (rf/2) + 1;
+	if (spec->consistency_factor == cf)
+		rc = update_trusty_replica_list(spec, replica, rf);
+	else {
+
+		rc = 0;
+
+		/*
+		 * Wait for ongoing IOs if first time (or)
+		 * waiting in previous iteration was NOT successful.
+		 */
+
+		if (spec->scaleup_replica == NULL) {
+			/* Pause IO's */
+			spec->quiesce = 1;
+
+			rc = wait_for_ongoing_ios_on_replica(spec, replica, pause_io_wait_time);
+
+			/* set transition replica so that new consistency model as well gets applied */
+			if (rc == 0)
+				spec->scaleup_replica = replica;
+
+			/* Resume IOs */
+			spec->quiesce = 0;
+		}
+
+		/* Retry again */
+		if (rc != 0)
+			return rc;
+
+		rc = update_trusty_replica_list(spec, replica, rf);
+	}
+	if (rc == 0) {
+		spec->replication_factor = rf;
+		spec->consistency_factor = cf;
+		spec->lu->replication_factor = rf;
+		spec->lu->consistency_factor = cf;
+	}
+	return rc;
+}
+
 /*
  * Handles transition from unknown to known
  * Returns
@@ -2515,7 +2563,10 @@ wait_for_ongoing_ios_on_replica(spec_t *spec, replica_t *replica, int sec) {
 static int
 handle_transition_from_unknown_to_known(spec_t *spec, replica_t *replica)
 {
-	int trusty_replica_count = get_trusty_replica_count(spec);
+	int rf, trusty_replica_count;
+	bool is_known_replicaid;
+
+	trusty_replica_count = get_trusty_replica_count(spec);
 	is_known_replicaid = is_trusted_replicas_contain_replicaid(spec, replica->replica_id);
 	rf = spec->replication_factor;
 
@@ -2546,39 +2597,7 @@ handle_transition_from_unknown_to_known(spec_t *spec, replica_t *replica)
 	/*
 	 * Scaleup case
 	 */
-	/*
-	 * Check if there is no change in CF wrt new RF, i.e., (RF + 1)
-	 */
-	rf = spec->replication_factor + 1;
-	cf = (rf / 2) + 1;
-	if (spec->consistency_factor == cf)
-		return update_trusty_replica_list(spec, replica, rf);
-
-	rc = 0;
-
-	/*
-	 * Wait for ongoing IOs if first time (or)
-	 * waiting in previous iteration was NOT successful.
-	 */
-
-	if (spec->transition_replica == NULL) {
-		/* Pause IO's */
-		spec->quiesce = 1;
-
-		rc = wait_for_ongoing_ios_on_replica(spec, replica, pause_io_wait_time);
-
-		/* set transition replica so that new consistency model as well gets applied */
-		if (rc == 0)
-			spec->transition_replica = replica;
-
-		/* Resume IOs */
-		spec->quiesce = 0;
-	}
-
-	if (rc != 0)
-		return rc;
-
-	return update_trusty_replica_list(spec, replica, rf);
+	return handle_scaleup_replica_transition(spec, replica);
 }
 
 static int
@@ -2587,9 +2606,9 @@ update_replica_status(spec_t *spec, zvol_io_hdr_t *hdr, replica_t *replica)
 	zrepl_status_ack_t *repl_status;
 	replica_state_t last_state;
 	int found_in_list = 0;
-	int pause_io_wait_time = 20;
 	replica_t *r1;
-	int replica_count, rc;
+	int replica_count, ret;
+	bool is_replica_exist = false;
 
 	if ((hdr->status != ZVOL_OP_STATUS_OK) ||
 	    (hdr->len != sizeof (zrepl_status_ack_t))) {
@@ -2660,11 +2679,29 @@ update_replica_status(spec_t *spec, zvol_io_hdr_t *hdr, replica_t *replica)
 
 				ret = handle_transition_from_unknown_to_known(spec, replica);
 
+				/* Check whether replilca exist in the unknown list
+				 * there are chances that IO might failed on this replica
+				 * and removed it from unknown list
+				 */
+				TAILQ_FOREACH(r1, &spec->non_quorum_rq, r_non_quorum_next) {
+					if (r1 == replica) {
+						is_replica_exist = true;
+						break;
+					}
+				}
+				if (is_replica_exist == false) {
+					ISTGT_ERRLOG("successfully updated unkown replica(%s:%lu) "
+					    "but no longer exist in unknown list\n",
+					     replica->replica_id, replica->zvol_guid);
+					goto cleanup;
+				}
+
 				// retry
 				if (ret < 0) {
 					MTX_UNLOCK(&spec->rq_mtx);
 					ISTGT_ERRLOG("failed to transform replica(%s:%lu) from "
-					    "unknown to trusty\n");
+					    "unknown to trusty\n", replica->replica_id,
+					    replica->zvol_guid);
 					return 0;
 				}
 
@@ -2675,8 +2712,7 @@ update_replica_status(spec_t *spec, zvol_io_hdr_t *hdr, replica_t *replica)
 					    "replication factor %d replication factor %d\n",
 					    replica->replica_id, replica->zvol_guid,
 					    spec->desired_replication_factor,
-					    spec->replication_factor,
-					);
+					    spec->replication_factor);
 					inform_mgmt_conn(replica);
 					goto cleanup;
 				}
@@ -2689,7 +2725,6 @@ update_replica_status(spec_t *spec, zvol_io_hdr_t *hdr, replica_t *replica)
 				    spec->desired_replication_factor);
 				TAILQ_REMOVE(&spec->non_quorum_rq, replica, r_non_quorum_next);
 				TAILQ_INSERT_TAIL(&spec->rq, replica, r_next);
-				spec->transition_replica = NULL;
 			}
 			spec->healthy_rcount++;
 			MTX_LOCK(&replica->r_mtx);
@@ -2706,7 +2741,7 @@ disconnect_all_non_quorum_replicas:
 				DISCONNECT_NON_QUORUM_REPLICAS(spec);
 			}
 cleanup:
-			spec->transition_replica = NULL;
+			spec->scaleup_replica = NULL;
 			spec->rebuild_info.dw_replica = NULL;
 			spec->rebuild_info.healthy_replica = NULL;
 			spec->rebuild_info.rebuild_in_progress = false;
@@ -2723,7 +2758,7 @@ cleanup:
 		spec->rebuild_info.rebuild_in_progress = false;
 		spec->rebuild_info.dw_replica = NULL;
 		spec->rebuild_info.healthy_replica = NULL;
-		spec->transition_replica = NULL;
+		spec->scaleup_replica = NULL;
 	}
 
 	/*Trigger rebuild if possible */
@@ -3204,8 +3239,6 @@ free_replica(replica_t *r)
 
 	if (r->ip)
 		free(r->ip);
-	if (r->replica_id)
-		free(r->replica_id);
 	free(r);
 }
 
@@ -3370,7 +3403,7 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 {
 	int i, rc = 0;
 	uint8_t *data = NULL;
-	uint8_t success = 0, failure = 0, healthy_response = 0, response_received;
+	uint8_t success = 0, failure = 0, response_received;
 	int min_response;
 	int healthy_replica = 0;
 	int cf;
@@ -3380,8 +3413,6 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 	for (i = 0; i < rcomm_cmd->copies_sent; i++) {
 		if (rcomm_cmd->resp_list[i].status & RECEIVED_OK) {
 			success++;
-			if (rcomm_cmd->resp_list[i].status & SENT_TO_HEALTHY)
-				healthy_response++;
 		} else if (rcomm_cmd->resp_list[i].status & RECEIVED_ERR) {
 			failure++;
 		}
@@ -3391,22 +3422,8 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 
 	}
 
-	MTX_LOCK(&spec->rq_mtx);
-		// We will set transition_replica only when there is cf change
-		// due to scaleup scenario
-		if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE &&
-		    spec->transition_replica != NULL) {
-			i = rcomm_cmd->copies_sent;
-			for (; i < (i < rcomm_cmd->copies_sent +
-			    rcomm_cmd->non_quorum_copies_sent); i++) {
-				if (rcomm_cmd->resp_list[i].status & RECEIVED_OK)
-					success++;
-			}
-			cf = (rcomm_cmd->replication_factor + 1)/2;
-		}
-	MTX_UNLOCK(&spec->rq_mtx);
-
 	response_received = success + failure;
+	// Changing existence consistency model if replica is in transition mode
 	min_response = MAX_OF(rcomm_cmd->replication_factor -
 	    rcomm_cmd->consistency_factor + 1, cf);
 
@@ -3451,14 +3468,6 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 		}
 	} else if ((rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) ||
 		   (rcomm_cmd->opcode == ZVOL_OPCODE_SYNC)) {
-		//if (healthy_response >= rcomm_cmd->consistency_factor) {
-		//	/*
-		//	 * We got the successful response from required healthy
-		//	 * replicas.
-		//	 */
-		//	ASSERT(healthy_replica >= rcomm_cmd->consistency_factor);
-		//	rc = 1;
-		//} else
 		if (success >= min_response) {
 			/*
 			 * If we didn't get the required number of response
@@ -3813,7 +3822,7 @@ handle_mgmt_conn_error(replica_t *r, int sfd, struct epoll_event *events, int ev
 		REPLICA_ERRLOG("Replica(%lu) was under rebuild,"
 		    " seting master_replica to NULL\n",
 		    r->zvol_guid);
-		r->spec->transition_replica = NULL;
+		r->spec->scaleup_replica = NULL;
 		r->spec->rebuild_info.dw_replica = NULL;
 		r->spec->rebuild_info.healthy_replica = NULL;
 		r->spec->rebuild_info.rebuild_in_progress = false;
@@ -4118,7 +4127,7 @@ initialize_volume(spec_t *spec, int replication_factor, int consistency_factor, 
 	spec->ready = false;
 	spec->rebuild_info.dw_replica = NULL;
 	spec->rebuild_info.healthy_replica = NULL;
-	spec->transition_replica = NULL;
+	spec->scaleup_replica = NULL;
 
 	rc = pthread_mutex_init(&spec->rcommonq_mtx, NULL);
 	if (rc != 0) {

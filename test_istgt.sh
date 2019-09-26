@@ -845,12 +845,26 @@ run_non_quorum_replica_errored_test()
 	local replica2_vdev="/tmp/test_vol2"
 	local replica3_vdev="/tmp/test_vol3"
 	local device_name=""
+	local retry_count=5
 
 	DESIRED_REPLICATION_FACTOR=3
 	REPLICATION_FACTOR=3
 	CONSISTENCY_FACTOR=2
 
 	setup_test_env
+
+	##Wait for istgt to up
+	while [ $retry_count -gt 0 ]; do
+		value=$(netstat -nap | grep 6060 | grep -w LISTEN | wc -l)
+		if [ $value == "1" ]; then
+			break
+		fi
+		sleep 1
+		retry_count=$((retry_count - 1))
+		if [ $retry_count == 1 ]; then
+			exit 1
+		fi
+	done
 
 	## Below Test will connect 1 QUORUM REPLICA and 5 NON-QUORUM Replica
 	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev -q  &

@@ -308,7 +308,7 @@ handle_data_conn_error(replica_t *r)
 			}
 
 	if (r1 == NULL) {
-		REPLICA_ERRLOG("replica %s %d not part of rq and non_rq list..\n",
+		REPLICA_ERRLOG("replica(%s:%d) not part of rq and non_rq list..\n",
 		    r->ip, r->port);
 		MTX_LOCK(&r->r_mtx);
 		/*

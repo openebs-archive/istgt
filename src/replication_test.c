@@ -64,7 +64,7 @@ size_t mdlist_size = 0;
 uint64_t read_ios;
 uint64_t write_ios;
 int replica_quorum_state = 0;
-char replica_id[MAX_IP_LEN];
+char replica_id[REPLICA_ID_LEN];
 
 static void
 sig_handler(int sig)

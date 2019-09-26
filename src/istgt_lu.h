@@ -353,7 +353,7 @@ typedef struct istgt_lu_t {
 typedef ISTGT_LU *ISTGT_LU_Ptr;
 
 typedef struct trusty_replica_s {
-	char *replica_id;
+	char replica_id[REPLICA_ID_LEN];
 	uint64_t zvol_guid;
 	TAILQ_ENTRY(trusty_replica_s) next;
 } trusty_replica_t;
@@ -887,7 +887,10 @@ typedef struct istgt_lu_disk_t {
 		bool rebuild_in_progress;
 	} rebuild_info;
 
-	struct replica_s *transition_replica;
+	/* scaleup_replica will set during scaleup replica cases
+	 * when consistency changes
+	 */
+	struct replica_s *scaleup_replica;
 	/*Common for both the above queues,
 	Since same cmd is part of both the queues*/
 	pthread_mutex_t rq_mtx; 

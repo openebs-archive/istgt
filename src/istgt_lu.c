@@ -1466,7 +1466,6 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	int nbs;
 	int i, j, k;
 	int rc;
-	int len;
 	int gotstorage = 0;
 #ifdef REPLICATION
 	trusty_replica_t *trusty_replica;
@@ -1783,15 +1782,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 			trusty_replica = xmalloc(sizeof (trusty_replica_t));
 			memset(trusty_replica, 0, sizeof(trusty_replica_t));
 			val = istgt_get_nmval(sp, "Replica", i, 1);
-			len = strlen(key);
-			trusty_replica->replica_id = xmalloc(len + 1);
-			if (trusty_replica->replica_id == NULL) {
-				ISTGT_ERRLOG("failed to allocate memory"
-				    " for trusty replica %s\n", key);
-				goto error_return;
-			}
-			memset(trusty_replica->replica_id, 0, len + 1);
-			strncpy(trusty_replica->replica_id, key, len);
+			strncpy(trusty_replica->replica_id, key, REPLICA_ID_LEN);
 			trusty_replica->zvol_guid = (uint64_t) strtol(val, NULL, 10);
 			TAILQ_INSERT_TAIL(&lu->trusty_replicas, trusty_replica, next);
 			ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "trusty replica key {%s} and"
@@ -2383,7 +2374,6 @@ error_return:
 #ifdef REPLICATION
 	/* Releasing in memory details */
 	while (trusty_replica = TAILQ_FIRST(&lu->trusty_replicas)) {
-		xfree(trusty_replica->replica_id);
                 TAILQ_REMOVE(&lu->trusty_replicas, trusty_replica, next);
                 xfree(trusty_replica);
         }
