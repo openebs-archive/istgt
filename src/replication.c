@@ -82,6 +82,8 @@ static int get_non_quorum_replica_count(spec_t *spec);
 		    spec->replication_factor;				\
 		rcomm_cmd->consistency_factor =				\
 		    spec->consistency_factor;				\
+		rcomm_cmd->scalingup_replica =				\
+		    spec->scalingup_replica;				\
 		rcomm_cmd->state = CMD_ENQUEUED_TO_WAITQ;		\
 		switch (cmd->cdb0) {					\
 			case SBC_WRITE_6:				\
@@ -419,6 +421,7 @@ send_prepare_for_rebuild_or_trigger_rebuild(spec_t *spec,
 	spec->rebuild_info.dw_replica = dw_replica;
 	spec->rebuild_info.healthy_replica = healthy_replica;
 	spec->rebuild_info.rebuild_in_progress = true;
+	spec->scalingup_replica = NULL;
 	ASSERT(spec->rebuild_info.dw_replica);
 
 	replica_cnt = count_of_replicas_helping_rebuild(spec, healthy_replica);
@@ -443,6 +446,7 @@ send_prepare_for_rebuild_or_trigger_rebuild(spec_t *spec,
 			spec->rebuild_info.dw_replica = NULL;
 			spec->rebuild_info.healthy_replica = NULL;
 			spec->rebuild_info.rebuild_in_progress = false;
+			spec->scalingup_replica = NULL;
 		}
 		return ret;
 	}
@@ -483,6 +487,7 @@ exit:
 	if (ret == -1) {
 		if (rcomm_mgmt->cmds_failed == rcomm_mgmt->cmds_sent) {
 			free_rcommon_mgmt_cmd(rcomm_mgmt);
+			spec->scalingup_replica = NULL;
 			spec->rebuild_info.dw_replica = NULL;
 			spec->rebuild_info.healthy_replica = NULL;
 			spec->rebuild_info.rebuild_in_progress = false;
@@ -910,10 +915,11 @@ update_in_memory_trusty_replica_list(spec_t *spec, replica_t *replica) {
  * life time (even if it disconnected or connected back n times).
  * This should be called by holding spec->rq_mtx lock
  * This is done in following way
- * 1. Verify whether it is valid to update or not.
- * 2. Build replica details to make it persistent in etcd.
- * 3. Make call to cstor-volume-mgmt to update in etcd.
- * 4. On success update in memory data structures.
+ * 1. Build replica details to make it persistent in etcd.
+ * 2. Make call to cstor-volume-mgmt to update in etcd.
+ * 3. On success update in memory data structures.
+ * Note: This releases the spec's rq_mtx to send data to vol_mgmt.
+ * Caller should handle accordingly. Look for update_replica_status for ex
  * Returns:
  * = 0 - on sucess
  * < 0 - on failure
@@ -2348,6 +2354,7 @@ handle_start_rebuild_resp(spec_t *spec, zvol_io_hdr_t *hdr)
 		return;
 
 	MTX_LOCK(&spec->rq_mtx);
+	spec->scalingup_replica = NULL;
 	spec->rebuild_info.dw_replica = NULL;
 	spec->rebuild_info.healthy_replica = NULL;
 	spec->rebuild_info.rebuild_in_progress = false;
@@ -2382,13 +2389,14 @@ handle_prepare_for_rebuild_resp(spec_t *spec, zvol_io_hdr_t *hdr,
 			    rcomm_mgmt->buf_size);
 			rcomm_mgmt->buf = NULL;
 			if (ret == 0) {
-				REPLICA_LOG("Rebuild triggered on Replica(%lu) "
-				    "state:%d\n", dw_replica->zvol_guid,
+				REPLICA_LOG("Rebuild triggered on Replica(%s:%lu) "
+				    "state:%d\n", dw_replica->replica_id, dw_replica->zvol_guid,
 				    dw_replica->state);
 			} else {
-				REPLICA_LOG("Unable to start rebuild on Replica(%lu)"
-				    " state:%d\n", dw_replica->zvol_guid,
+				REPLICA_LOG("Unable to start rebuild on Replica(%s:%lu)"
+				    " state:%d\n", dw_replica->replica_id, dw_replica->zvol_guid,
 				    dw_replica->state);
+				spec->scalingup_replica = NULL;
 				spec->rebuild_info.dw_replica = NULL;
 				spec->rebuild_info.healthy_replica = NULL;
 				spec->rebuild_info.rebuild_in_progress = false;
@@ -2413,6 +2421,7 @@ handle_prepare_for_rebuild_resp(spec_t *spec, zvol_io_hdr_t *hdr,
 		spec->rebuild_info.dw_replica = NULL;
 		spec->rebuild_info.healthy_replica = NULL;
 		spec->rebuild_info.rebuild_in_progress = false;
+		spec->scalingup_replica = NULL;
 		MTX_UNLOCK(&spec->rq_mtx);
 	}
 }
@@ -2459,7 +2468,7 @@ wait_for_ongoing_ios_on_replica(spec_t *spec, replica_t *replica, int sec) {
 
 		/*
 		 * Check on spec is required as these IOs as well
-		 * need to be pushed to replica before setting scaleup_replica
+		 * need to be pushed to replica before setting scalingup_replica
 		 * to replica.
 		 */
 		if (spec->inflight_write_io_cnt != 0 ||
@@ -2524,7 +2533,7 @@ handle_scaleup_replica_transition(spec_t *spec, replica_t *replica)
 		 * waiting in previous iteration was NOT successful.
 		 */
 
-		if (spec->scaleup_replica == NULL) {
+		if (spec->scalingup_replica == NULL) {
 			/* Pause IO's */
 			spec->quiesce = 1;
 
@@ -2532,7 +2541,7 @@ handle_scaleup_replica_transition(spec_t *spec, replica_t *replica)
 
 			/* set transition replica so that new consistency model as well gets applied */
 			if (rc == 0)
-				spec->scaleup_replica = replica;
+				spec->scalingup_replica = replica;
 
 			/* Resume IOs */
 			spec->quiesce = 0;
@@ -2741,7 +2750,7 @@ disconnect_all_non_quorum_replicas:
 				DISCONNECT_NON_QUORUM_REPLICAS(spec);
 			}
 cleanup:
-			spec->scaleup_replica = NULL;
+			spec->scalingup_replica = NULL;
 			spec->rebuild_info.dw_replica = NULL;
 			spec->rebuild_info.healthy_replica = NULL;
 			spec->rebuild_info.rebuild_in_progress = false;
@@ -2758,7 +2767,7 @@ cleanup:
 		spec->rebuild_info.rebuild_in_progress = false;
 		spec->rebuild_info.dw_replica = NULL;
 		spec->rebuild_info.healthy_replica = NULL;
-		spec->scaleup_replica = NULL;
+		spec->scalingup_replica = NULL;
 	}
 
 	/*Trigger rebuild if possible */
@@ -3403,16 +3412,16 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 {
 	int i, rc = 0;
 	uint8_t *data = NULL;
-	uint8_t success = 0, failure = 0, response_received;
+	uint8_t success = 0, failure = 0, healthy_response = 0, response_received;
 	int min_response;
 	int healthy_replica = 0;
-	int cf;
-
-	cf = rcomm_cmd->consistency_factor;
+	int rf, cf, copies_sent, total_copies_sent;
 
 	for (i = 0; i < rcomm_cmd->copies_sent; i++) {
 		if (rcomm_cmd->resp_list[i].status & RECEIVED_OK) {
 			success++;
+			if (rcomm_cmd->resp_list[i].status & SENT_TO_HEALTHY)
+				healthy_response++;
 		} else if (rcomm_cmd->resp_list[i].status & RECEIVED_ERR) {
 			failure++;
 		}
@@ -3425,7 +3434,7 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 	response_received = success + failure;
 	// Changing existence consistency model if replica is in transition mode
 	min_response = MAX_OF(rcomm_cmd->replication_factor -
-	    rcomm_cmd->consistency_factor + 1, cf);
+	    rcomm_cmd->consistency_factor + 1, rcomm_cmd->consistency_factor);
 
 	rc = 0;
 	if (rcomm_cmd->opcode == ZVOL_OPCODE_READ) {
@@ -3468,14 +3477,49 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 		}
 	} else if ((rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) ||
 		   (rcomm_cmd->opcode == ZVOL_OPCODE_SYNC)) {
-		if (success >= min_response) {
+		rf = rcomm_cmd->replication_factor;
+		copies_sent = rcomm_cmd->copies_sent;
+		/* If scaleup replica is not null and to meet new
+		 * consistency model
+		 */
+		if (rcomm_cmd->scalingup_replica) {
+			rf = rf + 1;
+			total_copies_sent = rcomm_cmd->copies_sent +
+			    rcomm_cmd->non_quorum_copies_sent;
+			for (i = 0; i < total_copies_sent; i++) {
+				if (rcomm_cmd->resp_list[i].replica ==
+				    rcomm_cmd->scalingup_replica) {
+					if (rcomm_cmd->resp_list[i].status &
+					    RECEIVED_OK) {
+						healthy_response++;
+						success++;
+						healthy_replica++;
+						response_received++;
+					} else if (rcomm_cmd->resp_list[i].status
+					    & RECEIVED_ERR) {
+						response_received++;
+					}
+					copies_sent++;
+					break;
+				}
+			}
+		}
+		cf = (rf / 2) + 1;
+		if (healthy_response >= cf) {
+			/*
+			 * We got the successful response from required healthy
+			 * replicas.
+			 */
+			ASSERT(healthy_replica >= rcomm_cmd->consistency_factor);
+			rc = 1;
+		} else if (success >= min_response) {
 			/*
 			 * If we didn't get the required number of response
 			 * from healthy replica's but success response matches
 			 * with min_response.
 			 */
 			rc = 1;
-		} else if (response_received == rcomm_cmd->copies_sent) {
+		} else if (response_received == copies_sent) {
 			rc = -1;
 			REPLICA_ERRLOG("didn't receive success from replica.."
 			    " cmd:write io(%lu) cs(%d)\n", rcomm_cmd->io_seq,
@@ -3822,7 +3866,7 @@ handle_mgmt_conn_error(replica_t *r, int sfd, struct epoll_event *events, int ev
 		REPLICA_ERRLOG("Replica(%lu) was under rebuild,"
 		    " seting master_replica to NULL\n",
 		    r->zvol_guid);
-		r->spec->scaleup_replica = NULL;
+		r->spec->scalingup_replica = NULL;
 		r->spec->rebuild_info.dw_replica = NULL;
 		r->spec->rebuild_info.healthy_replica = NULL;
 		r->spec->rebuild_info.rebuild_in_progress = false;
@@ -4127,7 +4171,7 @@ initialize_volume(spec_t *spec, int replication_factor, int consistency_factor, 
 	spec->ready = false;
 	spec->rebuild_info.dw_replica = NULL;
 	spec->rebuild_info.healthy_replica = NULL;
-	spec->scaleup_replica = NULL;
+	spec->scalingup_replica = NULL;
 
 	rc = pthread_mutex_init(&spec->rcommonq_mtx, NULL);
 	if (rc != 0) {

@@ -887,10 +887,10 @@ typedef struct istgt_lu_disk_t {
 		bool rebuild_in_progress;
 	} rebuild_info;
 
-	/* scaleup_replica will set during scaleup replica cases
+	/* scalingup_replica will set during scaleup replica cases
 	 * when consistency changes
 	 */
-	struct replica_s *scaleup_replica;
+	struct replica_s *scalingup_replica;
 	/*Common for both the above queues,
 	Since same cmd is part of both the queues*/
 	pthread_mutex_t rq_mtx; 

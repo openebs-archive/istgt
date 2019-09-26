@@ -102,6 +102,7 @@ typedef struct rcommon_cmd_s {
 	int non_quorum_copies_sent;
 	uint8_t replication_factor;
 	uint8_t consistency_factor;
+	struct replica_s *scalingup_replica;
 	zvol_op_code_t opcode;
 	uint64_t io_seq;
 	uint64_t lun_id;
