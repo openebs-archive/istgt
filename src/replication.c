@@ -897,7 +897,8 @@ update_in_memory_trusty_replica_list(spec_t *spec, replica_t *replica) {
 	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 
 	TAILQ_FOREACH(trusty_replica, &spec->lu->trusty_replicas, next) {
-		if (strcmp(trusty_replica->replica_id, replica->replica_id) == 0) {
+		if (strncmp(trusty_replica->replica_id,
+		    replica->replica_id, REPLICA_ID_LEN) == 0) {
 			trusty_replica->zvol_guid = replica->zvol_guid;
 			return 0;
 		}
@@ -969,7 +970,7 @@ check_is_it_trusty_replica(spec_t *spec, replica_t *rep) {
 	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 	trusty_replica_t *trusty_replica;
 	TAILQ_FOREACH(trusty_replica, &spec->lu->trusty_replicas, next){
-		if ((strcmp(trusty_replica->replica_id, rep->replica_id) == 0) &&
+		if ((strncmp(trusty_replica->replica_id, rep->replica_id, REPLICA_ID_LEN) == 0) &&
 		    (trusty_replica->zvol_guid == rep->zvol_guid)) {
 			ret = true;
 			break;
@@ -985,7 +986,8 @@ static bool
 is_trusted_replicas_contain_replicaid(spec_t *spec, char *replica_id) {
 	trusty_replica_t *trusty_replica;
 	TAILQ_FOREACH(trusty_replica, &spec->lu->trusty_replicas, next) {
-		if (strcmp(trusty_replica->replica_id, replica_id) == 0) {
+		if (strncmp(trusty_replica->replica_id, replica_id,
+		    REPLICA_ID_LEN) == 0) {
 			return true;
 		}
 	}
@@ -1085,7 +1087,7 @@ can_replica_connect(spec_t *spec, replica_t *replica)
 		return true;
 
 	/*
-	 * Unknown replica and its ID (replica ID may be known - but doesn't matter)
+	 * Unknown replica and its ID (replica GUID may be known - but doesn't matter)
 	 * i.e., new volume case, or, upgrade from 1.2 to 1.3
 	 * or scaleup if RF < DRF
 	 */
@@ -1123,7 +1125,7 @@ can_be_trusty_replica(spec_t *spec, replica_t *replica)
 		return false;
 
 	/*
-	 * Unknown replica and its ID (replica ID may be known - but doesn't matter)
+	 * Unknown replica and its ID (replica GUID may be known - but doesn't matter)
 	 * i.e., new volume case, or, upgrade from 1.2 to 1.3
 	 * or scaleup if RF < DRF
 	 */
@@ -2487,6 +2489,8 @@ wait_for_ongoing_ios_on_replica(spec_t *spec, replica_t *replica, int sec) {
 		}
 		if (!io_found) {
 			ret = 0;
+			ISTGT_LOG("Successfully flushed the IO's from replica(%s:%lu) queue",
+			    replica->replica_id, replica->zvol_guid);
 			break;
 		}
 
@@ -2640,14 +2644,11 @@ update_replica_status(spec_t *spec, zvol_io_hdr_t *hdr, replica_t *replica)
 
 	MTX_LOCK(&spec->rq_mtx);
 
-	/* No need of taking lock since we are reading replica->state
-	 * and replica->state is update only when state changed and
-	 * connected time
+	/* No need of taking replica lock since reading replica->state
+	 * and replica->state get updated in this function and during
+	 * it's connection time which is happening in same thread
 	 */
-	MTX_LOCK(&replica->r_mtx);
 	last_state = replica->state;
-	//replica->state = (replica_state_t) repl_status->state;
-	MTX_UNLOCK(&replica->r_mtx);
 
 	if(last_state != repl_status->state) {
 		REPLICA_NOTICELOG("Replica(%lu) (%s:%d) mgmt_fd:%d state "
@@ -2695,7 +2696,7 @@ update_replica_status(spec_t *spec, zvol_io_hdr_t *hdr, replica_t *replica)
 
 				ret = handle_transition_from_unknown_to_known(spec, replica);
 
-				/* Check whether replilca exist in the unknown list
+				/* Check whether replica exist in the unknown list
 				 * there are chances that IO might failed on this replica
 				 * and removed it from unknown list
 				 */
@@ -2715,7 +2716,7 @@ update_replica_status(spec_t *spec, zvol_io_hdr_t *hdr, replica_t *replica)
 				// retry
 				if (ret < 0) {
 					MTX_UNLOCK(&spec->rq_mtx);
-					ISTGT_ERRLOG("failed to transform replica(%s:%lu) from "
+					ISTGT_ERRLOG("will retry again to transform replica(%s:%lu) from "
 					    "unknown to trusty\n", replica->replica_id,
 					    replica->zvol_guid);
 					return 0;
@@ -3712,10 +3713,6 @@ retry_read:
 			goto wait_for_other_responses;
 
 		// check for status of rcomm_cmd
-		/* TODO: Is it good to take lock here or inside
-		 *	check_for_command_completion since we are
-		 *	spec related info inside that function.
-		 */
 		rc = check_for_command_completion(spec, rcomm_cmd, cmd);
 		if (rc) {
 			if (rc == 1) {
