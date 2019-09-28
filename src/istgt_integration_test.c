@@ -239,10 +239,10 @@ static void
 handle_replica_start_rebuild(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 {
 	zvol_io_hdr_t *hdr = &(zio_cmd->hdr);
-	mgmt_ack_t *mgmt_ack_data = (mgmt_ack_t *)zio_cmd->buf;
+	rebuild_req_t *rebuild_req = (rebuild_req_t *)zio_cmd->buf;
 
 	/* Mark rebuild is in progress */
-	if ((strcmp(mgmt_ack_data->volname, "")) == 0) {
+	if ((strcmp(rebuild_req->volname, "")) == 0) {
 		rargs->zrepl_status = ZVOL_STATUS_HEALTHY;
 		rargs->zrepl_rebuild_status = ZVOL_REBUILDING_DONE;
 	} else {

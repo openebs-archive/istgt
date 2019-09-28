@@ -412,7 +412,7 @@ send_prepare_for_rebuild_or_trigger_rebuild(spec_t *spec,
 	int replica_cnt;
 	uint64_t size;
 	uint64_t data_len;
-	mgmt_ack_t *mgmt_data;
+	rebuild_req_t *rebuild_req;
 	replica_t *replica;
 	struct rcommon_mgmt_cmd *rcomm_mgmt;
 
@@ -436,12 +436,12 @@ send_prepare_for_rebuild_or_trigger_rebuild(spec_t *spec,
 		assert(spec->ready == true);
 
 		data_len = strlen(spec->volname) + 1;
-		mgmt_data = (mgmt_ack_t *)malloc(sizeof (*mgmt_data));
-		memset(mgmt_data, 0, sizeof (*mgmt_data));
-		snprintf(mgmt_data->dw_volname, data_len, "%s",
+		rebuild_req = (rebuild_req_t *)malloc(sizeof (*rebuild_req));
+		memset(rebuild_req, 0, sizeof (*rebuild_req));
+		snprintf(rebuild_req->dw_volname, data_len, "%s",
 		    spec->volname);
-		ret = start_rebuild(mgmt_data,
-		    spec->rebuild_info.dw_replica, sizeof (*mgmt_data));
+		ret = start_rebuild(rebuild_req,
+		    spec->rebuild_info.dw_replica, sizeof (*rebuild_req));
 		if (ret == -1) {
 			spec->rebuild_info.dw_replica = NULL;
 			spec->rebuild_info.healthy_replica = NULL;
@@ -2378,7 +2378,7 @@ handle_prepare_for_rebuild_resp(spec_t *spec, zvol_io_hdr_t *hdr,
 	int ret = 0;
 	size_t data_len;
 	rcommon_mgmt_cmd_t *rcomm_mgmt = mgmt_cmd->rcomm_mgmt;
-	mgmt_ack_t *buf = (mgmt_ack_t *)rcomm_mgmt->buf;
+	rebuild_req_t *buf = (rebuild_req_t *)rcomm_mgmt->buf;
 	
 	if (hdr->status != ZVOL_OP_STATUS_OK) {
 		rcomm_mgmt->cmds_failed++;
