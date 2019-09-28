@@ -480,6 +480,8 @@ main(int argc, char **argv)
 	int delay_connection = 0;
 	bool retry = false;
 
+	memset(replica_id, 0, REPLICA_ID_LEN);
+
 	while ((ch = getopt(argc, argv, "i:p:I:P:V:n:e:s:t:drq")) != -1) {
 		switch (ch) {
 			case 'i':
@@ -495,7 +497,7 @@ main(int argc, char **argv)
 				check |= 1 << 3;
 				break;
 			case 'P':
-				strncpy(replica_id, optarg, sizeof(replica_id));
+				strcpy(replica_id, optarg);
 				replica_port = atoi(optarg);
 				check |= 1 << 4;
 				break;

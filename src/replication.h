@@ -52,6 +52,8 @@
 
 #define	MAX_OF(a, b) (((a) > (b))?(a):(b))
 
+#define CONSISTENCY_FACTOR(a) (((a)/2) + 1)
+
 typedef enum zvol_cmd_type_e {
 	CMD_IO = 1,
 	CND_MGMT,

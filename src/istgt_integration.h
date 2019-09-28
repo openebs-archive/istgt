@@ -75,7 +75,8 @@ typedef struct replica_s {
 	char *ip;
 	uint64_t pool_guid;
 	uint64_t zvol_guid;
-	char replica_id[REPLICA_ID_LEN]; //UID to identify replica
+	/* extra byte for printing and strlen functions */
+	char replica_id[REPLICA_ID_LEN + 1]; //UID to identify replica
 
 	/* payload for current IO response for a replica */
 	void *ongoing_io_buf;

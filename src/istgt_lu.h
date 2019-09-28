@@ -354,7 +354,7 @@ typedef ISTGT_LU *ISTGT_LU_Ptr;
 
 #ifdef REPLICATION
 typedef struct trusty_replica_s {
-	char replica_id[REPLICA_ID_LEN];
+	char replica_id[REPLICA_ID_LEN + 1];
 	uint64_t zvol_guid;
 	TAILQ_ENTRY(trusty_replica_s) next;
 } trusty_replica_t;

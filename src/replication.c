@@ -2375,10 +2375,12 @@ handle_prepare_for_rebuild_resp(spec_t *spec, zvol_io_hdr_t *hdr,
     mgmt_ack_t *ack_data, mgmt_cmd_t *mgmt_cmd)
 {
 
-	int ret = 0;
+	int ret = 0, i;
 	size_t data_len;
 	rcommon_mgmt_cmd_t *rcomm_mgmt = mgmt_cmd->rcomm_mgmt;
-	rebuild_req_t *buf = (rebuild_req_t *)rcomm_mgmt->buf;
+	mgmt_ack_t *buf = (mgmt_ack_t *)rcomm_mgmt->buf;
+	rebuild_req_t *rebuild_req_buf;
+	int success_cnt;
 	
 	if (hdr->status != ZVOL_OP_STATUS_OK) {
 		rcomm_mgmt->cmds_failed++;
@@ -2394,9 +2396,19 @@ handle_prepare_for_rebuild_resp(spec_t *spec, zvol_io_hdr_t *hdr,
 		MTX_LOCK(&spec->rq_mtx);
 		replica_t *dw_replica = spec->rebuild_info.dw_replica;
 		if (dw_replica) {
-			ret = start_rebuild(buf, dw_replica,
-			    rcomm_mgmt->buf_size);
-			rcomm_mgmt->buf = NULL;
+			success_cnt = rcomm_mgmt->cmds_succeeded;
+			/* ZVOL_OPCODE_PREPARE_FOR_REBUILD receives mgmt_ack_t data
+			 * ZVOL_OPCODE_PREPARE_FOR_REBUILD will send rebuild_req_t.
+			 * Below snippet will handle this conversion
+			 */
+			rebuild_req_buf = xmalloc(sizeof(
+			    rebuild_req_t) * success_cnt);
+			for (i=0; i < success_cnt; i++) {
+				memcpy(&rebuild_req_buf[i], &buf[i],
+				    sizeof(rebuild_req_t));
+			}
+			ret = start_rebuild(rebuild_req_buf, dw_replica,
+			    sizeof(rebuild_req_t) * success_cnt);
 			if (ret == 0) {
 				REPLICA_LOG("Rebuild triggered on Replica(%s:%lu) "
 				    "state:%d\n", dw_replica->replica_id, dw_replica->zvol_guid,
@@ -2532,7 +2544,7 @@ handle_scaleup_replica_transition(spec_t *spec, replica_t *replica)
 	 * Check if there is no change in CF wrt new RF, i.e., (RF + 1)
 	 */
 	rf = spec->replication_factor + 1;
-	cf = (rf/2) + 1;
+	cf = CONSISTENCY_FACTOR(rf);
 	if (spec->consistency_factor == cf)
 		rc = update_trusty_replica_list(spec, replica, rf);
 	else {
@@ -3512,7 +3524,7 @@ check_for_command_completion(spec_t *spec, rcommon_cmd_t *rcomm_cmd, ISTGT_LU_CM
 					break;
 				}
 			}
-			cf = (rf / 2) + 1;
+			cf = CONSISTENCY_FACTOR(rf);
 			min_response = MAX_OF(rf - cf + 1, cf);
 		}
 		if (healthy_response >= cf) {

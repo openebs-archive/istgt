@@ -1769,11 +1769,15 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 		goto error_return;
 	}
 	/* Read trusty replica details from conf file and maintain in memory structure*/
+	/* Replica configuration in istgt conf file looks like
+	 * Replica 6061 6061
+	 * Replica 6062 6062
+	 * Replica 6063 6063
+	 */
 	val = istgt_get_val(sp, "Replica");
-	if (val == NULL) {
-		TAILQ_INIT(&lu->trusty_replicas);
-	} else {
-		TAILQ_INIT(&lu->trusty_replicas);
+	i = 0;
+	TAILQ_INIT(&lu->trusty_replicas);
+	if (val != NULL) {
 		for (i=0; ; i++) {
 			key = istgt_get_nmval(sp, "Replica", i, 0);
 			if (key == NULL) {
