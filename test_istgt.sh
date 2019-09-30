@@ -509,6 +509,7 @@ run_lu_rf_test ()
   ReadOnly No
   ReplicationFactor 3
   ConsistencyFactor 2
+  DesiredReplicationFactor 3
   UnitType Disk
   UnitOnline Yes
   BlockLength 512
@@ -538,6 +539,8 @@ run_lu_rf_test ()
 	sleep 5
 
 	pkill -9 -P $replica3_pid
+	## Below will be allowed to connect as unkown replica but it will never become healthy
+	## since we are storing RF number replica details in memory
 	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$(($replica3_port + 10))" -V $replica3_vdev -q &
 	replica3_pid=$!
         sleep 5
@@ -545,9 +548,25 @@ run_lu_rf_test ()
 	## Checking whether process exist or not
 	if ps -p $replica3_pid > /dev/null 2>&1
 	then
-		echo "Replica identification test passed"
-	else
 		echo "Replica identification test failed"
+		cat $LOGFILE
+		exit 1
+	else
+		echo "Replica identification test passed"
+	fi
+
+	## Check whether old replica i.e(6163) allowed to connect or not
+	## since 6173 is new replica it will be addded as part of unknown
+	## quorum list since 6163 is in known list we should allow it to connect
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V $replica3_vdev -q &
+	old_replica3_pid=$!
+	sleep 3
+	## checking whether process exist or not
+	if ps -p $old_replica3_pid > /dev/null 2>&1
+	then
+		echo "Trusty Replica identification test passed"
+	else
+		echo "Trusty Replica identification test failed"
 		cat $LOGFILE
 		exit 1
 	fi
@@ -558,11 +577,11 @@ run_lu_rf_test ()
 
 	if ps -p $replica4_pid > /dev/null 2>&1
 	then
-		echo "Non-quorum-replica connection test failed(3 quorum + 1 non-quorum)"
+		echo "Unknown replica connection test failed(3 quorum + 1 non-quorum)"
 		cat $LOGFILE
 		exit 1
 	else
-		echo "Non-quorum-replica connection test passed(3 quorum + 1 non-quorum)"
+		echo "Unknown replica connection test passed(3 quorum + 1 non-quorum)"
 	fi
 
 	pkill -9 -P $replica1_pid
@@ -614,7 +633,7 @@ wait_for_healthy_replicas()
 check_degraded_quorum()
 {
 	local expected_degraded_count=$1
-	local expected_quorum_count=$2
+	local expected_non_quorum_count=$2
 	local cnt=0
 
 	## Check the no.of degraded replicas
@@ -631,7 +650,7 @@ check_degraded_quorum()
 	cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[].quorum'"
 	cnt=$(eval $cmd | grep -w 0 | wc -l)
 
-	if [ $cnt -ne $expected_quorum_count ]
+	if [ $cnt -ne $expected_non_quorum_count ]
 	then
 		echo "Quorum test failed: expected quorum count is $expected_quorum_count and got $cnt"
 		exit 1
@@ -657,6 +676,7 @@ run_quorum_test()
 	local replica6_ip="127.0.0.1"
 	local replica1_vdev="/tmp/test_vol1"
 
+	DESIRED_REPLICATION_FACTOR=3
 	REPLICATION_FACTOR=3
 	CONSISTENCY_FACTOR=2
 
@@ -677,6 +697,33 @@ run_quorum_test()
 	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V $replica1_vdev &
 	replica3_pid=$!
 	sleep 2
+
+	# As long as we are not running any IOs we can use the same vdev file
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica4_ip" -P "$replica4_port" -V $replica1_vdev &
+	replica4_pid=$!
+	sleep 3
+
+	if ps -p $replica4_pid > /dev/null 2>&1
+	then
+		echo "Non-quorum-replica connection test failed desired replication factor: $DESIRED_REPLICATION_FACTOR"
+		cat $LOGFILE
+		exit 1
+	fi
+
+	## Increasing desired replication factor
+	istgtcontrol drf vol3 5
+	rc=$?
+	if [ $rc == 0 ]; then
+		echo "Updated the desired replication factor using istgtcontrol with invalid volume vol1 returns success"
+		exit 1
+	fi
+
+	istgtcontrol drf vol1 5
+	rc=$?
+	if [ $rc != 0 ]; then
+		echo "Failed to update desired replication factor"
+		exit 1
+	fi
 
 	# As long as we are not running any IOs we can use the same vdev file
 	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica4_ip" -P "$replica4_port" -V $replica1_vdev &
@@ -730,7 +777,7 @@ run_quorum_test()
 	fi
 
 	# Pass the expected healthy replica count
-	wait_for_healthy_replicas 3
+	wait_for_healthy_replicas 5
 
 	pkill -9 -P $replica1_pid
 	pkill -9 -P $replica2_pid
@@ -741,6 +788,11 @@ run_quorum_test()
 	rm -rf ${replica1_vdev::-1}*
 }
 
+## check_order_of_rebuilding make sure that rebuilding
+## on quorum replicas should be done and later it should
+## be done on unkown replicas
+## $1 -- no.of replicas connected
+## $2 -- no.of unkown or non quorum replicas
 check_order_of_rebuilding()
 {
 
@@ -748,9 +800,10 @@ check_order_of_rebuilding()
 	local cmd1=""
 	local cmd2=""
 	local done_status=0
+	local no_of_replicas=$1
 	while [ 1 ]; do
 		cnt=0
-		for (( i = 0; i < 3; i++ )) do
+		for (( i = 0; i < $no_of_replicas; i++ )) do
 			cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"["$i"].Mode'"
 			rt=$(eval $cmd)
 			if [ ${rt} == "\"Healthy\"" ]; then
@@ -792,11 +845,26 @@ run_non_quorum_replica_errored_test()
 	local replica2_vdev="/tmp/test_vol2"
 	local replica3_vdev="/tmp/test_vol3"
 	local device_name=""
+	local retry_count=5
 
+	DESIRED_REPLICATION_FACTOR=3
 	REPLICATION_FACTOR=3
 	CONSISTENCY_FACTOR=2
 
 	setup_test_env
+
+	##Wait for istgt to up
+	while [ $retry_count -gt 0 ]; do
+		value=$(netstat -nap | grep 6060 | grep -w LISTEN | wc -l)
+		if [ $value == "1" ]; then
+			break
+		fi
+		sleep 1
+		retry_count=$((retry_count - 1))
+		if [ $retry_count == 1 ]; then
+			exit 1
+		fi
+	done
 
 	## Below Test will connect 1 QUORUM REPLICA and 5 NON-QUORUM Replica
 	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev -q  &
@@ -949,25 +1017,28 @@ verify_resize_command()
 	sleep 2
 }
 
-data_integrity_with_non_quorum()
+data_integrity_with_unknown_replica()
 {
 	local device_name=""
 	local replica1_port="6161"
 	local replica2_port="6162"
 	local replica3_port="6163"
+	local replica4_port="6164"
 	local replica1_ip="127.0.0.1"
 	local replica2_ip="127.0.0.1"
 	local replica3_ip="127.0.0.1"
+	local replica4_ip="127.0.0.1"
 	local replica1_vdev="/tmp/test_vol1"
 	local replica2_vdev="/tmp/test_vol2"
 	local replica3_vdev="/tmp/test_vol3"
+	local replica4_vdev="/tmp/test_vol4"
 
+	DESIRED_REPLICATION_FACTOR=3
 	REPLICATION_FACTOR=3
 	CONSISTENCY_FACTOR=2
 
-	setup_test_env
+	setup_test_env $replica4_vdev
 
-	## Below Test will connect 1 QUORUM REPLICA and 5 NON-QUORUM Replica
 	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev -q &
 	replica1_pid=$!
 	sleep 2	#Replica will take some time to make successful connection to target
@@ -980,10 +1051,21 @@ data_integrity_with_non_quorum()
 	replica2_pid=$!
 	sleep 2
 
+	## Verify data integrity in scaleup case
+	istgtcontrol drf vol1 4
+	rc=$?
+	if [ $rc != 0 ]; then
+		echo "Failed to update desired replication factor to 4"
+		exit 1
+	fi
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica4_ip" -P "$replica4_port" -V $replica4_vdev &
+	replica4_pid=$!
+	sleep 2
+
+
 	login_to_volume "$CONTROLLER_IP:3260"
 	sleep 10
 	device_name=$(get_scsi_disk)
-
 
 
 	## Cross check non-quorum replica shuould be in degraded state
@@ -998,21 +1080,28 @@ data_integrity_with_non_quorum()
 	fi
 
 	if [ "$device_name" != "" ]; then
-		sudo dd if=/dev/urandom of=$device_name bs=4k count=1000 oflag=direct
+		sudo dd if=/dev/urandom of=/dev/$device_name bs=4k count=1000 oflag=direct
                 var1="$($ISTGTCONTROL -q iostats | jq '.TotalWriteBytes')"
 		sleep 5
 
 		hash1=$(md5sum $replica1_vdev | awk '{print $1}')
 		hash2=$(md5sum $replica3_vdev | awk '{print $1}')
+		hash3=$(md5sum $replica4_vdev | awk '{print $1}')
 		if [ $hash1 == $hash2 ]; then echo "DI Test: PASSED"
 		else
 			echo "DI Test: FAILED Hash of quorum is $hash1 and non-quorum is $hash2 with writebytes $var1";
 			tail -20 $LOGFILE
 			exit 1
 		fi
+		if [ $hash1 == $hash3 ]; then echo "DI Test: PASSED on scale up replica"
+		else
+			echo "DI Test: FAILED Hash of known replica is $hash1 and unknown replica is $hash2 with writebytes $var1";
+			tail -20 $LOGFILE
+			exit 1
+		fi
 	fi
 
-	check_order_of_rebuilding
+	check_order_of_rebuilding 4
 
 	## Checking the read IO's with quorum and non-quorum replicas
 	sudo dd if=$device_name of=/dev/null bs=4k count=100
@@ -1034,17 +1123,18 @@ data_integrity_with_non_quorum()
 	date_log=$(eval date +%Y-%m-%d/%H:%M:%S.%s)
 
 	$ISTGTCONTROL -q replica | jq
-	wait_for_healthy_replicas 3
+	wait_for_healthy_replicas 4
 
 	logout_of_volume
 	pkill -9 -P $replica1_pid
 	pkill -9 -P $replica2_pid
 	pkill -9 -P $replica3_pid
+	pkill -9 -P $replica4_pid
 	stop_istgt
 	rm -f /tmp/check_sum*
 	rm -rf ${replica1_vdev::-1}*
-
 }
+
 run_rebuild_time_test_in_single_replica()
 {
 	local replica1_port="6161"
@@ -1053,6 +1143,7 @@ run_rebuild_time_test_in_single_replica()
 	local ret=0
 
 	echo "run rebuild time test in single replica"
+	DESIRED_REPLICATION_FACTOR=1
 	REPLICATION_FACTOR=1
 	CONSISTENCY_FACTOR=1
 	setup_test_env
@@ -1132,6 +1223,7 @@ run_rebuild_time_test_in_multiple_replicas()
 	local done_test=0
 
 	echo "run rebuild time test in multiple replica, param1: $1"
+	DESIRED_REPLICATION_FACTOR=3
 	REPLICATION_FACTOR=3
 	CONSISTENCY_FACTOR=2
 	setup_test_env
@@ -1300,6 +1392,7 @@ run_replication_factor_test()
 
 	export non_zero_inflight_replica_cnt=0
 	sleep 1
+	DESIRED_REPLICATION_FACTOR=3
 	REPLICATION_FACTOR=3
 	CONSISTENCY_FACTOR=2
 
@@ -1474,7 +1567,7 @@ run_io_timeout_test()
 
 run_lu_rf_test
 run_quorum_test
-data_integrity_with_non_quorum
+data_integrity_with_unknown_replica
 run_non_quorum_replica_errored_test
 run_data_integrity_test
 run_mempool_test

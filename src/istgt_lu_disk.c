@@ -1067,7 +1067,8 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 		}
 		istgt_queue_init(&spec->blocked_queue);
 #ifdef REPLICATION
-		rc = initialize_volume(spec, spec->lu->replication_factor, spec->lu->consistency_factor);
+		rc = initialize_volume(spec, spec->lu->replication_factor,
+			spec->lu->consistency_factor, spec->lu->desired_replication_factor);
 		if (rc != 0) {
 			ISTGT_ERRLOG("LU%d: persistent reservation mutex_init() failed errno:%d\n", lu->num, errno);
 			return -1;

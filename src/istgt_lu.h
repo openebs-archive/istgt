@@ -345,10 +345,20 @@ typedef struct istgt_lu_t {
 	int conns;
 #ifdef REPLICATION
 	uint8_t replication_factor;
+	uint8_t desired_replication_factor;
 	uint8_t consistency_factor;
+	TAILQ_HEAD(, trusty_replica_s) trusty_replicas; //Contains list of trusty replicas
 #endif
 } ISTGT_LU;
 typedef ISTGT_LU *ISTGT_LU_Ptr;
+
+#ifdef REPLICATION
+typedef struct trusty_replica_s {
+	char replica_id[REPLICA_ID_LEN + 1];
+	uint64_t zvol_guid;
+	TAILQ_ENTRY(trusty_replica_s) next;
+} trusty_replica_t;
+#endif
 
 typedef enum {
 	ISTGT_TAG_UNTAGGED,
@@ -867,6 +877,7 @@ typedef struct istgt_lu_disk_t {
 	TAILQ_HEAD(, replica_s) rwaitq; //Queue of replicas completed handshake, and yet to have data connection to this spec(volume)
 	TAILQ_HEAD(, replica_s) non_quorum_rq; //Queue of non_quorum replicas connected to this spec
 	TAILQ_HEAD(, known_replica_s) identified_replica;	/* List of replicas known to spec */
+	int desired_replication_factor;
 	int replication_factor;
 	int consistency_factor;
 	int healthy_rcount;
@@ -878,6 +889,10 @@ typedef struct istgt_lu_disk_t {
 		bool rebuild_in_progress;
 	} rebuild_info;
 
+	/* scalingup_replica will set during scaleup replica cases
+	 * when consistency changes
+	 */
+	struct replica_s *scalingup_replica;
 	/*Common for both the above queues,
 	Since same cmd is part of both the queues*/
 	pthread_mutex_t rq_mtx; 

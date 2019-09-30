@@ -52,6 +52,7 @@ __thread char  tinfo[50] =  {0};
 	mgmt_ack_data->pool_guid = replica_port;\
 	mgmt_ack_data->checkpointed_io_seq = 1000;\
 	mgmt_ack_data->zvol_guid = replica_port;\
+	strcpy(mgmt_ack_data->replica_id, replica_id);\
 	mgmt_ack_data->quorum = replica_quorum_state;\
 }
 
@@ -63,6 +64,7 @@ size_t mdlist_size = 0;
 uint64_t read_ios;
 uint64_t write_ios;
 int replica_quorum_state = 0;
+char replica_id[REPLICA_ID_LEN];
 
 static void
 sig_handler(int sig)
@@ -274,6 +276,10 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 		iovec_count = 1;
 		sleep(random()%2);
 		mgmt_ack_hdr->status = (random() % 5 == 0) ? ZVOL_OP_STATUS_FAILED : ZVOL_OP_STATUS_OK;
+		if ( mgmt_ack_hdr->status == ZVOL_OP_STATUS_FAILED) {
+			REPLICA_ERRLOG("Random failure on replica(%s:%d) for SNAP_CREATE "
+			    "opcode\n", replica_ip, replica_port);
+		}
 		mgmt_ack_hdr->len = 0;
 	} else if (opcode == ZVOL_OPCODE_SNAP_PREPARE) {
 		iovec_count = 1;
@@ -474,6 +480,8 @@ main(int argc, char **argv)
 	int delay_connection = 0;
 	bool retry = false;
 
+	memset(replica_id, 0, REPLICA_ID_LEN);
+
 	while ((ch = getopt(argc, argv, "i:p:I:P:V:n:e:s:t:drq")) != -1) {
 		switch (ch) {
 			case 'i':
@@ -489,6 +497,7 @@ main(int argc, char **argv)
 				check |= 1 << 3;
 				break;
 			case 'P':
+				strcpy(replica_id, optarg);
 				replica_port = atoi(optarg);
 				check |= 1 << 4;
 				break;
@@ -537,8 +546,8 @@ main(int argc, char **argv)
 	io_hdr = malloc(sizeof(zvol_io_hdr_t));
 	mgmtio = malloc(sizeof(zvol_io_hdr_t));
 	zrepl_status = (zrepl_status_ack_t *)malloc(sizeof (zrepl_status_ack_t));
-	zrepl_status->state = ZVOL_STATUS_DEGRADED; 
-	zrepl_status->rebuild_status = ZVOL_REBUILDING_INIT; 
+	zrepl_status->state = ZVOL_STATUS_DEGRADED;
+	zrepl_status->rebuild_status = ZVOL_REBUILDING_INIT;
 	if (init_mdlist(test_vol)) {
 		REPLICA_ERRLOG("Failed to initialize mdlist for replica(%d)\n", ctrl_port);
 		close(vol_fd);
@@ -550,7 +559,7 @@ main(int argc, char **argv)
 
 	data = NULL;
 	epfd = epoll_create1(0);
-	
+
 	//Create listener for io connections from controller and add to epoll
 	if((sfd = cstor_ops.conn_listen(replica_ip, replica_port, 32, 1)) < 0) {
                 REPLICA_LOG("conn_listen() failed, err:%d replica(%d)", errno, ctrl_port);
