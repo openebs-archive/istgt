@@ -275,7 +275,10 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 	} else if (opcode == ZVOL_OPCODE_SNAP_CREATE) {
 		iovec_count = 1;
 		sleep(random()%2);
-		mgmt_ack_hdr->status = (random() % 5 == 0) ? ZVOL_OP_STATUS_FAILED : ZVOL_OP_STATUS_OK;
+		mgmt_ack_hdr->status = ZVOL_OP_STATUS_OK;
+		// TODO: Need to have retry logic for failed replica
+		// if it is helper replica during snap create command
+		//mgmt_ack_hdr->status = (random() % 5 == 0) ? ZVOL_OP_STATUS_FAILED : ZVOL_OP_STATUS_OK;
 		if ( mgmt_ack_hdr->status == ZVOL_OP_STATUS_FAILED) {
 			REPLICA_ERRLOG("Random failure on replica(%s:%d) for SNAP_CREATE "
 			    "opcode\n", replica_ip, replica_port);

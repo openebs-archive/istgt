@@ -1787,9 +1787,9 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 			memset(trusty_replica, 0, sizeof(trusty_replica_t));
 			val = istgt_get_nmval(sp, "Replica", i, 1);
 			strncpy(trusty_replica->replica_id, key, REPLICA_ID_LEN);
-			trusty_replica->zvol_guid = (uint64_t) strtol(val, NULL, 10);
+			trusty_replica->zvol_guid = (uint64_t) strtoul(val, NULL, 10);
 			TAILQ_INSERT_TAIL(&lu->trusty_replicas, trusty_replica, next);
-			ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "trusty replica key {%s} and"
+			ISTGT_LOG("trusty replica key {%s} and"
 			    " zvol guid {%lu}\n",trusty_replica->replica_id, trusty_replica->zvol_guid);
 		}
 	}
