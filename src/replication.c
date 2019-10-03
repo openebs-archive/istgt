@@ -943,6 +943,7 @@ update_trusty_replica_list(spec_t *spec, replica_t *rep, int rf) {
 	data = xmalloc(data_len + 1);
 	memset(data, 0, data_len + 1);
 	strncpy(data, json_string, data_len);
+	ISTGT_LOG("Sending %s data to volume-mgmt to make it persistent\n");
 
 	rc = update_volume_config(data);
 	free(data);
