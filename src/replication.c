@@ -296,7 +296,7 @@ allocate_rcommon_mgmt_cmd(uint64_t buf_size)
 	return (rcomm_mgmt);
 }
 
-static void 
+static void
 free_rcommon_mgmt_cmd(rcommon_mgmt_cmd_t *rcomm_mgmt)
 {
 	if (rcomm_mgmt->buf != NULL)
@@ -390,20 +390,20 @@ enqueue_prepare_for_rebuild(spec_t *spec, replica_t *replica,
 		/*
 		 * Since insertion and processing/deletion happens in same
 		 * thread(mgmt_thread), it is safe to remove cmd from queue
-		 * in error case. Be cautious when you replicate this code.  
+		 * in error case. Be cautious when you replicate this code.
 		 */
 		MTX_LOCK(&replica->r_mtx);
 		clear_mgmt_cmd(replica, mgmt_cmd);
 		MTX_UNLOCK(&replica->r_mtx);
 	}
-	return ret; 
+	return ret;
 }
 
 /*
  * Case 1: Rebuild from healthy replica
  * Case 2: Mesh rebuild i.e all replicas are downgraded
  */
-static int 
+static int
 send_prepare_for_rebuild_or_trigger_rebuild(spec_t *spec,
     replica_t *dw_replica,
     replica_t *healthy_replica)
@@ -429,7 +429,7 @@ send_prepare_for_rebuild_or_trigger_rebuild(spec_t *spec,
 
 	/*
 	 * If replication_factor is 1 i.e. single replica,
-	 * trigger rebuild directly from here to change 
+	 * trigger rebuild directly from here to change
 	 * state at replica side to make it healthy.
 	 */
 	if (replica_cnt == 0) {
@@ -452,7 +452,7 @@ send_prepare_for_rebuild_or_trigger_rebuild(spec_t *spec,
 	}
 
 
-	size = replica_cnt * sizeof (mgmt_ack_t); 
+	size = replica_cnt * sizeof (mgmt_ack_t);
 	rcomm_mgmt = allocate_rcommon_mgmt_cmd(size);
 
 	// Case 1
@@ -471,10 +471,10 @@ send_prepare_for_rebuild_or_trigger_rebuild(spec_t *spec,
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
 		if (replica == dw_replica)
 			continue;
-		
+
 		if (replica_cnt == 0)
 			break;
-    
+
 		ret = enqueue_prepare_for_rebuild(spec, replica, rcomm_mgmt,
 		    ZVOL_OPCODE_PREPARE_FOR_REBUILD);
 		if (ret == -1) {
@@ -494,14 +494,14 @@ exit:
 		}
 	}
 	assert(((ret == -1) && replica_cnt) || (ret == replica_cnt));
-	
+
 	return ret;
 }
 
 static int
 start_rebuild(void *buf, replica_t *replica, uint64_t data_len)
 {
-	
+
 	int ret = 0;
 	uint64_t num = 1;
 	zvol_io_hdr_t *rmgmtio = NULL;
@@ -943,7 +943,7 @@ update_trusty_replica_list(spec_t *spec, replica_t *rep, int rf) {
 	data = xmalloc(data_len + 1);
 	memset(data, 0, data_len + 1);
 	strncpy(data, json_string, data_len);
-	ISTGT_LOG("Sending %s data to volume-mgmt to make it persistent\n");
+	ISTGT_LOG("Sending %s data to volume-mgmt to make it persistent\n", data);
 
 	rc = update_volume_config(data);
 	free(data);
@@ -1161,7 +1161,7 @@ update_volstate(spec_t *spec)
 	    spec->consistency_factor) && (spec->healthy_rcount >= 1)) ||
 	    (spec->healthy_rcount  + spec->degraded_rcount >=
 	    MAX_OF(spec->replication_factor - spec->consistency_factor + 1,
-	    spec->consistency_factor))) { 
+	    spec->consistency_factor))) {
 		TAILQ_FOREACH(replica, &spec->rq, r_next) {
 			if (max < replica->initial_checkpointed_io_seq) {
 				max = replica->initial_checkpointed_io_seq;
@@ -1428,7 +1428,7 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 	int i;
 	bool needs_update, can_be_trusty;
 
-	ack_hdr = replica->mgmt_io_resp_hdr;	
+	ack_hdr = replica->mgmt_io_resp_hdr;
 	ack_data = (mgmt_ack_t *)replica->mgmt_io_resp_data;
 
 	TAILQ_INIT(&replica->waitq);
@@ -1607,10 +1607,10 @@ error_out_replica:
 	}
 
 	/*
-	 * After can_replica_connect check above, 
-         * there might be any non_quorum replicas became healthy. 
+	 * After can_replica_connect check above,
+         * there might be any non_quorum replicas became healthy.
          * If (healthy+degraded) reaches desired replication factor,
-         * this replica addition won't be required. 
+         * this replica addition won't be required.
          * So, same check required here with the spec lock.
 	 */
 	if (can_replica_connect(spec, replica) == false) {
@@ -2298,8 +2298,8 @@ send_replica_query(replica_t *replica, spec_t *spec, zvol_op_code_t opcode)
 	zvol_op_code_t mgmt_opcode = opcode;
 	mgmt_cmd_t *mgmt_cmd;
 
-	/* 
-	 * This API sends the query to replica on its management connection. 
+	/*
+	 * This API sends the query to replica on its management connection.
          * For healthy replicas, there is no need to send status queries.
 	 */
 	if ((replica->state == ZVOL_STATUS_HEALTHY) && (opcode == ZVOL_OPCODE_REPLICA_STATUS))
@@ -2382,7 +2382,7 @@ handle_prepare_for_rebuild_resp(spec_t *spec, zvol_io_hdr_t *hdr,
 	mgmt_ack_t *buf = (mgmt_ack_t *)rcomm_mgmt->buf;
 	rebuild_req_t *rebuild_req_buf;
 	int success_cnt;
-	
+
 	if (hdr->status != ZVOL_OP_STATUS_OK) {
 		rcomm_mgmt->cmds_failed++;
 	} else {
@@ -2807,7 +2807,7 @@ zvol_handshake(spec_t *spec, replica_t *replica)
 	zvol_io_hdr_t *ack_hdr;
 	mgmt_ack_t *ack_data;
 
-	ack_hdr = replica->mgmt_io_resp_hdr;	
+	ack_hdr = replica->mgmt_io_resp_hdr;
 	ack_data = (mgmt_ack_t *)replica->mgmt_io_resp_data;
 
 	if ((ack_hdr->status != ZVOL_OP_STATUS_OK) ||
@@ -2891,7 +2891,7 @@ accept_mgmt_conns(int epfd, int sfd)
                 MTX_LOCK(&specq_mtx);
                 TAILQ_FOREACH(spec, &spec_q, spec_next) {
 			// Since we are supporting single spec per controller
-			// we will continue using first spec only	
+			// we will continue using first spec only
                         break;
                 }
                 MTX_UNLOCK(&specq_mtx);
@@ -3131,7 +3131,7 @@ read_io_resp_hdr:
 					break;
 
 				case ZVOL_OPCODE_PREPARE_FOR_REBUILD:
-				
+
 					/* replica status must come from mgmt connection */
 					assert(fd != replica->iofd);
 					handle_prepare_for_rebuild_resp(spec, resp_hdr, *resp_data, mgmt_cmd);
@@ -3586,7 +3586,7 @@ again:
 	}
 
 	/* Quiesce write/sync IOs based on flag */
-	if ((cmd_write || cmd_sync) && spec->quiesce == 1) { 
+	if ((cmd_write || cmd_sync) && spec->quiesce == 1) {
 		MTX_UNLOCK(&spec->rq_mtx);
 		sleep(1);
 		goto again;
