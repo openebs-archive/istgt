@@ -2633,10 +2633,20 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 				ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "Device file=%s\n",
 							    lu->lun[i].u.device.file);
 			} else if (strcasecmp(val, "Storage") == 0) {
+#ifndef	REPLICATION
 				file = istgt_get_nmval(sp, buf, j, 1);
 				size = istgt_get_nmval(sp, buf, j, 2);
 				rsz  = istgt_get_nmval(sp, buf, j, 3);
+#else
+				size = istgt_get_nmval(sp, buf, j, 1);
+				rsz  = istgt_get_nmval(sp, buf, j, 2);
+#endif
+
+#ifndef	REPLICATION
 				if (file == NULL || size == NULL) {
+#else
+				if (size == NULL) {
+#endif
 					ISTGT_ERRLOG("LU%d: LUN%d: format error\n", lu->num, i);
 					goto error_return;
 				}
@@ -2678,9 +2688,15 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 						new_rsize = (uint32_t)vall;
 				}
 
+#ifndef	REPLICATION
 				if (old_size == new_size && new_rsize == old_rsize &&
 					spec != NULL && strcasecmp(file, spec->file) == 0)
 					continue;
+#else
+				if (old_size == new_size && new_rsize == old_rsize &&
+					spec != NULL)
+					continue;
+#endif
 
 				lu->lun[i].u.storage.size = new_size;
 				lu->lun[i].u.storage.rsize = new_rsize;
