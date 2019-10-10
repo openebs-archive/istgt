@@ -287,7 +287,7 @@ run_data_integrity_test() {
 	write_and_verify_data
 	wait_for_pids $test_snapshot_pid
 
-	#$TEST_SNAPSHOT 1
+	$TEST_SNAPSHOT 1
 
 	pkill -9 -P $replica1_pid
 	kill -SIGKILL $replica1_pid
@@ -298,18 +298,18 @@ run_data_integrity_test() {
 	sleep 65
 	ps -auxwww
 	ps -o pid,ppid,command
-	#$TEST_SNAPSHOT 0
+	$TEST_SNAPSHOT 0
 
 	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V "/tmp/test_vol1" -q &
 	replica1_pid=$!
 	sleep 5
 	write_and_verify_data
-	#$TEST_SNAPSHOT 1
+	$TEST_SNAPSHOT 1
 
 	sleep 65
 	ps -auxwww
 	ps -o pid,ppid,command
-	#$TEST_SNAPSHOT 1
+	$TEST_SNAPSHOT 1
 
 	pkill -9 -P $replica1_pid
 	kill -SIGKILL $replica1_pid
@@ -1086,27 +1086,22 @@ data_integrity_with_unknown_replica()
 
 		hash1=$(md5sum $replica1_vdev | awk '{print $1}')
 		hash2=$(md5sum $replica3_vdev | awk '{print $1}')
+		hash3=$(md5sum $replica4_vdev | awk '{print $1}')
 		if [ $hash1 == $hash2 ]; then echo "DI Test: PASSED"
 		else
 			echo "DI Test: FAILED Hash of quorum is $hash1 and non-quorum is $hash2 with writebytes $var1";
 			tail -20 $LOGFILE
 			exit 1
 		fi
+		if [ $hash1 == $hash3 ]; then echo "DI Test: PASSED on scale up replica"
+		else
+			echo "DI Test: FAILED Hash of known replica is $hash1 and unknown replica is $hash2 with writebytes $var1";
+			tail -20 $LOGFILE
+			exit 1
+		fi
 	fi
 
 	check_order_of_rebuilding 4
-
-	## md5sum on sparse file will take few seconds to calculate hash
-	## meanwhile rebuild is completed on non quorum replica.
-	## since there is no real rebuild happen between replicas
-	## it is good to calculate md5sum after checking order of rebuild
-	hash3=$(md5sum $replica4_vdev | awk '{print $1}')
-	if [ $hash1 == $hash3 ]; then echo "DI Test: PASSED on scale up replica"
-	else
-		echo "DI Test: FAILED Hash of known replica is $hash1 and unknown replica is $hash2 with writebytes $var1";
-		tail -20 $LOGFILE
-		exit 1
-	fi
 
 	## Checking the read IO's with quorum and non-quorum replicas
 	sudo dd if=$device_name of=/dev/null bs=4k count=100
