@@ -1374,7 +1374,7 @@ rebuild_test(void *arg)
 					rargs->kill_replica = true;
 					test_args->state++;
 				}
-				break; 
+				break;
 
 				case UNIT_TEST_STATE_REREGISTER_REPLICA:
 				if (rargs->kill_is_over == true) {

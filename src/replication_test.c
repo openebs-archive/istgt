@@ -445,6 +445,7 @@ usage(void)
 	printf(" -e error frequency (should be <= 10, default is 0)\n");
 	printf(" -t delay in response in seconds\n");
 	printf(" -s delay while forming the management connectioin and Rebuild respone in seconds\n");
+	printf(" -u unique replica identifier(replica ID)\n");
 }
 
 
@@ -485,7 +486,7 @@ main(int argc, char **argv)
 
 	memset(replica_id, 0, REPLICA_ID_LEN);
 
-	while ((ch = getopt(argc, argv, "i:p:I:P:V:n:e:s:t:drq")) != -1) {
+	while ((ch = getopt(argc, argv, "i:p:I:P:V:n:e:s:t:u:drq")) != -1) {
 		switch (ch) {
 			case 'i':
 				strncpy(ctrl_ip, optarg, sizeof(ctrl_ip));
@@ -500,7 +501,6 @@ main(int argc, char **argv)
 				check |= 1 << 3;
 				break;
 			case 'P':
-				strcpy(replica_id, optarg);
 				replica_port = atoi(optarg);
 				check |= 1 << 4;
 				break;
@@ -533,13 +533,17 @@ main(int argc, char **argv)
 			case 't':
 				delay = atoi(optarg);
 				break;
+			case 'u':
+				strcpy(replica_id, optarg);
+				check |= 1 << 6;
+				break;
 			default:
 				usage();
 				exit(EXIT_FAILURE);
 		}
 	}
 
-	if(check != 63) {
+	if(check != 127) {
 		usage();
 	}
 
@@ -774,7 +778,8 @@ again:
 execute_io:
 					if (io_hdr->opcode == ZVOL_OPCODE_OPEN) {
 						open_ptr = (zvol_op_open_data_t *)data;
-						if (open_ptr->replication_factor == 1) {
+						if (open_ptr->replication_factor == 1 &&
+						    replica_quorum_state == 1) {
 							zrepl_status->state = ZVOL_STATUS_HEALTHY;
 							zrepl_status->rebuild_status = ZVOL_REBUILDING_DONE;
 						}
