@@ -78,7 +78,7 @@ typedef struct rargs_s {
 	char replica_ip[MAX_IP_LEN];
 	uint16_t replica_port;
 	uint64_t zvol_guid;
-	char replica_id[REPLICA_ID_LEN];
+	char replica_id[REPLICA_ID_LEN + 1];
 
 	/* IP:Port on which controller is listening */
 	char ctrl_ip[MAX_IP_LEN];
