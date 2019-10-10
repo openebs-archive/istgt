@@ -684,6 +684,69 @@ is_replica_connected ()
 	fi
 }
 
+run_scaleup_test ()
+{
+	local replica1_port="6161"
+	local replica2_port="6162"
+	local replica3_port="6163"
+	local new_replica_port="7164"
+	local replica1_id="6161"
+	local replica2_id="6162"
+	local replica3_id="6163"
+	local replica_ip="127.0.0.1"
+	local replica1_vdev="/tmp/test_vol1"
+	local replica2_vdev="/tmp/test_vol2"
+	local replica3_vdev="/tmp/test_vol3"
+
+	DESIRED_REPLICATION_FACTOR=3
+	REPLICATION_FACTOR=1
+	CONSISTENCY_FACTOR=1
+	KNOWN_REPLICA1_DETAILS="Replica 6161 6161"
+
+	setup_test_env
+
+	## Replica2, Replica3 will be part of unknown replicas
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica_ip" -P "$replica2_port" -V $replica2_vdev -u "$replica2_id" &
+	replica2_pid=$!
+	sleep 2
+
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica_ip" -P "$replica3_port" -V $replica3_vdev -u "$replica3_id" &
+	replica3_pid=$!
+	sleep 2
+
+	cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].status'"
+	rt=$(eval $cmd)
+	if [ ${rt} != "\"Offline\"" ]; then
+		$ISTGTCONTROL -q REPLICA vol1
+		echo "volume status is supposed to be Offline since there are no known replicas connected, but, $rt"
+		exit 1
+	fi
+
+	## Below replica is connecting as known replica
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica_ip" -P "$replica1_port" -V $replica1_vdev -u "$replica1_id" -q &
+	replica1_pid=$!
+	sleep 15 #Replica will take some time to make successful connection to target
+
+	cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].status'"
+	rt=$(eval $cmd)
+	if [ ${rt} != "\"Healthy\"" ]; then
+		$ISTGTCONTROL -q REPLICA vol1
+		echo "volume status is supposed to be Healthy since it is single replica case, but, $rt"
+		exit 1
+	fi
+
+	## Wait for replcaed replica to become healthy
+	wait_for_healthy_replicas 3
+
+	## Remove known replica from conf file
+	sed -i "$ d" /usr/local/istgt/istgt.conf
+	pkill -9 -P $replica1_pid
+	pkill -9 -P $replica2_pid
+	pkill -9 -P $replica3_pid
+	rm -rf ${replica1_vdev::-1}*
+	stop_istgt
+}
+
 run_replica_connection_test ()
 {
 	local replica1_port="6161"
@@ -798,7 +861,6 @@ run_replica_connection_test ()
 	pkill -9 -P $replica3_pid
 	stop_istgt
 	rm -rf ${replica1_vdev::-1}*
-
 }
 
 # run_quorum_test is used to test by connecting n Quorum replicas and m Non Quorum replicas
@@ -1737,6 +1799,7 @@ run_io_timeout_test()
 
 run_lu_rf_test
 run_replica_connection_test
+run_scaleup_test
 run_quorum_test
 data_integrity_with_unknown_replica
 run_non_quorum_replica_errored_test

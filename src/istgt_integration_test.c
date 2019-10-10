@@ -78,7 +78,7 @@ typedef struct rargs_s {
 	char replica_ip[MAX_IP_LEN];
 	uint16_t replica_port;
 	uint64_t zvol_guid;
-	char replica_id[REPLICA_ID_LEN + 1];
+	char replica_id[REPLICA_ID_LEN];
 
 	/* IP:Port on which controller is listening */
 	char ctrl_ip[MAX_IP_LEN];
@@ -1374,7 +1374,7 @@ rebuild_test(void *arg)
 					rargs->kill_replica = true;
 					test_args->state++;
 				}
-				break; 
+				break;
 
 				case UNIT_TEST_STATE_REREGISTER_REPLICA:
 				if (rargs->kill_is_over == true) {
