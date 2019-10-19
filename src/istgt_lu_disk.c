@@ -10915,29 +10915,44 @@ istgt_lu_disk_execute(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 #endif
 	if (dolog == 1) {
 	ISTGT_LOG(
-		"c#%d LU%d.%lx: CSN:%x OP=0x%x/%x (%lu+%u) complete [%c:%ld.%9.9ld %c:%ld.%9.9ld]%s\n",
-	    	conn->id, lunum, lu_cmd->lun, lu_cmd->CmdSN, cdb[0], lu_cmd->status, lu_cmd->lba, lu_cmd->lblen,
-		lu_cmd->caller[lu_cmd->_andx > 1 ? lu_cmd->_andx - 2 : 0],
-		lu_cmd->tdiff[lu_cmd->_andx > 1 ? lu_cmd->_andx - 2 : 0].tv_sec,
-		lu_cmd->tdiff[lu_cmd->_andx > 1 ? lu_cmd->_andx - 2 : 0].tv_nsec,
-		lu_cmd->caller[lu_cmd->_andx > 0 ? lu_cmd->_andx - 1 : 0],
-		lu_cmd->tdiff[lu_cmd->_andx > 0 ? lu_cmd->_andx - 1 : 0].tv_sec,
-		lu_cmd->tdiff[lu_cmd->_andx > 0 ? lu_cmd->_andx - 1 : 0].tv_nsec,
+		"c#%d LU%d.%lx: CSN:%x OP=0x%x/%x (%lu+%u)"
+		" complete [%c:%ld.%9.9ld %c:%ld.%9.9ld]%s\n",
+		conn->id, lunum, lu_cmd->lun, lu_cmd->CmdSN, cdb[0],
+		lu_cmd->status, lu_cmd->lba, lu_cmd->lblen,
+		lu_cmd->caller[lu_cmd->_andx > 1 ? \
+			lu_cmd->_andx - 2 : 0],
+		lu_cmd->tdiff[lu_cmd->_andx > 1 ? \
+			lu_cmd->_andx - 2 : 0].tv_sec,
+		lu_cmd->tdiff[lu_cmd->_andx > 1 ? \
+			lu_cmd->_andx - 2 : 0].tv_nsec,
+		lu_cmd->caller[lu_cmd->_andx > 0 ? \
+			lu_cmd->_andx - 1 : 0],
+		lu_cmd->tdiff[lu_cmd->_andx > 0 ? \
+			lu_cmd->_andx - 1 : 0].tv_sec,
+		lu_cmd->tdiff[lu_cmd->_andx > 0 ? \
+			lu_cmd->_andx - 1 : 0].tv_nsec,
 		msg);
 	} else {
 	ISTGT_TRACELOG(ISTGT_TRACE_ISCSI,
-		"c#%d LU%d.%lx: CSN:%x OP=0x%x/%x (%lu+%u) complete [%c:%ld.%9.9ld %c:%ld.%9.9ld]%s\n",
-	    	conn->id, lunum, lu_cmd->lun, lu_cmd->CmdSN, cdb[0], lu_cmd->status, lu_cmd->lba, lu_cmd->lblen,
-		lu_cmd->caller[lu_cmd->_andx > 1 ? lu_cmd->_andx - 2 : 0],
-		lu_cmd->tdiff[lu_cmd->_andx > 1 ? lu_cmd->_andx - 2 : 0].tv_sec,
-		lu_cmd->tdiff[lu_cmd->_andx > 1 ? lu_cmd->_andx - 2 : 0].tv_nsec,
-		lu_cmd->caller[lu_cmd->_andx > 0 ? lu_cmd->_andx - 1 : 0],
-		lu_cmd->tdiff[lu_cmd->_andx > 0 ? lu_cmd->_andx - 1 : 0].tv_sec,
-		lu_cmd->tdiff[lu_cmd->_andx > 0 ? lu_cmd->_andx - 1 : 0].tv_nsec,
+		"c#%d LU%d.%lx: CSN:%x OP=0x%x/%x (%lu+%u)"
+		" complete [%c:%ld.%9.9ld %c:%ld.%9.9ld]%s\n",
+		conn->id, lunum, lu_cmd->lun, lu_cmd->CmdSN, cdb[0],
+		lu_cmd->status, lu_cmd->lba, lu_cmd->lblen,
+		lu_cmd->caller[lu_cmd->_andx > 1 ? \
+				lu_cmd->_andx - 2 : 0],
+		lu_cmd->tdiff[lu_cmd->_andx > 1 ? \
+				lu_cmd->_andx - 2 : 0].tv_sec,
+		lu_cmd->tdiff[lu_cmd->_andx > 1 ? \
+				lu_cmd->_andx - 2 : 0].tv_nsec,
+		lu_cmd->caller[lu_cmd->_andx > 0 ? \
+				lu_cmd->_andx - 1 : 0],
+		lu_cmd->tdiff[lu_cmd->_andx > 0 ? \
+				lu_cmd->_andx - 1 : 0].tv_sec,
+		lu_cmd->tdiff[lu_cmd->_andx > 0 ? \
+				lu_cmd->_andx - 1 : 0].tv_nsec,
 		msg);
 	}
-	if ((data != NULL)  && (freedata == 1))
+	if ((data != NULL) && (freedata == 1))
 		xfree(data);
-	return 0;
+	return (0);
 }
-
