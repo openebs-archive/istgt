@@ -690,9 +690,10 @@ istgt_uctl_cmd_desired_rf(UCTL_Ptr uctl)
 	ISTGT_LU_DISK *spec = NULL;
 	int rc = 0, ret = UCTL_CMD_ERR;
 	char *volname, *arg, *s_drf;
-	int drf;
+	int drf, i;
 	const char *delim = ARGS_DELIM;
 	arg = uctl->arg;
+	char **remaining_replicas_id;
 
 	CHECK_ARG_AND_GOTO_ERROR;
 	volname = strsepq(&arg, delim);
@@ -721,14 +722,21 @@ istgt_uctl_cmd_desired_rf(UCTL_Ptr uctl)
 	spec = lu->lun[0].spec;
 
 	if (drf < spec->desired_replication_factor) {
-		ISTGT_ERRLOG("desired replication factor(%d) is greater than"
-		    " requested desired replication factor(%d)\n",
-		    spec->desired_replication_factor, drf);
-		istgt_uctl_snprintf(uctl, "ERR current desired replication factor"
-		    " is already greater than existing desiredRF\n");
-		goto error_return;
-	}
-	if (drf == spec->desired_replication_factor) {
+		// In case of scale down read known replica list
+		remaining_replicas_id = (char **) xmalloc(sizeof(char *)*(spec->replication_factor - 1));
+		for (i=0; i < (spec->replication_factor-1); i++) {
+			remaining_replicas_id[i] = strsepq(&arg, delim);
+			ISTGT_LOG("ReplicaId %s\n", remaining_replicas_id[i]);
+		}
+		rc = istgt_lu_remove_replica(spec, remaining_replicas_id);
+
+		if (rc == 0) {
+			istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
+			ret = UCTL_CMD_OK;
+		}
+		else
+			istgt_uctl_snprintf(uctl, "ERR failed %s\n", uctl->cmd);
+	} else if (drf == spec->desired_replication_factor) {
 		ISTGT_LOG("desired replication factor is already equal to "
 		    "requested desired replication factor\n");
 		istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
