@@ -84,6 +84,7 @@
 
 #define	MAX_LINEBUF 4096
 #define	UCTL_CHAP_CHALLENGE_LEN 1024
+#define REPLICA_ID_LEN 32
 
 typedef struct istgt_uctl_auth_t {
 	char *user;
@@ -904,6 +905,7 @@ exec_snap(UCTL_Ptr uctl)
 	return (UCTL_CMD_OK);
 }
 
+// exec_command is used for resize, scaleup and scaledown of replicas
 static int
 exec_command(UCTL_Ptr uctl)
 {
@@ -912,9 +914,31 @@ exec_command(UCTL_Ptr uctl)
 	int rc = 0;
 	char *name = uctl->setargv[0];
 	char *value = uctl->setargv[1];
+	int i = 0, listcnt;
+	char *id_list;
 
-	uctl_snprintf(uctl, "%s \"%s\" \"%s\" \n",
-		uctl->cmd, name, value);
+	listcnt = uctl->setargcnt - 2;
+	if (listcnt != 0) {
+		// Since list of replicaIds sent via socket
+		// each replicaId should enclosed with in ""
+		id_list = (char *) malloc(sizeof(char) * ((listcnt * 
+		    REPLICA_ID_LEN) + (listcnt * 3)));
+		memset(id_list, 0, sizeof(id_list));
+		for (i=0; i < listcnt; i++) {
+			strcat(id_list, "\"");
+			strncat(id_list, uctl->setargv[i+2], REPLICA_ID_LEN);
+			strcat(id_list, "\" ");
+		}
+	}
+	//Release the momory
+	if (listcnt != 0) {
+		uctl_snprintf(uctl, "%s \"%s\" \"%s\" %s \n",
+		    uctl->cmd, name, value, id_list);
+		free(id_list);
+	} else {
+		uctl_snprintf(uctl, "%s \"%s\" \"%s\" \n",
+		    uctl->cmd, name, value);
+	}
 
 	rc = uctl_writeline(uctl);
 	if (rc != UCTL_CMD_OK) {

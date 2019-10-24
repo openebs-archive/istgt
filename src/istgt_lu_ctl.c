@@ -693,7 +693,7 @@ istgt_uctl_cmd_desired_rf(UCTL_Ptr uctl)
 	int drf, i;
 	const char *delim = ARGS_DELIM;
 	arg = uctl->arg;
-	char **remaining_replicas_id;
+	char **known_replica_id_list = NULL;
 
 	CHECK_ARG_AND_GOTO_ERROR;
 	volname = strsepq(&arg, delim);
@@ -722,14 +722,29 @@ istgt_uctl_cmd_desired_rf(UCTL_Ptr uctl)
 	spec = lu->lun[0].spec;
 
 	if (drf < spec->desired_replication_factor) {
-		// In case of scale down read known replica list
-		remaining_replicas_id = (char **) xmalloc(sizeof(char *)*(spec->replication_factor - 1));
-		for (i=0; i < (spec->replication_factor-1); i++) {
-			remaining_replicas_id[i] = strsepq(&arg, delim);
-			ISTGT_LOG("ReplicaId %s\n", remaining_replicas_id[i]);
-		}
-		rc = istgt_lu_remove_replica(spec, remaining_replicas_id);
 
+		if ( spec->desired_replication_factor != spec->replication_factor ||
+		    drf != spec->replication_factor - 1) {
+			ISTGT_ERRLOG("current desired replication factor(%d) "
+			    "and replication factor(%d) but requested desired "
+			    "replication factor(%d) are invalid changes\n",
+			    spec->desired_replication_factor,
+			    spec->replication_factor, drf);
+			istgt_uctl_snprintf(uctl, "ERR current desired "
+			    "replication factor(%d) and replication factor(%d) "
+			    "but requested desired replication factor(%d) are "
+			    "invalid changes\n", spec->desired_replication_factor,
+			    spec->replication_factor, drf);
+		}
+		// In case of scale down read known replica list
+		known_replica_id_list = (char **) xmalloc(sizeof(char *) * drf);
+		memset(known_replica_id_list, 0, sizeof(known_replica_id_list));
+		for (i=0; i < drf; i++) {
+			CHECK_ARG_AND_GOTO_ERROR;
+			known_replica_id_list[i] = strsepq(&arg, delim);
+		}
+		rc = istgt_lu_remove_unknown_replica(spec, drf, known_replica_id_list);
+		rc = 0;
 		if (rc == 0) {
 			istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
 			ret = UCTL_CMD_OK;
@@ -750,6 +765,9 @@ istgt_uctl_cmd_desired_rf(UCTL_Ptr uctl)
 		ret = UCTL_CMD_OK;
 	}
 error_return:
+	if (known_replica_id_list != NULL) {
+		free(known_replica_id_list);
+	}
 	rc = istgt_uctl_writeline(uctl);
 	if (rc != UCTL_CMD_OK) {
 		return (rc);
