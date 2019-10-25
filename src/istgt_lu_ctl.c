@@ -735,6 +735,7 @@ istgt_uctl_cmd_desired_rf(UCTL_Ptr uctl)
 			    "but requested desired replication factor(%d) are "
 			    "invalid changes\n", spec->desired_replication_factor,
 			    spec->replication_factor, drf);
+			goto error_return;
 		}
 		// In case of scale down read known replica list
 		known_replica_id_list = (char **) xmalloc(sizeof(char *) * drf);
