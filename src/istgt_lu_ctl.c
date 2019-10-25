@@ -723,6 +723,8 @@ istgt_uctl_cmd_desired_rf(UCTL_Ptr uctl)
 
 	if (drf < spec->desired_replication_factor) {
 
+		// TODO: I think this check is not required(get confirmation during review process)
+		// If user want to remove scalingup replica should we need to allow this process?
 		if ( spec->desired_replication_factor != spec->replication_factor ||
 		    drf != spec->replication_factor - 1) {
 			ISTGT_ERRLOG("current desired replication factor(%d) "
