@@ -915,14 +915,14 @@ exec_command(UCTL_Ptr uctl)
 	char *name = uctl->setargv[0];
 	char *value = uctl->setargv[1];
 	int i = 0, listcnt;
-	char *id_list;
+	char *id_list = NULL;
 
 	listcnt = uctl->setargcnt - 2;
 	if (listcnt != 0) {
 		// Since list of replicaIds sent via socket
-		// each replicaId should enclosed with in ""
+		// each replicaId should enclosed with in "" and space
 		id_list = (char *) malloc(sizeof(char) * ((listcnt * 
-		    REPLICA_ID_LEN) + (listcnt * 3)));
+		    REPLICA_ID_LEN) + (listcnt * 4)));
 		memset(id_list, 0, sizeof(id_list));
 		for (i=0; i < listcnt; i++) {
 			strcat(id_list, "\"");
