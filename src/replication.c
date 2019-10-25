@@ -390,7 +390,7 @@ wait_for_ongoing_ios_on_replica(spec_t *spec, replica_t *replica, int sec) {
 		}
 		if (!io_found) {
 			ret = 0;
-			ISTGT_LOG("Successfully flushed the IO's from replica(%s:%lu) queue",
+			ISTGT_LOG("Successfully flushed the IO's from replica(%s:%lu) queue\n",
 			    replica->replica_id, replica->zvol_guid);
 			break;
 		}
@@ -2246,6 +2246,7 @@ is_valid_known_replica_list(spec_t *spec, int listcnt, char **known_replica_id_l
 	bool found_replica;
 	int i;
 
+	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 	for(i=0; i<listcnt; i++) {
 		found_replica = false;
 		TAILQ_FOREACH(trusty_replica, &spec->lu->trusty_replicas, next) {
@@ -2304,6 +2305,7 @@ istgt_lu_remove_unknown_replica(spec_t *spec, int drf, char **known_replica_id_l
 	int new_rf = drf;
 	int new_cf = CONSISTENCY_FACTOR(new_rf);
 	int found_in_rq_list = false;
+	int found_replica = false;
 
 #ifdef REPLICATION
 	trusty_replica_t *trusty_replica = NULL;
@@ -2326,24 +2328,38 @@ istgt_lu_remove_unknown_replica(spec_t *spec, int drf, char **known_replica_id_l
 		 * lock on spec->rq_mtx it is good enough to read replica_id
 		 * properity.
 		 */
+		found_replica = false;
+		/* If current replica not exist in provided list then that
+		 * replica need to be removed
+		 */
 		for (i=0; i < drf; i++) {
 			if (strncmp(replica->replica_id,
-			    known_replica_id_list[i], REPLICA_ID_LEN) != 0) {
-				removing_replica = replica;
-				found_in_rq_list = true;
+			    known_replica_id_list[i], REPLICA_ID_LEN) == 0) {
+				found_replica = true;
 				break;
 			}
 		}
+		if (!found_replica) {
+			removing_replica = replica;
+			found_in_rq_list = true;
+			break;
+		}
 	}
 	if (removing_replica == NULL) {
-		TAILQ_FOREACH(replica, &spec->non_quorum_rq, r_non_quorum_next)
+		TAILQ_FOREACH(replica, &spec->non_quorum_rq, r_non_quorum_next) {
+			found_replica = false;
 			for (i=0; i < drf; i++) {
 				if (strncmp(replica->replica_id,
-				    known_replica_id_list[i], REPLICA_ID_LEN) != 0) {
-					removing_replica = replica;
+				    known_replica_id_list[i], REPLICA_ID_LEN) == 0) {
+					found_replica = true;
 					break;
 				}
 			}
+			if (!found_replica) {
+				removing_replica = replica;
+				break;
+			}
+		}
 	}
 
 	/* Wait for any ongoing snapshot commands */
@@ -2401,15 +2417,21 @@ update_volume_configurations:
 
 #ifdef REPLICATION
 	// If removing replica exists in trusty replica list remove from it
-	TAILQ_FOREACH(trusty_replica, &spec->lu->trusty_replicas, next)
+	TAILQ_FOREACH(trusty_replica, &spec->lu->trusty_replicas, next) {
+		found_replica = false;
 		for(i=0; i<drf; i++) {
 			if (strncmp(trusty_replica->replica_id,
-			    known_replica_id_list[i], REPLICA_ID_LEN) != 0) {
-				TAILQ_REMOVE(&spec->lu->trusty_replicas,
-				    trusty_replica, next);
+			    known_replica_id_list[i], REPLICA_ID_LEN) == 0) {
+				found_replica = true;
 				break;
 			}
 		}
+		if (!found_replica) {
+			TAILQ_REMOVE(&spec->lu->trusty_replicas,
+			    trusty_replica, next);
+			break;
+		}
+	}
 #endif
 	spec->quiesce = 0;
 
