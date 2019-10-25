@@ -2303,6 +2303,7 @@ istgt_lu_remove_unknown_replica(spec_t *spec, int drf, char **known_replica_id_l
 	int io_wait_time = 5;
 	int new_rf = drf;
 	int new_cf = CONSISTENCY_FACTOR(new_rf);
+	int found_in_rq_list = false;
 
 #ifdef REPLICATION
 	trusty_replica_t *trusty_replica = NULL;
@@ -2313,6 +2314,7 @@ istgt_lu_remove_unknown_replica(spec_t *spec, int drf, char **known_replica_id_l
 
 #ifdef REPLICATION
 	if (is_valid_known_replica_list(spec, drf, known_replica_id_list) == false) {
+		MTX_UNLOCK(&spec->rq_mtx);
 		ISTGT_ERRLOG("invalid known replicaid list\n");
 		return rc;
 	}
@@ -2328,9 +2330,20 @@ istgt_lu_remove_unknown_replica(spec_t *spec, int drf, char **known_replica_id_l
 			if (strncmp(replica->replica_id,
 			    known_replica_id_list[i], REPLICA_ID_LEN) != 0) {
 				removing_replica = replica;
+				found_in_rq_list = true;
 				break;
 			}
 		}
+	}
+	if (removing_replica == NULL) {
+		TAILQ_FOREACH(replica, &spec->non_quorum_rq, r_non_quorum_next)
+			for (i=0; i < drf; i++) {
+				if (strncmp(replica->replica_id,
+				    known_replica_id_list[i], REPLICA_ID_LEN) != 0) {
+					removing_replica = replica;
+					break;
+				}
+			}
 	}
 
 	/* Wait for any ongoing snapshot commands */
@@ -2350,7 +2363,8 @@ istgt_lu_remove_unknown_replica(spec_t *spec, int drf, char **known_replica_id_l
 	 * if there is no change in consistency model then go and update
 	 * volume configuration without pausing IOs.
 	 */
-	if (removing_replica == NULL && new_cf == spec->consistency_factor)
+	if (!found_in_rq_list ||
+	    (removing_replica == NULL && new_cf == spec->consistency_factor))
 		goto update_volume_configurations;
 
 	/* Select some replica other than removing replica and
@@ -2403,6 +2417,8 @@ update_volume_configurations:
 		inform_mgmt_conn(removing_replica);
 
 	MTX_UNLOCK(&spec->rq_mtx);
+	ISTGT_LOG("Successfully removed the replica is_connected: %s\n",
+	    (removing_replica == NULL)? "true" : "false");
 	return 0;
 }
 

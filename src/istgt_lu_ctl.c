@@ -744,7 +744,6 @@ istgt_uctl_cmd_desired_rf(UCTL_Ptr uctl)
 			known_replica_id_list[i] = strsepq(&arg, delim);
 		}
 		rc = istgt_lu_remove_unknown_replica(spec, drf, known_replica_id_list);
-		rc = 0;
 		if (rc == 0) {
 			istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
 			ret = UCTL_CMD_OK;
