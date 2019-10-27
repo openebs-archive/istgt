@@ -744,7 +744,7 @@ run_scaleup_scaledown_test ()
 	## Below replica is connecting as known replica
 	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica_ip" -P "$replica1_port" -V $replica1_vdev -u "$replica1_id" -q &
 	replica1_pid=$!
-	sleep 15 #Replica will take some time to make successful connection to target
+	sleep 20 #Replica will take some time to make successful connection to target
 
 	cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].status'"
 	rt=$(eval $cmd)
@@ -1889,19 +1889,19 @@ run_io_timeout_test()
 	rm -rf ${replica1_vdev::-1}*
 }
 
-#run_lu_rf_test
+run_lu_rf_test
 run_replica_connection_test
 run_scaleup_scaledown_test
-#run_quorum_test
-#data_integrity_with_unknown_replica
-#run_non_quorum_replica_errored_test
-#run_data_integrity_test
-#run_mempool_test
-#run_istgt_integration
-#run_read_consistency_test
-#run_replication_factor_test
-#run_io_timeout_test
-#run_test_env
+run_quorum_test
+data_integrity_with_unknown_replica
+run_non_quorum_replica_errored_test
+run_data_integrity_test
+run_mempool_test
+run_istgt_integration
+run_read_consistency_test
+run_replication_factor_test
+run_io_timeout_test
+run_test_env
 echo "===============All Tests are passed ==============="
 tail -20 $LOGFILE
 
