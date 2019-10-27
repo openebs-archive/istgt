@@ -2236,6 +2236,18 @@ istgt_lu_resize_volume(spec_t *spec, uint64_t size) {
 	return true;
 }
 
+#define IS_REPLICA_ID_EXIST_IN_LIST(_replica_id, _list, _no_of_items, _is_exist) 	\
+	do {										\
+		int i;									\
+		for (i=0; i < _no_of_items; i++) {					\
+			if (strncmp(_replica_id, _list[i], REPLICA_ID_LEN) == 0) {	\
+					_is_exist = true;				\
+					break;						\
+			}								\
+		}									\
+	}while(0)
+
+
 #ifdef REPLICATION
 /* is_valid_known_replica_list this function should be called by taking
  * spec->rq_mtx lock
@@ -2299,7 +2311,7 @@ can_replica_remove(spec_t *spec, replica_t *removing_replica) {
 int
 istgt_lu_remove_unknown_replica(spec_t *spec, int drf, char **known_replica_id_list) {
 	replica_t *replica, *removing_replica = NULL;
-	int rc = -1, i;
+	int rc = -1;
 	// Hard coded IO wait time
 	int io_wait_time = 5;
 	int new_rf = drf;
@@ -2332,13 +2344,8 @@ istgt_lu_remove_unknown_replica(spec_t *spec, int drf, char **known_replica_id_l
 		/* If current replica not exist in provided list then that
 		 * replica need to be removed
 		 */
-		for (i=0; i < drf; i++) {
-			if (strncmp(replica->replica_id,
-			    known_replica_id_list[i], REPLICA_ID_LEN) == 0) {
-				found_replica = true;
-				break;
-			}
-		}
+		IS_REPLICA_ID_EXIST_IN_LIST(replica->replica_id,
+		    known_replica_id_list, drf, found_replica);
 		if (!found_replica) {
 			removing_replica = replica;
 			found_in_rq_list = true;
@@ -2348,13 +2355,8 @@ istgt_lu_remove_unknown_replica(spec_t *spec, int drf, char **known_replica_id_l
 	if (removing_replica == NULL) {
 		TAILQ_FOREACH(replica, &spec->non_quorum_rq, r_non_quorum_next) {
 			found_replica = false;
-			for (i=0; i < drf; i++) {
-				if (strncmp(replica->replica_id,
-				    known_replica_id_list[i], REPLICA_ID_LEN) == 0) {
-					found_replica = true;
-					break;
-				}
-			}
+			IS_REPLICA_ID_EXIST_IN_LIST(replica->replica_id,
+			    known_replica_id_list, drf, found_replica);
 			if (!found_replica) {
 				removing_replica = replica;
 				break;
@@ -2419,13 +2421,8 @@ update_volume_configurations:
 	// If removing replica exists in trusty replica list remove from it
 	TAILQ_FOREACH(trusty_replica, &spec->lu->trusty_replicas, next) {
 		found_replica = false;
-		for(i=0; i<drf; i++) {
-			if (strncmp(trusty_replica->replica_id,
-			    known_replica_id_list[i], REPLICA_ID_LEN) == 0) {
-				found_replica = true;
-				break;
-			}
-		}
+		IS_REPLICA_ID_EXIST_IN_LIST(trusty_replica->replica_id,
+		    known_replica_id_list, drf, found_replica);
 		if (!found_replica) {
 			TAILQ_REMOVE(&spec->lu->trusty_replicas,
 			    trusty_replica, next);
@@ -3877,6 +3874,8 @@ retry_read:
 
 	if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) {
 		TAILQ_FOREACH(replica, &spec->non_quorum_rq, r_non_quorum_next) {
+			if (replica->cordon == 1)
+				continue;
 			rcomm_cmd->non_quorum_copies_sent++;
 
 			build_rcmd();
