@@ -2245,10 +2245,9 @@ istgt_lu_resize_volume(spec_t *spec, uint64_t size) {
 					break;						\
 			}								\
 		}									\
-	}while(0)
+	} while(0)
 
 
-#ifdef REPLICATION
 /* is_valid_known_replica_list this function should be called by taking
  * spec->rq_mtx lock
  */
@@ -2278,7 +2277,6 @@ is_valid_known_replica_list(spec_t *spec, int listcnt, char **known_replica_id_l
 	}
 	return true;
 }
-#endif
 
 static bool
 can_replica_remove(spec_t *spec, replica_t *removing_replica) {
@@ -2319,12 +2317,10 @@ istgt_lu_remove_unknown_replica(spec_t *spec, int drf, char **known_replica_id_l
 	int found_in_rq_list = false;
 	int found_replica = false;
 
-#ifdef REPLICATION
 	trusty_replica_t *trusty_replica = NULL;
-#endif
 
 	MTX_LOCK(&spec->rq_mtx);
-	assert(drf == spec->replication_factor - 1);
+	ASSERT(drf == spec->replication_factor - 1);
 
 #ifdef REPLICATION
 	if (is_valid_known_replica_list(spec, drf, known_replica_id_list) == false) {
@@ -2417,7 +2413,6 @@ update_volume_configurations:
 	spec->lu->desired_replication_factor = drf;
 	spec->desired_replication_factor = drf;
 
-#ifdef REPLICATION
 	// If removing replica exists in trusty replica list remove from it
 	TAILQ_FOREACH(trusty_replica, &spec->lu->trusty_replicas, next) {
 		found_replica = false;
@@ -2429,11 +2424,13 @@ update_volume_configurations:
 			break;
 		}
 	}
-#endif
 	spec->quiesce = 0;
 
-	if (removing_replica != NULL)
+	if (removing_replica != NULL) {
+		MTX_LOCK(&removing_replica->r_mtx);
 		inform_mgmt_conn(removing_replica);
+		MTX_UNLOCK(&removing_replica->r_mtx);
+	}
 
 	MTX_UNLOCK(&spec->rq_mtx);
 	ISTGT_LOG("Successfully removed the replica is_connected: %s\n",

@@ -914,16 +914,16 @@ exec_command(UCTL_Ptr uctl)
 	int rc = 0;
 	char *name = uctl->setargv[0];
 	char *value = uctl->setargv[1];
-	int i = 0, listcnt;
+	int i = 0, listcnt, memory_len;
 	char *id_list = NULL;
 
 	listcnt = uctl->setargcnt - 2;
-	if (listcnt != 0) {
+	if (listcnt > 0) {
 		// Since list of replicaIds sent via socket
 		// each replicaId should enclosed with in "" and space
-		id_list = (char *) malloc(sizeof(char) * ((listcnt * 
-		    REPLICA_ID_LEN) + (listcnt * 4)));
-		memset(id_list, 0, sizeof(id_list));
+		memory_len = ((listcnt * REPLICA_ID_LEN) + (listcnt * 4));
+		id_list = (char *) malloc(sizeof(char) * memory_len);
+		memset(id_list, 0, sizeof(sizeof(char) * memory_len));
 		for (i=0; i < listcnt; i++) {
 			strcat(id_list, "\"");
 			strncat(id_list, uctl->setargv[i+2], REPLICA_ID_LEN);
@@ -931,7 +931,7 @@ exec_command(UCTL_Ptr uctl)
 		}
 	}
 	//Release the momory
-	if (listcnt != 0) {
+	if (listcnt > 0) {
 		uctl_snprintf(uctl, "%s \"%s\" \"%s\" %s \n",
 		    uctl->cmd, name, value, id_list);
 		free(id_list);

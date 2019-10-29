@@ -741,7 +741,7 @@ istgt_uctl_cmd_desired_rf(UCTL_Ptr uctl)
 		}
 		// In case of scale down read known replica list
 		known_replica_id_list = (char **) xmalloc(sizeof(char *) * drf);
-		memset(known_replica_id_list, 0, sizeof(known_replica_id_list));
+		memset(known_replica_id_list, 0, sizeof(char *) * drf);
 		for (i=0; i < drf; i++) {
 			CHECK_ARG_AND_GOTO_ERROR;
 			known_replica_id_list[i] = strsepq(&arg, delim);
