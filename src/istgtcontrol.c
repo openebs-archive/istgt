@@ -65,6 +65,7 @@
 #include "istgt_sock.h"
 #include "istgt_misc.h"
 #include "istgt_md5.h"
+#include "zrepl_prot.h"
 
 #if !defined(__GNUC__)
 #undef __attribute__
@@ -84,7 +85,6 @@
 
 #define	MAX_LINEBUF 4096
 #define	UCTL_CHAP_CHALLENGE_LEN 1024
-#define REPLICA_ID_LEN 32
 
 typedef struct istgt_uctl_auth_t {
 	char *user;

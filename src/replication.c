@@ -2262,13 +2262,11 @@ istgt_lu_remove_unknown_replica(spec_t *spec, int drf, char **known_replica_id_l
 	MTX_LOCK(&spec->rq_mtx);
 	ASSERT(drf == spec->replication_factor - 1);
 
-#ifdef REPLICATION
 	if (is_valid_known_replica_list(spec, drf, known_replica_id_list) == false) {
 		MTX_UNLOCK(&spec->rq_mtx);
 		ISTGT_ERRLOG("invalid known replicaid list\n");
 		return rc;
 	}
-#endif
 
 	// Find the replica who's replicaID is not exist in known_replica_id_list
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
