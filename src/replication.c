@@ -63,6 +63,7 @@ static void inform_data_conn(replica_t *r);
 static void free_replica(replica_t *r);
 static int handle_mgmt_event_fd(replica_t *replica);
 static int get_non_quorum_replica_count(spec_t *spec);
+static int wait_for_ongoing_ios_on_replica(spec_t *spec, replica_t *replica, int sec);
 
 #define build_rcomm_cmd(rcomm_cmd, cmd, offset, nbytes) 						\
 	do {								\
@@ -352,67 +353,6 @@ check_header_sanity(zvol_io_hdr_t *resp_hdr)
 	}
 
 	return 0;
-}
-
-/*
- * wait_for_ongoing_ios_on_replica pause the IOs and it's caller
- * responsibility to pause IO's and call this function
- * Returns:
- * 0 - on success
- * -1 - still, if pending IOs are there
- */
-static int
-wait_for_ongoing_ios_on_replica(spec_t *spec, replica_t *replica, int sec) {
-	int ret = -1;
-	struct timespec last, now, diff;
-	bool io_found = false;	/* Write or Sync IOs */
-
-	ASSERT(MTX_LOCKED(&spec->rq_mtx));
-	ASSERT(spec->quiesce == 1);
-
-	clock_gettime(CLOCK_MONOTONIC_COARSE, &last);
-	timesdiff(CLOCK_MONOTONIC_COARSE, last, now, diff);
-
-	while (diff.tv_sec < sec) {
-		io_found = false;
-
-		/*
-		 * Check on spec is required as these IOs as well
-		 * need to be pushed to replica before setting scalingup_replica
-		 * to replica.
-		 */
-		if (spec->inflight_write_io_cnt != 0 ||
-		    spec->inflight_sync_io_cnt != 0)
-			io_found = true;
-		else if (replica->replica_inflight_write_io_cnt != 0 ||
-		    replica->replica_inflight_sync_io_cnt != 0) {
-			io_found = true;
-		}
-		if (!io_found) {
-			ret = 0;
-			ISTGT_LOG("Successfully flushed the IO's from replica(%s:%lu) queue\n",
-			    replica->replica_id, replica->zvol_guid);
-			break;
-		}
-
-		MTX_UNLOCK(&spec->rq_mtx);
-
-		ISTGT_LOG("Waiting for IO's to flush on replica(%s:%lu) "
-		    "spec write_io_cnt: %lu and sync_io_cnt: %lu replica "
-		    "write_io_cnt: %lu sync_io_cnt: %lu\n",
-		    replica->replica_id, replica->zvol_guid,
-		    spec->inflight_write_io_cnt, spec->inflight_sync_io_cnt,
-		    replica->replica_inflight_write_io_cnt, replica->replica_inflight_sync_io_cnt);
-		/*
-		 * inflight write/sync IOs in spec, or in replica,
-		 * so, wait for some time
-		 */
-		sleep (1);
-		MTX_LOCK(&spec->rq_mtx);
-		timesdiff(CLOCK_MONOTONIC_COARSE, last, now, diff);
-	}
-
-	return ret;
 }
 
 static int
@@ -2729,6 +2669,67 @@ handle_update_spec_stats(spec_t *spec, zvol_io_hdr_t *hdr, void *resp)
 		spec->stats.used = stats->value;
 	clock_gettime(CLOCK_MONOTONIC_COARSE, &spec->stats.updated_stats_time);
 	return;
+}
+
+/*
+ * wait_for_ongoing_ios_on_replica pause the IOs and it's caller
+ * responsibility to pause IO's and call this function
+ * Returns:
+ * 0 - on success
+ * -1 - still, if pending IOs are there
+ */
+static int
+wait_for_ongoing_ios_on_replica(spec_t *spec, replica_t *replica, int sec) {
+	int ret = -1;
+	struct timespec last, now, diff;
+	bool io_found = false;	/* Write or Sync IOs */
+
+	ASSERT(MTX_LOCKED(&spec->rq_mtx));
+	ASSERT(spec->quiesce == 1);
+
+	clock_gettime(CLOCK_MONOTONIC_COARSE, &last);
+	timesdiff(CLOCK_MONOTONIC_COARSE, last, now, diff);
+
+	while (diff.tv_sec < sec) {
+		io_found = false;
+
+		/*
+		 * Check on spec is required as these IOs as well
+		 * need to be pushed to replica before setting scalingup_replica
+		 * to replica.
+		 */
+		if (spec->inflight_write_io_cnt != 0 ||
+		    spec->inflight_sync_io_cnt != 0)
+			io_found = true;
+		else if (replica->replica_inflight_write_io_cnt != 0 ||
+		    replica->replica_inflight_sync_io_cnt != 0) {
+			io_found = true;
+		}
+		if (!io_found) {
+			ret = 0;
+			ISTGT_LOG("Successfully flushed the IO's from replica(%s:%lu) queue\n",
+			    replica->replica_id, replica->zvol_guid);
+			break;
+		}
+
+		MTX_UNLOCK(&spec->rq_mtx);
+
+		ISTGT_LOG("Waiting for IO's to flush on replica(%s:%lu) "
+		    "spec write_io_cnt: %lu and sync_io_cnt: %lu replica "
+		    "write_io_cnt: %lu sync_io_cnt: %lu\n",
+		    replica->replica_id, replica->zvol_guid,
+		    spec->inflight_write_io_cnt, spec->inflight_sync_io_cnt,
+		    replica->replica_inflight_write_io_cnt, replica->replica_inflight_sync_io_cnt);
+		/*
+		 * inflight write/sync IOs in spec, or in replica,
+		 * so, wait for some time
+		 */
+		sleep (1);
+		MTX_LOCK(&spec->rq_mtx);
+		timesdiff(CLOCK_MONOTONIC_COARSE, last, now, diff);
+	}
+
+	return ret;
 }
 
 //TODO: Need to restructure handle_scaleup_replica_transition and
