@@ -65,7 +65,10 @@
 #include "istgt_sock.h"
 #include "istgt_misc.h"
 #include "istgt_md5.h"
+
+#ifdef REPLICATION
 #include "zrepl_prot.h"
+#endif
 
 #if !defined(__GNUC__)
 #undef __attribute__
