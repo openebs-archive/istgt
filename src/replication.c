@@ -2145,7 +2145,7 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	spec->quiesce = 0;
 	MTX_UNLOCK(&spec->rq_mtx);
 
-	REPLICA_ERRLOG("snap create ioseq: %lu resp: %s\n", io_seq,
+	REPLICA_LOG("snap create ioseq: %lu resp: %s\n", io_seq,
 	    (r == true) ? "success" : "failed");
 	return (ret);
 }
