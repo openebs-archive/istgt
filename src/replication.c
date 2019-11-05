@@ -2057,7 +2057,7 @@ timeout_wait_for_command(spec_t *spec, rcommon_mgmt_cmd_t *rcomm_mgmt, int wait_
 int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int wait_time)
 {
 	bool r;
-	int ret = false, sent = 0, success;
+	int ret = 0, sent = 0, success;
 	replica_t *replica;
 	struct timespec last;
 	rcommon_mgmt_cmd_t *rcomm_mgmt;
@@ -2144,8 +2144,9 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	}
 	spec->quiesce = 0;
 	MTX_UNLOCK(&spec->rq_mtx);
-	if (r == false)
-		REPLICA_ERRLOG("snap create ioseq: %lu resp: %d\n", io_seq, r);
+
+	REPLICA_LOG("snap create ioseq: %lu resp: %s\n", io_seq,
+	    (r == true) ? "success" : "failed");
 	return (ret);
 }
 
