@@ -310,7 +310,7 @@ istgt_lu_set_state(ISTGT_LU_Ptr lu, ISTGT_STATE state)
 }
 
 #ifdef REPLICATION
-//int initialize_volume(spec_t *, int, int);
+//int initialize_volume(spec_t *, int, int, int);
 #endif
 
 #endif /* USE_ATOMIC */

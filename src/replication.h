@@ -52,6 +52,8 @@
 
 #define	MAX_OF(a, b) (((a) > (b))?(a):(b))
 
+#define CONSISTENCY_FACTOR(a) (((a)/2) + 1)
+
 typedef enum zvol_cmd_type_e {
 	CMD_IO = 1,
 	CND_MGMT,
@@ -102,6 +104,7 @@ typedef struct rcommon_cmd_s {
 	int non_quorum_copies_sent;
 	uint8_t replication_factor;
 	uint8_t consistency_factor;
+	struct replica_s *scalingup_replica;
 	zvol_op_code_t opcode;
 	uint64_t io_seq;
 	uint64_t lun_id;
@@ -207,7 +210,7 @@ extern int do_drainfd(int);
 void close_fd(int epollfd, int fd);
 int64_t perform_read_write_on_fd(int fd, uint8_t *data, uint64_t len,
     int state);
-int initialize_volume(spec_t *spec, int, int);
+int initialize_volume(spec_t *spec, int, int, int);
 void destroy_volume(spec_t *spec);
 void inform_mgmt_conn(replica_t *r);
 extern const char * get_cv_status(spec_t *spec);

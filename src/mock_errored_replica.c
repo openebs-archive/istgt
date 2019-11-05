@@ -453,6 +453,8 @@ send_mgmt_ack(int fd, zvol_io_hdr_t *mgmt_ack_hdr, void *buf, int *zrepl_status_
 		case ZVOL_OPCODE_HANDSHAKE:
 			strcpy(mgmt_ack_data.ip, replica_ip);
 			strcpy(mgmt_ack_data.volname, buf);
+			memset(mgmt_ack_data.replica_id, 0, REPLICA_ID_LEN);
+			sprintf(mgmt_ack_data.replica_id, "%d", replica_port);
 			mgmt_ack_data.port = replica_port;
 			mgmt_ack_data.pool_guid = replica_port;
 			mgmt_ack_data.zvol_guid = replica_port;

@@ -1467,6 +1467,9 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	int i, j, k;
 	int rc;
 	int gotstorage = 0;
+#ifdef REPLICATION
+	trusty_replica_t *trusty_replica;
+#endif
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "add unit %d\n", sp->num);
 
 	if (sp->num >= MAX_LOGICAL_UNIT) {
@@ -1710,6 +1713,23 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "ReadOnly %s\n",
 	    lu->readonly ? "Yes" : "No");
 #ifdef REPLICATION
+	val = istgt_get_val(sp, "DesiredReplicationFactor");
+	if (val == NULL) {
+		ISTGT_ERRLOG("Desired ReplicationFactor not found in conf file\n");
+		goto error_return;
+	} else {
+		lu->desired_replication_factor = (int) strtol(val, NULL, 10);
+		if (lu->desired_replication_factor > MAXREPLICA) {
+			ISTGT_ERRLOG("Max replication factor is %d.."
+			    " given desired replication factor %d\n",
+			    MAXREPLICA, lu->desired_replication_factor);
+			goto error_return;
+		}
+	}
+
+	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "Desired ReplicationFactor %d\n",
+	    lu->desired_replication_factor);
+
 	val = istgt_get_val(sp, "ReplicationFactor");
 	if (val == NULL) {
 		ISTGT_ERRLOG("ReplicationFactor not found in conf file\n");
@@ -1717,8 +1737,8 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	} else {
 		lu->replication_factor = (int) strtol(val, NULL, 10);
 		if (lu->replication_factor > MAXREPLICA) {
-			ISTGT_ERRLOG("Max replication factor is %d.. "
-			    "given %d\n", MAXREPLICA, lu->replication_factor);
+			ISTGT_ERRLOG("Max replication factor is %d.. given %d\n",
+			    MAXREPLICA, lu->replication_factor);
 			goto error_return;
 		}
 	}
@@ -1737,9 +1757,48 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "ConsistencyFactor %d\n",
 	    lu->consistency_factor);
 
+	if (lu->replication_factor > lu->desired_replication_factor) {
+		ISTGT_ERRLOG("Invalid config ReplicationFactor(%d) is"
+		    " greater than Desired ReplicationFactor(%d)\n",
+		    lu->replication_factor, lu->desired_replication_factor);
+		goto error_return;
+	}
 	if (lu->replication_factor <= 0 || lu->consistency_factor <= 0 ||
 		lu->replication_factor < lu->consistency_factor) {
 		ISTGT_ERRLOG("Invalid ReplicationFactor/ConsistencyFactor or their ratio\n");
+		goto error_return;
+	}
+	/* Read trusty replica details from conf file and maintain in memory structure*/
+	/* Replica configuration in istgt conf file looks like
+	 * Replica 6061 6061
+	 * Replica 6062 6062
+	 * Replica 6063 6063
+	 */
+	val = istgt_get_val(sp, "Replica");
+	i = 0;
+	TAILQ_INIT(&lu->trusty_replicas);
+	if (val != NULL) {
+		for (i=0; ; i++) {
+			key = istgt_get_nmval(sp, "Replica", i, 0);
+			if (key == NULL) {
+				break;
+			}
+			trusty_replica = xmalloc(sizeof (trusty_replica_t));
+			memset(trusty_replica, 0, sizeof(trusty_replica_t));
+			val = istgt_get_nmval(sp, "Replica", i, 1);
+			strncpy(trusty_replica->replica_id, key, REPLICA_ID_LEN);
+			trusty_replica->zvol_guid = (uint64_t) strtoul(val, NULL, 10);
+			TAILQ_INSERT_TAIL(&lu->trusty_replicas, trusty_replica, next);
+			ISTGT_LOG("trusty replica key {%s} and"
+			    " zvol guid {%lu}\n",trusty_replica->replica_id, trusty_replica->zvol_guid);
+		}
+	}
+	// It is useful in case where multiple copies of data
+	// is lost and to reconstruct the data from other replicas
+	// RF and CF will be updated to correspondig values
+	if (i > lu->desired_replication_factor) {
+		ISTGT_ERRLOG("trusty replica count %d is greater than desired replication factor %d\n",
+		    i, lu->replication_factor);
 		goto error_return;
 	}
 #endif
@@ -2316,6 +2375,13 @@ error_return:
 		}
 		MTX_UNLOCK(&istgt->mutex);
 	}
+#ifdef REPLICATION
+	/* Releasing in memory details */
+	while (trusty_replica = TAILQ_FIRST(&lu->trusty_replicas)) {
+                TAILQ_REMOVE(&lu->trusty_replicas, trusty_replica, next);
+                xfree(trusty_replica);
+        }
+#endif
 
 	xfree(lu);
 	return (-1);
@@ -2567,10 +2633,20 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 				ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "Device file=%s\n",
 							    lu->lun[i].u.device.file);
 			} else if (strcasecmp(val, "Storage") == 0) {
+#ifndef	REPLICATION
 				file = istgt_get_nmval(sp, buf, j, 1);
 				size = istgt_get_nmval(sp, buf, j, 2);
 				rsz  = istgt_get_nmval(sp, buf, j, 3);
+#else
+				size = istgt_get_nmval(sp, buf, j, 1);
+				rsz  = istgt_get_nmval(sp, buf, j, 2);
+#endif
+
+#ifndef	REPLICATION
 				if (file == NULL || size == NULL) {
+#else
+				if (size == NULL) {
+#endif
 					ISTGT_ERRLOG("LU%d: LUN%d: format error\n", lu->num, i);
 					goto error_return;
 				}
@@ -2612,9 +2688,15 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 						new_rsize = (uint32_t)vall;
 				}
 
+#ifndef	REPLICATION
 				if (old_size == new_size && new_rsize == old_rsize &&
 					spec != NULL && strcasecmp(file, spec->file) == 0)
 					continue;
+#else
+				if (old_size == new_size && new_rsize == old_rsize &&
+					spec != NULL)
+					continue;
+#endif
 
 				lu->lun[i].u.storage.size = new_size;
 				lu->lun[i].u.storage.rsize = new_rsize;

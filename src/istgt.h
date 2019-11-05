@@ -165,6 +165,9 @@
 
 #define ISTGT_UCTL_UNXPATH "/var/run/istgt_ctl_sock"
 
+// Sock file used to communicate from target to side car
+#define ISTGT_MGMT_UNXPATH "/var/run/volume_mgmt_sock"
+
 #define MTX_LOCK(MTX) \
 	do {								\
 		int _rc_;							\

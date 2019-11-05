@@ -15,13 +15,15 @@ do
 	VALUE=$(echo $ARGUMENT | cut -f2 -d=)
 
 	case "$KEY" in
-		volname)		volname=${VALUE} ;;
-		portal)			portal=${VALUE} ;;
-		size)			size=${VALUE} ;;
-		externalIP)		externalIP=${VALUE} ;;
-		replication_factor)	replication_factor=${VALUE} ;;
-		consistency_factor)	consistency_factor=${VALUE} ;;
-		test_env)		test_env=${VALUE} ;;
+		volname)			volname=${VALUE} ;;
+		portal)				portal=${VALUE} ;;
+		size)				size=${VALUE} ;;
+		externalIP)			externalIP=${VALUE} ;;
+		desired_replication_factor)	desired_replication_factor=${VALUE} ;;
+		replication_factor)		replication_factor=${VALUE} ;;
+		consistency_factor)		consistency_factor=${VALUE} ;;
+		test_env)			test_env=${VALUE} ;;
+		known_replica1_details)		known_replica1_details=${VALUE} ;;
 		*)
 	esac
 done
@@ -54,11 +56,16 @@ fi
 sed -i "s|TargetName.*|TargetName $volname|g" $CONF_FILE
 sed -i "s|ReplicationFactor.*|ReplicationFactor $replication_factor|g" $CONF_FILE
 sed -i "s|ConsistencyFactor.*|ConsistencyFactor $consistency_factor|g" $CONF_FILE
+sed -i "s|DesiredReplicationFactor.*|DesiredReplicationFactor $desired_replication_factor|g" $CONF_FILE
 sed -i "s|TargetAlias.*|TargetAlias nicknamefor-$volname|g" $CONF_FILE
 sed -i "s|Portal UC1.*|Portal UC1 $portal:3261|g" $CONF_FILE
 sed -i "s|Portal DA1.*|Portal DA1 $portal:3260|g" $CONF_FILE
 sed -i "s|Netmask IP.*|Netmask $portal\/8|g" $CONF_FILE
 sed -i "s|LUN0 Storage.*|LUN0 Storage $size 32k|g" $CONF_FILE
+
+if [ -n "$known_replica1_details" ]; then
+	echo "  $known_replica1_details" >> $CONF_FILE
+fi
 
 cp $CONF_FILE /usr/local/etc/istgt/
 

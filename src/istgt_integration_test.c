@@ -37,6 +37,7 @@
 __thread char tinfo[50] = {0};
 int g_trace_flag = 0;
 pthread_t new_replica[10] = { 0 };
+int desired_replication_factor = 3;
 int replication_factor = 3, consistency_factor = 2;
 int new_replica_count = 3;	/* Assign same number as replication factor */
 
@@ -76,6 +77,8 @@ typedef struct rargs_s {
 	/* IP:Port on which replica is listening */
 	char replica_ip[MAX_IP_LEN];
 	uint16_t replica_port;
+	uint64_t zvol_guid;
+	char replica_id[REPLICA_ID_LEN];
 
 	/* IP:Port on which controller is listening */
 	char ctrl_ip[MAX_IP_LEN];
@@ -236,10 +239,10 @@ static void
 handle_replica_start_rebuild(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 {
 	zvol_io_hdr_t *hdr = &(zio_cmd->hdr);
-	mgmt_ack_t *mgmt_ack_data = (mgmt_ack_t *)zio_cmd->buf;
+	rebuild_req_t *rebuild_req = (rebuild_req_t *)zio_cmd->buf;
 
 	/* Mark rebuild is in progress */
-	if ((strcmp(mgmt_ack_data->volname, "")) == 0) {
+	if ((strcmp(rebuild_req->volname, "")) == 0) {
 		rargs->zrepl_status = ZVOL_STATUS_HEALTHY;
 		rargs->zrepl_rebuild_status = ZVOL_REBUILDING_DONE;
 	} else {
@@ -510,6 +513,7 @@ handle_handshake(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 	mgmt_ack->quorum = 1;
 	strncpy(mgmt_ack->ip, rargs->replica_ip, sizeof (mgmt_ack->ip));
 	strncpy(mgmt_ack->volname, rargs->volname, sizeof (mgmt_ack->volname));
+	strncpy(mgmt_ack->replica_id, rargs->replica_id, sizeof (rargs->replica_id));
 	hdr->status = ZVOL_OP_STATUS_OK;
 	hdr->len = sizeof (mgmt_ack_t);
 
@@ -1182,6 +1186,8 @@ create_mock_replicas(int r_factor, char *volname)
 		rargs->replica_port = 6061 + i;
 		rargs->kill_replica = false;
 		rargs->kill_is_over = false;
+		rargs->zvol_guid = rargs->replica_port;
+		sprintf(rargs->replica_id, "%d", rargs->replica_port);
 
 		strncpy(rargs->ctrl_ip, "127.0.0.1", MAX_IP_LEN);
 		rargs->ctrl_port = 6060;
@@ -1368,7 +1374,7 @@ rebuild_test(void *arg)
 					rargs->kill_replica = true;
 					test_args->state++;
 				}
-				break; 
+				break;
 
 				case UNIT_TEST_STATE_REREGISTER_REPLICA:
 				if (rargs->kill_is_over == true) {
@@ -1431,6 +1437,7 @@ main(int argc, char **argv)
 {
 	int rc;
 	spec_t *spec = (spec_t *)malloc(sizeof (spec_t));
+	ISTGT_LU_Ptr lu = (ISTGT_LU_Ptr)malloc(sizeof (ISTGT_LU));
 	pthread_t replica_thread;
 	struct stat sbuf;
 	pthread_t rebuild_test_thread;
@@ -1490,7 +1497,11 @@ main(int argc, char **argv)
 		return (1);
 	}
 
-	initialize_volume(spec, replication_factor, consistency_factor);
+	// Assign desired_replication_facto as replication factor
+	lu->desired_replication_factor = desired_replication_factor;
+	TAILQ_INIT(&lu->trusty_replicas);
+	spec->lu = lu;
+	initialize_volume(spec, replication_factor, consistency_factor, desired_replication_factor);
 
 	pthread_create(&replica_thread, NULL, &init_replication, (void *)NULL);
 

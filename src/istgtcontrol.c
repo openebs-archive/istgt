@@ -905,16 +905,16 @@ exec_snap(UCTL_Ptr uctl)
 }
 
 static int
-exec_resize(UCTL_Ptr uctl)
+exec_command(UCTL_Ptr uctl)
 {
 	const char *delim = ARGS_DELIM;
 	char *arg, *result;
 	int rc = 0;
 	char *name = uctl->setargv[0];
-	char *size = uctl->setargv[1];
+	char *value = uctl->setargv[1];
 
 	uctl_snprintf(uctl, "%s \"%s\" \"%s\" \n",
-		uctl->cmd, name, size);
+		uctl->cmd, name, value);
 
 	rc = uctl_writeline(uctl);
 	if (rc != UCTL_CMD_OK) {
@@ -1332,7 +1332,8 @@ static EXEC_TABLE exec_table[] =
 #ifdef	REPLICATION
 	{"SNAPCREATE", exec_snap, 2, 0},
 	{"SNAPDESTROY", exec_snap, 2, 0},
-	{"RESIZE", exec_resize, 2, 0},
+	{"RESIZE", exec_command, 2, 0},
+	{"DRF", exec_command, 2, 0},
 	{"REPLICA", exec_replica, 0, 0},
 	{"MAXIOWAIT", exec_max_io_wait, 0, 0},
 #endif
@@ -1823,6 +1824,7 @@ usage(void)
 	printf(" mempool    get mempool details\n");
 	printf(" maxiowait  get/set wait time for IO completion in seconds\n");
 	printf(" resize     read the size from command cli and updates the size\n");
+	printf(" drf        read the desired replication factor from command cli and update in memory\n");
 #endif
 	printf(" set        set values for variables:\n");
 	printf("            Syntax: istgtcontrol -t <iqn(ALL to set globally)> \
@@ -2100,7 +2102,8 @@ main(int argc, char *argv[])
 	(strcmp(cmd, "SNAPDESTROY") == 0) ||
 	    (strcmp(cmd, "REPLICA") == 0) ||
 	    (strcmp(cmd, "MAXIOWAIT") == 0) ||
-	    (strcmp(cmd, "RESIZE") == 0)) {
+	    (strcmp(cmd, "RESIZE") == 0) ||
+	    (strcmp(cmd, "DRF") == 0)) {
 		uctl->setargv = argv;
 		uctl->setargcnt = argc;
 	}
