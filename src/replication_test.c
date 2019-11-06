@@ -65,6 +65,7 @@ uint64_t read_ios;
 uint64_t write_ios;
 int replica_quorum_state = 0;
 char replica_id[REPLICA_ID_LEN];
+uint64_t replication_factor = 0;
 
 static void
 sig_handler(int sig)
@@ -249,6 +250,17 @@ test_read_data(int fd, uint8_t *data, uint64_t len)
 	return nbytes;
 }
 
+static bool
+is_valid_rebuild_status(zrepl_status_ack_t *zrepl_status) {
+	if (zrepl_status->state == ZVOL_STATUS_DEGRADED)
+		return true;
+	if (replication_factor == 1 &&
+	    zrepl_status->state == ZVOL_STATUS_HEALTHY &&
+	    zrepl_status->rebuild_status == ZVOL_REBUILDING_DONE)
+		return true;
+	return false;
+}
+
 static int
 send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
     int replica_port, int delay_connection, zrepl_status_ack_t *zrepl_status,
@@ -311,12 +323,14 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 		iovec[1].iov_base = zrepl_status;
 		iovec[1].iov_len = sizeof (zrepl_status_ack_t);
 	} else if (opcode == ZVOL_OPCODE_START_REBUILD) {
-		if (zrepl_status->state != ZVOL_STATUS_DEGRADED) {
+		if (!is_valid_rebuild_status(zrepl_status)) {
 			REPLICA_ERRLOG("START_REBUILD is on invalid repl "
 			    "status %d\n", zrepl_status->state);
 			exit(1);
 		}
-		zrepl_status->rebuild_status = ZVOL_REBUILDING_SNAP;
+		if (zrepl_status->state == ZVOL_STATUS_DEGRADED)
+			zrepl_status->rebuild_status = ZVOL_REBUILDING_SNAP;
+
 		mgmt_ack_hdr->len = 0;
 		iovec_count = 1;
 	} else if (opcode == ZVOL_OPCODE_STATS) {
@@ -778,7 +792,8 @@ again:
 execute_io:
 					if (io_hdr->opcode == ZVOL_OPCODE_OPEN) {
 						open_ptr = (zvol_op_open_data_t *)data;
-						if (open_ptr->replication_factor == 1 &&
+						replication_factor = open_ptr->replication_factor;
+						if (replication_factor == 1 &&
 						    replica_quorum_state == 1) {
 							zrepl_status->state = ZVOL_STATUS_HEALTHY;
 							zrepl_status->rebuild_status = ZVOL_REBUILDING_DONE;
