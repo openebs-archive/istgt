@@ -703,6 +703,15 @@ is_replica_connected ()
 	fi
 }
 
+## get_connected_replica_count returns no.of replicas connected to
+## the target by using istgtcontrol replica commmand
+get_connected_replica_count ()
+{
+	cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[].replicaId'"
+	cnt=$(eval "$cmd" | wc -l)
+	echo "$cnt"
+}
+
 run_scaleup_scaledown_test ()
 {
 	local replica1_port="6161"
@@ -770,14 +779,24 @@ run_scaleup_scaledown_test ()
 	## wait for few seconds to disconnect the replica
 	sleep 3
 
+	## Performed scale down process(i.e decreased the drf from 3 to 2)
 	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica_ip" -P "$replica1_port" -V $replica1_vdev -u "$replica1_id" -q &
 	replica1_pid=$!
-	## checking whether process exist or not
-	if ps -p $replica1_pid > /dev/null 2>&1
-	then
-		echo "Target should disconnect the replica ($replica1_id:$replica1_port) removed during scale down"
-		cat $LOGFILE
-		exit 1
+	sleep 2
+
+	## If replica1 tries to connect target will reject and this entry
+	## should not available in istgtcontrol replica command
+	replica_status=$(is_replica_connected "$replica1_port")
+	if [ "$replica_status" == 0 ]; then
+		echo "Replica($replica1_port) should be disconnected from the target as part of scaledown"
+		exit -1
+	fi
+
+	## After scaledown current replica count should be 2
+	current_replica_count=$(get_connected_replica_count)
+	if [ "$current_replica_count" != "2"]; then
+		echo "connected replica count should be 2 but got $(current_replica_count)"
+		exit -1
 	fi
 
 	## Remove replica2
@@ -790,7 +809,7 @@ run_scaleup_scaledown_test ()
 	## Wait for few seconds after disconnecting the replica
 	sleep 3
 
-	## pass zvol_guid as argument
+	## pass zvol_guid as argument it should not exist in list
 	replica_status=$(is_replica_connected "$replica2_port")
 	if [ "$replica_status" == 0 ]; then
 		echo "Replica($replica2_port) should be disconnected from the target as part of scaledown"
