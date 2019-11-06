@@ -64,6 +64,11 @@ typedef struct replica_s {
 	pthread_mutex_t r_mtx;
 	replica_state_t state;
 	spec_t *spec;
+	/* decides whether IOs need to send for the replica
+	 * or not. If it is enabled then don't send IOs for
+	 * this replica.
+	 */
+	int cordon;
 	int iofd;
 	/* management connection descriptor */
 	int mgmt_fd;

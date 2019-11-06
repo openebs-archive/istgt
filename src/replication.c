@@ -63,6 +63,7 @@ static void inform_data_conn(replica_t *r);
 static void free_replica(replica_t *r);
 static int handle_mgmt_event_fd(replica_t *replica);
 static int get_non_quorum_replica_count(spec_t *spec);
+static int wait_for_ongoing_ios_on_replica(spec_t *spec, replica_t *replica, int sec);
 
 #define build_rcomm_cmd(rcomm_cmd, cmd, offset, nbytes) 						\
 	do {								\
@@ -931,7 +932,7 @@ update_trusty_replica_list(spec_t *spec, replica_t *rep, int rf) {
 	char *data;
 	const char *json_string;
 	struct json_object *jobj;
-	int cf = (rf/2) + 1;
+	int cf = CONSISTENCY_FACTOR(rf);
 
 	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 
@@ -1437,6 +1438,7 @@ update_replica_entry(spec_t *spec, replica_t *replica, int iofd)
 
 	replica->ongoing_io = NULL;
 	replica->ongoing_io_len = 0;
+	replica->cordon = 0;
 	replica->ongoing_io_buf = NULL;
 	replica->iofd = iofd;
 	replica->ip = malloc(strlen(ack_data->ip)+1);
@@ -2174,6 +2176,206 @@ istgt_lu_resize_volume(spec_t *spec, uint64_t size) {
 	return true;
 }
 
+#define IS_REPLICA_ID_EXIST_IN_LIST(_replica_id, _list, _no_of_items, _is_exist) 	\
+	do {										\
+		int i;									\
+		for (i=0; i < _no_of_items; i++) {					\
+			if (strncmp(_replica_id, _list[i], REPLICA_ID_LEN) == 0) {	\
+					_is_exist = true;				\
+					break;						\
+			}								\
+		}									\
+	} while(0)
+
+
+/* is_valid_known_replica_list this function should be called by taking
+ * spec->rq_mtx lock
+ */
+static bool
+is_valid_known_replica_list(spec_t *spec, int listcnt, char **known_replica_id_list) {
+	trusty_replica_t *trusty_replica = NULL;
+	bool found_replica;
+	int i;
+
+	ASSERT(MTX_LOCKED(&spec->rq_mtx));
+	for(i=0; i<listcnt; i++) {
+		found_replica = false;
+		TAILQ_FOREACH(trusty_replica, &spec->lu->trusty_replicas, next) {
+			if (strncmp(trusty_replica->replica_id,
+			    known_replica_id_list[i], REPLICA_ID_LEN) == 0) {
+				found_replica = true;
+				break;
+			}
+		}
+		// If known replicaid doesn't exist in trusty replica then
+		// replicaid list has wrong information
+		if (!found_replica) {
+			ISTGT_ERRLOG("replicaid (%s) doesn't exist in "
+			    "trusty replica list\n", known_replica_id_list[i]);
+			return false;
+		}
+	}
+	return true;
+}
+
+static bool
+can_replica_remove(spec_t *spec, replica_t *removing_replica) {
+	replica_t *replica;
+
+	if (spec->healthy_rcount < spec->consistency_factor)
+		return false;
+
+	// TODO: Return true when all the replicas_id should be healthy
+	// else return false
+	TAILQ_FOREACH(replica, &spec->rq, r_next) {
+		if (replica != removing_replica &&
+		    replica->state != ZVOL_STATUS_HEALTHY)
+			return false;
+	}
+	return true;
+}
+
+/* istgt_lu_remove_unknown_replica will disconnect the replica and update
+ * volume configurations. Steps performed in this function
+ * 1. Get replica information that is going to remove/disconnect from target
+ * 2. Wait for any Ongoing snapshots
+ * 3. Verify whether replicas are healthy or not other than removing replica. If
+ *    there are degraded replicas return error
+ * 4. On success pause the IOs for 5 seconds. If there are pending IOs return error
+ *    by resuming IOs else continue the process
+ * 5. Mark the replica cordon for IOs
+ * 6. Update inmemory configurations.
+ */
+int
+istgt_lu_remove_unknown_replica(spec_t *spec, int drf, char **known_replica_id_list) {
+	replica_t *replica, *removing_replica = NULL;
+	int rc = -1;
+	// Hard coded IO wait time
+	int io_wait_time = 5;
+	int new_rf = drf;
+	int new_cf = CONSISTENCY_FACTOR(new_rf);
+	int found_in_rq_list = false;
+	int found_replica = false;
+
+	trusty_replica_t *trusty_replica = NULL;
+
+	MTX_LOCK(&spec->rq_mtx);
+	ASSERT(drf == spec->replication_factor - 1);
+
+	if (is_valid_known_replica_list(spec, drf, known_replica_id_list) == false) {
+		MTX_UNLOCK(&spec->rq_mtx);
+		ISTGT_ERRLOG("invalid known replicaid list\n");
+		return rc;
+	}
+
+	// Find the replica who's replicaID is not exist in known_replica_id_list
+	TAILQ_FOREACH(replica, &spec->rq, r_next) {
+		/* No need of taking replica->r_mtx lock since we took 
+		 * lock on spec->rq_mtx it is good enough to read replica_id
+		 * properity.
+		 */
+		found_replica = false;
+		/* If current replica not exist in provided list then that
+		 * replica need to be removed
+		 */
+		IS_REPLICA_ID_EXIST_IN_LIST(replica->replica_id,
+		    known_replica_id_list, drf, found_replica);
+		if (!found_replica) {
+			removing_replica = replica;
+			found_in_rq_list = true;
+			break;
+		}
+	}
+	if (removing_replica == NULL) {
+		TAILQ_FOREACH(replica, &spec->non_quorum_rq, r_non_quorum_next) {
+			found_replica = false;
+			IS_REPLICA_ID_EXIST_IN_LIST(replica->replica_id,
+			    known_replica_id_list, drf, found_replica);
+			if (!found_replica) {
+				removing_replica = replica;
+				break;
+			}
+		}
+	}
+
+	/* Wait for any ongoing snapshot commands */
+	while (spec->quiesce == 1) {
+		MTX_UNLOCK(&spec->rq_mtx);
+		sleep(1);
+		MTX_LOCK(&spec->rq_mtx);
+	}
+
+	if (can_replica_remove(spec, removing_replica) == false) {
+		MTX_UNLOCK(&spec->rq_mtx);
+		REPLICA_ERRLOG("Remaining replicas are not healthy to remove replica...\n");
+		return rc;
+	}
+
+	/* If replica that needs to be removed is not connected and
+	 * if there is no change in consistency model then go and update
+	 * volume configuration without pausing IOs.
+	 */
+	if (!found_in_rq_list ||
+	    (removing_replica == NULL && new_cf == spec->consistency_factor))
+		goto update_volume_configurations;
+
+	/* Select some replica other than removing replica and
+	 * wait for few seconds if there are any ongoing IOs
+	 */
+	TAILQ_FOREACH(replica, &spec->rq, r_next)
+		if (replica != removing_replica)
+			break;
+
+	spec->quiesce = 1;
+	rc = wait_for_ongoing_ios_on_replica(spec, replica, io_wait_time);
+	if ( rc != 0 ) {
+		spec->quiesce = 0;
+		MTX_UNLOCK(&spec->rq_mtx);
+		REPLICA_ERRLOG("pausing failed..\n");
+		return rc;
+	}
+	if (removing_replica != NULL) {
+		MTX_LOCK(&removing_replica->r_mtx);
+		// Marking replica as cordon(not ready to serve IOs)
+		removing_replica->cordon = 1;
+		MTX_UNLOCK(&removing_replica->r_mtx);
+		REPLICA_LOG("Replica(%s:%lu) marked cordoned for IOs\n",
+		    removing_replica->replica_id, removing_replica->zvol_guid);
+	}
+
+update_volume_configurations:
+	spec->replication_factor = new_rf;
+	spec->consistency_factor = new_cf;
+	spec->lu->replication_factor = new_rf;
+	spec->lu->consistency_factor = new_cf;
+	spec->lu->desired_replication_factor = drf;
+	spec->desired_replication_factor = drf;
+
+	// If removing replica exists in trusty replica list remove from it
+	TAILQ_FOREACH(trusty_replica, &spec->lu->trusty_replicas, next) {
+		found_replica = false;
+		IS_REPLICA_ID_EXIST_IN_LIST(trusty_replica->replica_id,
+		    known_replica_id_list, drf, found_replica);
+		if (!found_replica) {
+			TAILQ_REMOVE(&spec->lu->trusty_replicas,
+			    trusty_replica, next);
+			break;
+		}
+	}
+	spec->quiesce = 0;
+
+	if (removing_replica != NULL) {
+		MTX_LOCK(&removing_replica->r_mtx);
+		inform_mgmt_conn(removing_replica);
+		MTX_UNLOCK(&removing_replica->r_mtx);
+	}
+
+	MTX_UNLOCK(&spec->rq_mtx);
+	ISTGT_LOG("Successfully removed the replica is_connected: %s\n",
+	    (removing_replica == NULL)? "true" : "false");
+	return 0;
+}
+
 void
 get_replica_stats_json(replica_t *replica, struct json_object **jobj)
 {
@@ -2497,13 +2699,13 @@ wait_for_ongoing_ios_on_replica(spec_t *spec, replica_t *replica, int sec) {
 		if (spec->inflight_write_io_cnt != 0 ||
 		    spec->inflight_sync_io_cnt != 0)
 			io_found = true;
-		if (replica->replica_inflight_write_io_cnt != 0 ||
+		else if (replica->replica_inflight_write_io_cnt != 0 ||
 		    replica->replica_inflight_sync_io_cnt != 0) {
 			io_found = true;
 		}
 		if (!io_found) {
 			ret = 0;
-			ISTGT_LOG("Successfully flushed the IO's from replica(%s:%lu) queue",
+			ISTGT_LOG("Successfully flushed the IO's from replica(%s:%lu) queue\n",
 			    replica->replica_id, replica->zvol_guid);
 			break;
 		}
@@ -2513,7 +2715,7 @@ wait_for_ongoing_ios_on_replica(spec_t *spec, replica_t *replica, int sec) {
 		ISTGT_LOG("Waiting for IO's to flush on replica(%s:%lu) "
 		    "spec write_io_cnt: %lu and sync_io_cnt: %lu replica "
 		    "write_io_cnt: %lu sync_io_cnt: %lu\n",
-	   	    replica->replica_id, replica->zvol_guid,
+		    replica->replica_id, replica->zvol_guid,
 		    spec->inflight_write_io_cnt, spec->inflight_sync_io_cnt,
 		    replica->replica_inflight_write_io_cnt, replica->replica_inflight_sync_io_cnt);
 		/*
@@ -3608,6 +3810,8 @@ retry_read:
 	num_read_ios = 0;
 
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
+		if (replica->cordon == 1)
+			continue;
 		/*
 		 * If there are some healthy replica then send read command
 		 * to all healthy replica else send read command to all
@@ -3666,6 +3870,8 @@ retry_read:
 
 	if (rcomm_cmd->opcode == ZVOL_OPCODE_WRITE) {
 		TAILQ_FOREACH(replica, &spec->non_quorum_rq, r_non_quorum_next) {
+			if (replica->cordon == 1)
+				continue;
 			rcomm_cmd->non_quorum_copies_sent++;
 
 			build_rcmd();

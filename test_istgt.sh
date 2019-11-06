@@ -88,6 +88,25 @@ start_replica() {
 	$REPLICATION_TEST $* >> $LOGFILE 2>&1
 }
 
+## wait_for_istgt_process verifies whether istgt is running or not
+## $1 - retry count
+wait_for_istgt_process() {
+	local retry_count=$1
+
+	##Wait for istgt to up
+	while [ $retry_count -gt 0 ]; do
+		value=$(netstat -nap | grep $CONTROLLER_PORT | grep -w LISTEN | wc -l)
+		if [ $value == "1" ]; then
+			break
+		fi
+		sleep 1
+		retry_count=$((retry_count - 1))
+		if [ $retry_count == 1 ]; then
+			exit 1
+		fi
+	done
+}
+
 stop_istgt() {
 	if [ $SETUP_PID -ne -1 ]; then
 		pkill -9 -P $(list_descendants $SETUP_PID)
@@ -684,7 +703,16 @@ is_replica_connected ()
 	fi
 }
 
-run_scaleup_test ()
+## get_connected_replica_count returns no.of replicas connected to
+## the target by using istgtcontrol replica commmand
+get_connected_replica_count ()
+{
+	cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[].replicaId'"
+	cnt=$(eval "$cmd" | wc -l)
+	echo "$cnt"
+}
+
+run_scaleup_scaledown_test ()
 {
 	local replica1_port="6161"
 	local replica2_port="6162"
@@ -708,11 +736,11 @@ run_scaleup_test ()
 	## Replica2, Replica3 will be part of unknown replicas
 	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica_ip" -P "$replica2_port" -V $replica2_vdev -u "$replica2_id" &
 	replica2_pid=$!
-	sleep 2
+	sleep 3
 
 	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica_ip" -P "$replica3_port" -V $replica3_vdev -u "$replica3_id" &
 	replica3_pid=$!
-	sleep 2
+	sleep 3
 
 	cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].status'"
 	rt=$(eval $cmd)
@@ -725,7 +753,7 @@ run_scaleup_test ()
 	## Below replica is connecting as known replica
 	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica_ip" -P "$replica1_port" -V $replica1_vdev -u "$replica1_id" -q &
 	replica1_pid=$!
-	sleep 15 #Replica will take some time to make successful connection to target
+	sleep 20 #Replica will take some time to make successful connection to target
 
 	cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].status'"
 	rt=$(eval $cmd)
@@ -737,6 +765,64 @@ run_scaleup_test ()
 
 	## Wait for replcaed replica to become healthy
 	wait_for_healthy_replicas 3
+
+	## disconnect one replica and trigger scaledown
+	pkill -9 -P $replica1_pid
+
+	## remove replica1
+	istgtcontrol drf vol1 2 $replica2_id $replica3_id
+	rc=$?
+	if [ $rc != 0 ]; then
+		echo "Replica Scaledown should be succeed"
+		exit 1
+	fi
+	## wait for few seconds to disconnect the replica
+	sleep 3
+
+	## Performed scale down process(i.e decreased the drf from 3 to 2)
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica_ip" -P "$replica1_port" -V $replica1_vdev -u "$replica1_id" -q &
+	replica1_pid=$!
+	sleep 2
+
+	## If replica1 tries to connect target will reject and this entry
+	## should not available in istgtcontrol replica command
+	replica_status=$(is_replica_connected "$replica1_port")
+	if [ "$replica_status" == 0 ]; then
+		echo "Replica($replica1_port) should be disconnected from the target as part of scaledown"
+		exit -1
+	fi
+
+	## After scaledown current replica count should be 2
+	current_replica_count=$(get_connected_replica_count)
+	if [ "$current_replica_count" != "2"]; then
+		echo "connected replica count should be 2 but got $(current_replica_count)"
+		exit -1
+	fi
+
+	## Remove replica2
+	istgtcontrol drf vol1 1 $replica3_id
+	rc=$?
+	if [ $rc != 0 ]; then
+		echo "Replica Scaledown should be succeed"
+		exit 1
+	fi
+	## Wait for few seconds after disconnecting the replica
+	sleep 3
+
+	## pass zvol_guid as argument it should not exist in list
+	replica_status=$(is_replica_connected "$replica2_port")
+	if [ "$replica_status" == 0 ]; then
+		echo "Replica($replica2_port) should be disconnected from the target as part of scaledown"
+		exit -1
+	fi
+
+	cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].status'"
+	rt=$(eval $cmd)
+	if [ ${rt} != "\"Healthy\"" ]; then
+		$ISTGTCONTROL -q REPLICA vol1
+		echo "volume status is supposed to be Healthy since it is single replica case after scale down, but, $rt"
+		exit 1
+	fi
 
 	## Remove known replica from conf file
 	sed -i "$ d" /usr/local/istgt/istgt.conf
@@ -767,6 +853,8 @@ run_replica_connection_test ()
 	CONSISTENCY_FACTOR=1
 
 	setup_test_env $replica4_vdev
+
+	wait_for_istgt_process 3
 
 	# We didn't passed the replicaId so target should disconnect this replica
 	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica_ip" -P "$replica1_port" -V $replica1_vdev -q &
@@ -823,6 +911,14 @@ run_replica_connection_test ()
 	replica3_pid=$!
 	sleep 2
 
+	## Scaling down replica shouldn't be allowed when scaleup is in progress
+	istgtcontrol drf vol1 2 $replica1_id $replica2_id
+	rc=$?
+	if [ $rc == 0 ]; then
+		echo "Replica Scaledown should be failed due to ongoing scaleup process"
+		exit 1
+	fi
+
 	# wait till unknown replicas become healthy and known replicas
 	wait_for_healthy_replicas 3
 
@@ -856,9 +952,35 @@ run_replica_connection_test ()
 	## Wait for replcaed replica to become healthy
 	wait_for_healthy_replicas 3
 
+	## scale down the replicas to 2 (provided corrupted replica list)
+	istgtcontrol drf vol1 2 $replica1_id $new_replica_port
+	rc=$?
+	if [ $rc == 0 ]; then
+		echo "Replica Scaledown should be failed due to invalid replica id list"
+		exit 1
+	fi
+
+	## Scaledown replica2
+	istgtcontrol drf vol1 2 $replica1_id $replica3_id
+	rc=$?
+	if [ $rc != 0 ]; then
+		echo "Replica Scaledown should be succeed"
+		exit 1
+	fi
+	## Wait for few seconds after scaledown
+	sleep 3
+
+	## pass zvol_guid as argument
+	replica_status=$(is_replica_connected "$replica2_id")
+	if [ "$replica_status" == 0 ]; then
+		echo "Replica($replica2_id) should be disconnected from the target as we performed scaledown"
+		exit -1
+	fi
+
 	pkill -9 -P $replica1_pid
 	pkill -9 -P $replica2_pid
 	pkill -9 -P $replica3_pid
+	pkill -9 -P $new_replica3_pid
 	stop_istgt
 	rm -rf ${replica1_vdev::-1}*
 }
@@ -1058,7 +1180,6 @@ run_non_quorum_replica_errored_test()
 	local replica2_vdev="/tmp/test_vol2"
 	local replica3_vdev="/tmp/test_vol3"
 	local device_name=""
-	local retry_count=5
 
 	DESIRED_REPLICATION_FACTOR=3
 	REPLICATION_FACTOR=3
@@ -1066,18 +1187,8 @@ run_non_quorum_replica_errored_test()
 
 	setup_test_env
 
-	##Wait for istgt to up
-	while [ $retry_count -gt 0 ]; do
-		value=$(netstat -nap | grep 6060 | grep -w LISTEN | wc -l)
-		if [ $value == "1" ]; then
-			break
-		fi
-		sleep 1
-		retry_count=$((retry_count - 1))
-		if [ $retry_count == 1 ]; then
-			exit 1
-		fi
-	done
+	## Wait for istgt to up
+	wait_for_istgt_process 5
 
 	## Below Test will connect 1 QUORUM REPLICA and 5 NON-QUORUM Replica
 	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev -u "$replica1_id" -q  &
@@ -1799,7 +1910,7 @@ run_io_timeout_test()
 
 run_lu_rf_test
 run_replica_connection_test
-run_scaleup_test
+run_scaleup_scaledown_test
 run_quorum_test
 data_integrity_with_unknown_replica
 run_non_quorum_replica_errored_test

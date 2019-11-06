@@ -690,9 +690,10 @@ istgt_uctl_cmd_desired_rf(UCTL_Ptr uctl)
 	ISTGT_LU_DISK *spec = NULL;
 	int rc = 0, ret = UCTL_CMD_ERR;
 	char *volname, *arg, *s_drf;
-	int drf;
+	int drf, i;
 	const char *delim = ARGS_DELIM;
 	arg = uctl->arg;
+	char **known_replica_id_list = NULL;
 
 	CHECK_ARG_AND_GOTO_ERROR;
 	volname = strsepq(&arg, delim);
@@ -721,14 +722,38 @@ istgt_uctl_cmd_desired_rf(UCTL_Ptr uctl)
 	spec = lu->lun[0].spec;
 
 	if (drf < spec->desired_replication_factor) {
-		ISTGT_ERRLOG("desired replication factor(%d) is greater than"
-		    " requested desired replication factor(%d)\n",
-		    spec->desired_replication_factor, drf);
-		istgt_uctl_snprintf(uctl, "ERR current desired replication factor"
-		    " is already greater than existing desiredRF\n");
-		goto error_return;
-	}
-	if (drf == spec->desired_replication_factor) {
+
+		// TODO: I think this check is not required(get confirmation during review process)
+		// If user want to remove scalingup replica should we need to allow this process?
+		if ( spec->desired_replication_factor != spec->replication_factor ||
+		    drf != spec->replication_factor - 1) {
+			ISTGT_ERRLOG("current desired replication factor(%d) "
+			    "and replication factor(%d) but requested desired "
+			    "replication factor(%d) are invalid changes\n",
+			    spec->desired_replication_factor,
+			    spec->replication_factor, drf);
+			istgt_uctl_snprintf(uctl, "ERR current desired "
+			    "replication factor(%d) and replication factor(%d) "
+			    "but requested desired replication factor(%d) are "
+			    "invalid changes\n", spec->desired_replication_factor,
+			    spec->replication_factor, drf);
+			goto error_return;
+		}
+		// In case of scale down read known replica list
+		known_replica_id_list = (char **) xmalloc(sizeof(char *) * drf);
+		memset(known_replica_id_list, 0, sizeof(char *) * drf);
+		for (i=0; i < drf; i++) {
+			CHECK_ARG_AND_GOTO_ERROR;
+			known_replica_id_list[i] = strsepq(&arg, delim);
+		}
+		rc = istgt_lu_remove_unknown_replica(spec, drf, known_replica_id_list);
+		if (rc == 0) {
+			istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
+			ret = UCTL_CMD_OK;
+		}
+		else
+			istgt_uctl_snprintf(uctl, "ERR failed %s\n", uctl->cmd);
+	} else if (drf == spec->desired_replication_factor) {
 		ISTGT_LOG("desired replication factor is already equal to "
 		    "requested desired replication factor\n");
 		istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
@@ -742,6 +767,9 @@ istgt_uctl_cmd_desired_rf(UCTL_Ptr uctl)
 		ret = UCTL_CMD_OK;
 	}
 error_return:
+	if (known_replica_id_list != NULL) {
+		free(known_replica_id_list);
+	}
 	rc = istgt_uctl_writeline(uctl);
 	if (rc != UCTL_CMD_OK) {
 		return (rc);
