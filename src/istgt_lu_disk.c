@@ -258,6 +258,7 @@ find_first_bit(ISTGT_LU_CMD_Ptr lu_cmd)
 		nbits >>= 6;
 		if (!nbits)
 			continue;
+#if defined(__x86_64__)
 		asm volatile(
 				"   repe; scasq\n"
 				"   jz 1f\n"
@@ -269,9 +270,24 @@ find_first_bit(ISTGT_LU_CMD_Ptr lu_cmd)
 				:"=a" (res), "=&c" (d0), "=&D" (d1)
 				:"0" (0ULL), "1" (nbits), "2" (addr),
 				[addr] "r" (addr) : "memory");
-		res_final +=res;
-		if((unsigned long)res != nbits)
+		res_final += res;
+		if ((unsigned long)res != nbits)
 			return res_final;
+#elif defined(__aarch64__)
+		unsigned long idx;
+		res = 0;
+		for (idx = 0; idx < nbits; idx++) {
+			if (addr[idx]) {
+				res += __builtin_ffsl(addr[idx]) - 1;
+				break;
+			} else {
+				res += 64;
+			}
+		}
+		res_final += res;
+		if ((unsigned long)res != nbits << 6)
+			return res_final;
+#endif
 	}	
 	return res_final;
 }
