@@ -258,6 +258,7 @@ find_first_bit(ISTGT_LU_CMD_Ptr lu_cmd)
 		nbits >>= 6;
 		if (!nbits)
 			continue;
+#if defined(__x86_64__)
 		asm volatile(
 				"   repe; scasq\n"
 				"   jz 1f\n"
@@ -269,8 +270,21 @@ find_first_bit(ISTGT_LU_CMD_Ptr lu_cmd)
 				:"=a" (res), "=&c" (d0), "=&D" (d1)
 				:"0" (0ULL), "1" (nbits), "2" (addr),
 				[addr] "r" (addr) : "memory");
-		res_final +=res;
-		if((unsigned long)res != nbits)
+#else
+		unsigned long idx;
+		res = 0;
+		for (idx = 0; idx < nbits; idx++) {
+			if (addr[idx]) {
+				res += __builtin_ffsl(addr[idx]) - 1;
+				break;
+			} else {
+				// there is no set bit in this addr part, res should add the bits of addr.
+				res += sizeof(*addr) << 3;
+			}
+		}
+#endif
+		res_final += res;
+		if ((unsigned long)res != nbits << 6)
 			return res_final;
 	}	
 	return res_final;
