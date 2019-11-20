@@ -270,10 +270,7 @@ find_first_bit(ISTGT_LU_CMD_Ptr lu_cmd)
 				:"=a" (res), "=&c" (d0), "=&D" (d1)
 				:"0" (0ULL), "1" (nbits), "2" (addr),
 				[addr] "r" (addr) : "memory");
-		res_final += res;
-		if ((unsigned long)res != nbits)
-			return res_final;
-#elif defined(__aarch64__)
+#else
 		unsigned long idx;
 		res = 0;
 		for (idx = 0; idx < nbits; idx++) {
@@ -281,13 +278,14 @@ find_first_bit(ISTGT_LU_CMD_Ptr lu_cmd)
 				res += __builtin_ffsl(addr[idx]) - 1;
 				break;
 			} else {
-				res += 64;
+				// there is no set bit in this addr part, res should add the bits of addr.
+				res += sizeof(*addr) << 3;
 			}
 		}
+#endif
 		res_final += res;
 		if ((unsigned long)res != nbits << 6)
 			return res_final;
-#endif
 	}	
 	return res_final;
 }
