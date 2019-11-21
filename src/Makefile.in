@@ -48,7 +48,9 @@ istgt_header = istgt_ver.h istgt.h istgt_iscsi.h istgt_iscsi_xcopy.h istgt_iscsi
 replication_source = replication.c replication_misc.c ring_mempool.c rte_ring.c data_conn.c
 
 replication_header = replication.h  istgt_integration.h zrepl_prot.h 	\
-			rte_atomic_64.h  rte_atomic_generic.h  rte_atomic.h	\
+			arch/x86/rte_atomic_64.h arch/x86/rte_atomic.h arch/x86/rte_pause.h	\
+			arch/arm/rte_pause.h arch/arm/rte_pause_64.h arch/arm/rte_atomic.h arch/arm/rte_atomic_64.h	\
+			generic/rte_atomic.h generic/rte_pause.h	\
 			rte_common.h rte_memory.h  rte_pause.h  rte_ring.h rte_mempool.h
 
 target_source = @target_source_files@

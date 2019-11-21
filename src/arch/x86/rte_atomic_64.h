@@ -46,7 +46,7 @@
 
 #include <stdint.h>
 #include "rte_common.h"
-#include "rte_atomic.h"
+#include "arch/x86/rte_atomic.h"
 
 /*------------------------- 64 bit atomic operations -------------------------*/
 
