@@ -1,3 +1,19 @@
+/*
+ * Copyright © 2017-2019 The OpenEBS Authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -109,14 +125,14 @@ writer(void *args)
 	int *cnt = cargs->count;
 	SBC_OPCODE opcode;
 
-	clock_gettime(CLOCK_MONOTONIC, &now);
+	clock_gettime(CLOCK_MONOTONIC_RAW, &now);
 	srandom(now.tv_sec);
 
 	snprintf(tinfo, 50, "mcwrite%d", cargs->workerid);
 	prctl(PR_SET_NAME, tinfo, 0, 0, 0);
 
-	clock_gettime(CLOCK_MONOTONIC, &start);
-	clock_gettime(CLOCK_MONOTONIC, &prev);
+	clock_gettime(CLOCK_MONOTONIC_RAW, &start);
+	clock_gettime(CLOCK_MONOTONIC_RAW, &prev);
 
 	lu_cmd  = (ISTGT_LU_CMD_Ptr)malloc(sizeof (ISTGT_LU_CMD));
 	memset(lu_cmd, 0, sizeof (ISTGT_LU_CMD));
@@ -145,7 +161,7 @@ writer(void *args)
 
 		count++;
 
-		clock_gettime(CLOCK_MONOTONIC, &now);
+		clock_gettime(CLOCK_MONOTONIC_RAW, &now);
 		if (now.tv_sec - start.tv_sec > 120)
 			break;
 		if (now.tv_sec - prev.tv_sec > 1) {
@@ -188,14 +204,14 @@ reader(void *args)
 	int *cnt = cargs->count;
 	SBC_OPCODE opcode = SBC_READ_16;
 
-	clock_gettime(CLOCK_MONOTONIC, &now);
+	clock_gettime(CLOCK_MONOTONIC_RAW, &now);
 	srandom(now.tv_sec);
 
 	snprintf(tinfo, 50, "mcread%d", cargs->workerid);
 	prctl(PR_SET_NAME, tinfo, 0, 0, 0);
 
-	clock_gettime(CLOCK_MONOTONIC, &start);
-	clock_gettime(CLOCK_MONOTONIC, &prev);
+	clock_gettime(CLOCK_MONOTONIC_RAW, &start);
+	clock_gettime(CLOCK_MONOTONIC_RAW, &prev);
 
 	lu_cmd  = malloc(sizeof (ISTGT_LU_CMD));
 	memset(lu_cmd, 0, sizeof (ISTGT_LU_CMD));
@@ -222,7 +238,7 @@ reader(void *args)
 		lu_cmd->data = NULL;
 
 		count++;
-		clock_gettime(CLOCK_MONOTONIC, &now);
+		clock_gettime(CLOCK_MONOTONIC_RAW, &now);
 		if (now.tv_sec - start.tv_sec > 10)
 			break;
 		if (now.tv_sec - prev.tv_sec > 1) {
@@ -267,19 +283,19 @@ snapshot_thread(void *args)
 
 	init_snap_resp_list();
 
-	clock_gettime(CLOCK_MONOTONIC, &now);
+	clock_gettime(CLOCK_MONOTONIC_RAW, &now);
 	srandom(now.tv_sec);
 
-	clock_gettime(CLOCK_MONOTONIC, &start);
+	clock_gettime(CLOCK_MONOTONIC_RAW, &start);
 	while (1) {
 		update_snap_resp_list(spec);
 		io_wait_time = random() % 2 + 2;
 		wait_time = random() % 2 + 4;
 
-		clock_gettime(CLOCK_MONOTONIC, &cmd_start);
+		clock_gettime(CLOCK_MONOTONIC_RAW, &cmd_start);
 		ret = istgt_lu_create_snapshot(spec, snapname, io_wait_time,
 		    wait_time);
-		timesdiff(CLOCK_MONOTONIC, cmd_start, now, cmd_time);
+		timesdiff(CLOCK_MONOTONIC_RAW, cmd_start, now, cmd_time);
 
 		VERIFY(cmd_time.tv_sec <= (wait_time + 1));
 
@@ -287,7 +303,7 @@ snapshot_thread(void *args)
 
 		sleep(1);
 		count++;
-		clock_gettime(CLOCK_MONOTONIC, &now);
+		clock_gettime(CLOCK_MONOTONIC_RAW, &now);
 		if (now.tv_sec - start.tv_sec > 120)
 			break;
 	}
@@ -326,7 +342,7 @@ create_mock_client(spec_t *spec, bool do_snap)
 
 	count = 0;
 
-	clock_gettime(CLOCK_MONOTONIC, &now);
+	clock_gettime(CLOCK_MONOTONIC_RAW, &now);
 	srandom(now.tv_sec);
 
 	all_cargs = (cargs_t *)malloc(sizeof (cargs_t) *

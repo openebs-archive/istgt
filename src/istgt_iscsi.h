@@ -1,4 +1,20 @@
 /*
+ * Copyright © 2017-2019 The OpenEBS Authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * This work is derived from earlier work available under:
+ *
  * Copyright (C) 2008-2012 Daisuke Aoyama <aoyama@peach.ne.jp>.
  * All rights reserved.
  *
@@ -42,7 +58,6 @@
 
 /* support version - RFC3720(10.12.4) */
 #define	ISCSI_VERSION 0x00
-
 #define	ISCSI_ALIGN(SIZE) \
 	(((SIZE) + (ISCSI_ALIGNMENT - 1)) & ~(ISCSI_ALIGNMENT - 1))
 
@@ -51,6 +66,7 @@
 #define	ISCSI_TEXT_MAX_VAL_LEN 8192
 
 #define	SESS_MTX_LOCK(CONN) \
+
 	do {	\
 		int _rc_;	\
 		if ((_rc_ = pthread_mutex_lock(&(CONN)->sess->mutex)) != 0) {\
@@ -69,6 +85,7 @@
 
 typedef enum {
 	/* Initiator opcodes */
+
 	ISCSI_OP_NOPOUT				= 0x00,
 	ISCSI_OP_SCSI				= 0x01,
 	ISCSI_OP_TASK				= 0x02,
@@ -98,14 +115,14 @@ typedef enum {
 } ISCSI_OP;
 
 typedef enum {
-	ISCSI_TASK_FUNC_ABORT_TASK = 1,
-	ISCSI_TASK_FUNC_ABORT_TASK_SET = 2,
-	ISCSI_TASK_FUNC_CLEAR_ACA = 3,
-	ISCSI_TASK_FUNC_CLEAR_TASK_SET = 4,
-	ISCSI_TASK_FUNC_LOGICAL_UNIT_RESET = 5,
-	ISCSI_TASK_FUNC_TARGET_WARM_RESET = 6,
-	ISCSI_TASK_FUNC_TARGET_COLD_RESET = 7,
-	ISCSI_TASK_FUNC_TASK_REASSIGN = 8,
+	ISCSI_TASK_FUNC_ABORT_TASK	=	1,
+	ISCSI_TASK_FUNC_ABORT_TASK_SET	=	2,
+	ISCSI_TASK_FUNC_CLEAR_ACA	=	3,
+	ISCSI_TASK_FUNC_CLEAR_TASK_SET	=	4,
+	ISCSI_TASK_FUNC_LOGICAL_UNIT_RESET	=	5,
+	ISCSI_TASK_FUNC_TARGET_WARM_RESET	=	6,
+	ISCSI_TASK_FUNC_TARGET_COLD_RESET	=	7,
+	ISCSI_TASK_FUNC_TASK_REASSIGN	=	8,
 } ISCSI_TASK_FUNC;
 
 
@@ -141,6 +158,7 @@ typedef struct iscsi_ahs_t {
 	uint8_t ahs_specific2[];
 } ISCSI_AHS;
 
+
 #define	ISCSI_DIGEST_LEN 4
 typedef struct iscsi_pdu_t {
 	ISCSI_BHS bhs;
@@ -165,26 +183,27 @@ typedef struct iscsi_pdu_t {
 typedef ISCSI_PDU *ISCSI_PDU_Ptr;
 
 typedef enum {
-	CONN_STATE_INVALID = 0,
-	CONN_STATE_RUNNING = 1,
-	CONN_STATE_EXITING = 2,
-	CONN_STATE_SHUTDOWN = 3,
+	CONN_STATE_INVALID	=	0,
+	CONN_STATE_RUNNING	=	1,
+	CONN_STATE_EXITING	=	2,
+	CONN_STATE_SHUTDOWN	=	3,
 } CONN_STATE;
 
 typedef enum {
-	ISCSI_LOGIN_PHASE_NONE = 0,
-	ISCSI_LOGIN_PHASE_START = 1,
-	ISCSI_LOGIN_PHASE_SECURITY = 2,
-	ISCSI_LOGIN_PHASE_OPERATIONAL = 3,
-	ISCSI_LOGIN_PHASE_FULLFEATURE = 4,
+	ISCSI_LOGIN_PHASE_NONE	=	0,
+	ISCSI_LOGIN_PHASE_START	=	1,
+	ISCSI_LOGIN_PHASE_SECURITY	=	2,
+	ISCSI_LOGIN_PHASE_OPERATIONAL	=	3,
+	ISCSI_LOGIN_PHASE_FULLFEATURE	=	4,
 } ISCSI_LOGIN_PHASE;
 
 typedef enum {
-	ISTGT_CHAP_PHASE_NONE = 0,
-	ISTGT_CHAP_PHASE_WAIT_A = 1,
-	ISTGT_CHAP_PHASE_WAIT_NR = 2,
-	ISTGT_CHAP_PHASE_END = 3,
+	ISTGT_CHAP_PHASE_NONE	=	0,
+	ISTGT_CHAP_PHASE_WAIT_A	=	1,
+	ISTGT_CHAP_PHASE_WAIT_NR	=	2,
+	ISTGT_CHAP_PHASE_END	=	3,
 } ISTGT_CHAP_PHASE;
+
 
 #define	ISTGT_CHAP_CHALLENGE_LEN 1024
 typedef struct istgt_chap_auth_t {
@@ -215,6 +234,7 @@ typedef struct istgt_r2t_task_t {
 	uint64_t iobufsize;
 	int iobufindx;
 	struct iovec iobuf[40];
+
 	// int iobufoff[20]; int iobufsize[20]; uint8_t *iobuf[20];
 
 	uint32_t R2TSN;
@@ -279,7 +299,6 @@ typedef struct istgt_conn_t {
 	int  diskIoPending;
 	int  flagDelayedFree;
 	pthread_mutex_t diskioflag_mutex;
-
 	/* Initiator/Target port binds */
 	char initiator_name[MAX_INITIATOR_NAME];
 	char target_name[MAX_TARGET_NAME];

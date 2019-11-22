@@ -1,4 +1,20 @@
 /*
+ * Copyright © 2017-2019 The OpenEBS Authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * This work is derived from earlier work available under:
+ *
  * Copyright (C) 2008-2012 Daisuke Aoyama <aoyama@peach.ne.jp>.
  * All rights reserved.
  *
@@ -27,7 +43,6 @@
 
 #ifndef ISTGT_H
 #define ISTGT_H
-#define CLOCK_UPTIME_FAST       8
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
@@ -112,6 +127,7 @@
 #define DEFAULT_MAXR2T 16
 #define TMF_TIMEOUT 2 
 
+#define	SEC_IN_NS	(1000000000L)
 #define ISTGT_PG_TAG_MAX 0x0000ffff
 #define ISTGT_LU_TAG_MAX 0x0000ffff
 #define ISTGT_UC_TAG     0x00010000
@@ -148,6 +164,9 @@
 #endif
 
 #define ISTGT_UCTL_UNXPATH "/var/run/istgt_ctl_sock"
+
+// Sock file used to communicate from target to side car
+#define ISTGT_MGMT_UNXPATH "/var/run/volume_mgmt_sock"
 
 #define MTX_LOCK(MTX) \
 	do {								\

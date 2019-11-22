@@ -1,3 +1,19 @@
+/*
+ * Copyright © 2017-2019 The OpenEBS Authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 #include <sys/prctl.h>
@@ -50,8 +66,8 @@ int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 	rcmd = TAILQ_FIRST(head);					\
 	if (rcmd != NULL) {						\
 		struct timespec now;					\
-		clock_gettime(CLOCK_MONOTONIC, &now);			\
-		timesdiff(CLOCK_MONOTONIC, rcmd->queued_time, 		\
+		clock_gettime(CLOCK_MONOTONIC_RAW, &now);			\
+		timesdiff(CLOCK_MONOTONIC_RAW, rcmd->start_time, 		\
 		    now, _time_diff);					\
 	}								\
 	while (rcmd != NULL) {						\
@@ -103,9 +119,9 @@ int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 		int ms;							\
 		pending_cmd = TAILQ_FIRST(_head);			\
 		if (pending_cmd != NULL) {				\
-			clock_gettime(CLOCK_MONOTONIC, &nw);		\
-			timesdiff(CLOCK_MONOTONIC,			\
-			    pending_cmd->queued_time, nw, _diff);	\
+			clock_gettime(CLOCK_MONOTONIC_RAW, &nw);		\
+			timesdiff(CLOCK_MONOTONIC_RAW,			\
+			    pending_cmd->start_time, nw, _diff);	\
 			if (_diff.tv_sec >= replica_timeout) {		\
 				REPLICA_ERRLOG("timeout happened for "	\
 				    "replica(%lu).. delay(%lu sec)\n", 	\
@@ -119,8 +135,11 @@ int replica_timeout = REPLICA_DEFAULT_TIMEOUT;
 				    (wait_count * polling_timeout)) {	\
 					REPLICA_NOTICELOG("replica(%lu)"\
 					    " hasn't responded in last "\
-					    "%d seconds\n",		\
-					    r->zvol_guid, ms / 1000);	\
+					    "%d seconds for opcode: %d"	\
+					    " with seq: %lu\n",		\
+					    r->zvol_guid, ms / 1000,	\
+					    pending_cmd->opcode,	\
+					    pending_cmd->io_seq);	\
 				}					\
 				if (ms > (wait_count * polling_timeout))\
 					wait_count =			\
@@ -154,6 +173,8 @@ unblock_cmds(replica_t *r)
 			break;
 		TAILQ_REMOVE(&r->blockedq, cmd, next);
 		TAILQ_INSERT_TAIL(&r->readyq, cmd, next);
+
+		clock_gettime(CLOCK_MONOTONIC_RAW, &cmd->ready_time);
 		unblocked = true;
 	}
 	return unblocked;
@@ -168,18 +189,19 @@ move_to_blocked_or_ready_q(replica_t *r, rcmd_t *cmd)
 	bool cmd_blocked = false;
 	rcmd_t *pending_rcmd;
 
+	clock_gettime(CLOCK_MONOTONIC_RAW, &cmd->start_time);
 	if (!TAILQ_EMPTY(&r->blockedq)) {
-		clock_gettime(CLOCK_MONOTONIC, &cmd->queued_time);
 		TAILQ_INSERT_TAIL(&r->blockedq, cmd, next);
 		goto done;
 	}
 	CHECK_BLOCKAGE_IN_Q(&r->readyq, next);
 	CHECK_BLOCKAGE_IN_Q(&r->waitq, next);
-	clock_gettime(CLOCK_MONOTONIC, &cmd->queued_time);
 	if (cmd_blocked == true)
 		TAILQ_INSERT_TAIL(&r->blockedq, cmd, next);
-	else
+	else {
 		TAILQ_INSERT_TAIL(&r->readyq, cmd, next);
+		clock_gettime(CLOCK_MONOTONIC_RAW, &cmd->ready_time);
+	}
 done:
 	return;
 }
@@ -261,9 +283,10 @@ handle_data_conn_error(replica_t *r)
 	int fd, data_eventfd, mgmt_eventfd2, epollfd;
 	spec_t *spec;
 	replica_t *r1 = NULL;
+	int found_in_list = 0;
 
 	if (r->iofd == -1) {
-		REPLICA_ERRLOG("repl %s %d %p\n", r->ip, r->port, r);
+		REPLICA_ERRLOG("repl %s %d %p data_conn error\n", r->ip, r->port, r);
 		return -1;
 	}
 
@@ -271,31 +294,49 @@ handle_data_conn_error(replica_t *r)
 	spec = r->spec;
 
 	TAILQ_FOREACH(r1, &(spec->rq), r_next)
-		if (r1 == r)
+		if (r1 == r) {
+			assert(r->quorum == 1);
+			found_in_list = 1;
 			break;
+		}
+
+	if (r1 == NULL)
+		TAILQ_FOREACH(r1, &(spec->non_quorum_rq), r_non_quorum_next)
+			if (r1 == r) {
+				found_in_list = 2;
+				break;
+			}
 
 	if (r1 == NULL) {
-		REPLICA_ERRLOG("replica %s %d not part of rqlist..\n",
+		REPLICA_ERRLOG("replica(%s:%d) not part of rq and non_rq list..\n",
 		    r->ip, r->port);
+		MTX_LOCK(&r->r_mtx);
 		/*
 		 * mgmt thread will check mgmt_eventfd2 fd to see if
 		 * it needs to wait for replica thread or not.
 		 * At this stage, the replica hasn't been added to
-		 * spec's rqlist so we need to update mgmt_eventfd2 to -1
+		 * spec's rqlist and non_rqlist so we need to update mgmt_eventfd2 to -1
 		 * here So that mgmt_thread can skip replica thread check.
 		 */
 		if (r->mgmt_eventfd2 != -1)
 			r->mgmt_eventfd2 = -1;
+		MTX_UNLOCK(&r->r_mtx);
 		MTX_UNLOCK(&spec->rq_mtx);
 		return -1;
 	}
 
-	TAILQ_REMOVE(&spec->rq, r, r_next);
-
-	if (r->state == ZVOL_STATUS_HEALTHY)
-		spec->healthy_rcount--;
-	else if (r->state == ZVOL_STATUS_DEGRADED)
-		spec->degraded_rcount--;
+	if (found_in_list == 1) {
+		TAILQ_REMOVE(&spec->rq, r, r_next);
+		if (r->state == ZVOL_STATUS_HEALTHY)
+			spec->healthy_rcount--;
+		else {
+			ASSERT(r->state == ZVOL_STATUS_DEGRADED);
+			spec->degraded_rcount--;
+		}
+	} else {
+		ASSERT(found_in_list == 2);
+		TAILQ_REMOVE(&spec->non_quorum_rq, r, r_non_quorum_next);
+	}
 
 	update_volstate(r->spec);
 
@@ -333,6 +374,8 @@ handle_data_conn_error(replica_t *r)
 	MTX_LOCK(&r->r_mtx);
 	r->conn_closed++;
 	if (r->conn_closed != 2) {
+		REPLICA_NOTICELOG("Informing mgmt connection for error in "
+		    "replica(%lu)\n", r->zvol_guid);
 		inform_mgmt_conn(r);
 		pthread_cond_wait(&r->r_cond, &r->r_mtx);
 	}
@@ -364,7 +407,8 @@ find_replica_cmd(replica_t *r, uint64_t ioseq)
 		if (cmd->io_seq == ioseq)
 			return cmd;
 	}
-
+	REPLICA_ERRLOG("Failed to find seq number(%lu) in "
+	    "replica(%lu)'s waitq\n", ioseq, r->zvol_guid);
 	return NULL;
 }
 
@@ -394,8 +438,12 @@ read_cmd(replica_t *r)
 			if (count != (ssize_t)reqlen)
 				return READ_PARTIAL;
 
-			if (resp_hdr->status != ZVOL_OP_STATUS_OK)
+			if (resp_hdr->status != ZVOL_OP_STATUS_OK) {
+				REPLICA_ERRLOG("Received status(%d) for opcode(%d) "
+				    "and seq number(%lu) for replica(%lu)\n", resp_hdr->status,
+				    resp_hdr->opcode, resp_hdr->io_seq, r->zvol_guid);
 				return -1;
+			}
 
 			cmd = find_replica_cmd(r, resp_hdr->io_seq);
 			if (cmd == NULL)
@@ -452,8 +500,10 @@ start:
 	if (rc < 0) {
 		if (err == EINTR)
 			goto start;
-		if ((err != EAGAIN) && (err != EWOULDBLOCK))
+		if ((err != EAGAIN) && (err != EWOULDBLOCK)) {
+			REPLICA_ERRLOG("Failed to write to data connection.. fd(%d) err(%d)\n", fd, err);
 			return -1;
+		}
 		return WRITE_PARTIAL;
 	}
 
@@ -490,11 +540,14 @@ do_drainfd(int data_eventfd)
 		if (rc < 0) {
 			if (err == EINTR)
 				continue;
-			if (err != EAGAIN && err != EWOULDBLOCK)
+			if (err != EAGAIN && err != EWOULDBLOCK) {
+				REPLICA_ERRLOG("Failed to drain fd(%d).. err(%d)\n", data_eventfd, err);
 				return -1;
+			}
 			break;
 		}
 		if (rc == 0) {
+			REPLICA_ERRLOG("mgmt/data fd(%d) closed!\n", data_eventfd);
 			return -1;
 		}
 	}
@@ -524,6 +577,9 @@ handle_epoll_out_event(replica_t *r)
 	return 0;
 }
 
+#define	ADD_TIMESPEC(var, s, d)	\
+	(var) += (uint64_t)(d.tv_sec - s.tv_sec) * (uint64_t)SEC_IN_NS + d.tv_nsec - s.tv_nsec;
+
 static int
 handle_epoll_in_event(replica_t *r)
 {
@@ -532,6 +588,7 @@ handle_epoll_in_event(replica_t *r)
 	bool task_completed = false;
 	bool unblocked = false;
 	pthread_cond_t *cond_var;
+	struct timespec now;
 
 start:
 	ret = read_cmd(r);
@@ -539,10 +596,22 @@ start:
 		return -1;
 
 	if (ret == READ_COMPLETED) {
+		rcomm_cmd = r->ongoing_io->rcommq_ptr;
 		idx = r->ongoing_io->idx;
 		TAILQ_REMOVE(&r->waitq, r->ongoing_io, next);
-		rcomm_cmd = r->ongoing_io->rcommq_ptr;
+		clock_gettime(CLOCK_MONOTONIC_RAW, &now);
 
+		if (r->ongoing_io->opcode == ZVOL_OPCODE_READ) {
+			ADD_TIMESPEC((r->totalread_reqtime),
+			    (r->ongoing_io->start_time), (r->ongoing_io->ready_time));
+			ADD_TIMESPEC((r->totalread_resptime),
+			    (r->ongoing_io->start_time), now);
+		} else if (r->ongoing_io->opcode == ZVOL_OPCODE_WRITE) {
+			ADD_TIMESPEC((r->totalwrite_reqtime),
+			    (r->ongoing_io->start_time), (r->ongoing_io->ready_time));
+			ADD_TIMESPEC((r->totalwrite_resptime),
+			    (r->ongoing_io->start_time), now);
+		}
 		cond_var = rcomm_cmd->cond_var;
 
 		rcomm_cmd->resp_list[idx].io_resp_hdr = *(r->io_resp_hdr);
@@ -558,6 +627,7 @@ start:
 		 */
 		if (rcomm_cmd->state != CMD_EXECUTION_DONE) {
 			rcomm_cmd->resp_list[idx].status |= RECEIVED_OK;
+			/* This cond_var is from luworker, and hence, safe to use */
 			pthread_cond_signal(cond_var);
 		} else
 			rcomm_cmd->resp_list[idx].status |= RECEIVED_OK;
@@ -600,8 +670,10 @@ static int
 handle_mgmt_eventfd(void *arg)
 {
 	replica_t *r = (replica_t *) arg;
-	if (r->disconnect_conn > 0)
+	if (r->disconnect_conn > 0) {
+		REPLICA_ERRLOG("Disconnecting data connection for replica(%lu)\n", r->zvol_guid);
 		return -1;
+	}
 	return 0;
 }
 
@@ -699,7 +771,7 @@ initialize_error:
 	MTX_UNLOCK(&r->r_mtx);
 
 	prctl(PR_SET_NAME, "replica", 0, 0, 0);
-	clock_gettime(CLOCK_MONOTONIC, &last_time);
+	clock_gettime(CLOCK_MONOTONIC_RAW, &last_time);
 
 	while (1) {
 		nfds = epoll_wait(r_epollfd, events, MAXEVENTS, epoll_timeout);
@@ -735,11 +807,18 @@ initialize_error:
 
 			ret = -1;
 			ptr = events[i].data.ptr;
-			if (ptr != NULL)
+			if (ptr != NULL) {
+				REPLICA_ERRLOG("event.data.ptr != NULL.. This "
+				    "should not happen.. r(%lu)!\n", r->zvol_guid);
 				goto exit;
+			}
 
-			if (events[i].events & (EPOLLERR | EPOLLRDHUP | EPOLLHUP))
+			if (events[i].events & (EPOLLERR | EPOLLRDHUP | EPOLLHUP)) {
+				REPLICA_ERRLOG("Received event(%d) on fd(%d) "
+				    "for replica(%lu)\n", events[i].events,
+				    events[i].data.fd, r->zvol_guid);
 				goto exit;
+			}
 
 			ret = 0;
 			if (events[i].events & EPOLLIN)
@@ -766,8 +845,12 @@ initialize_error:
 		 * `x` is set to minimum of (replica_timeout/4) or lowest
 		 * time_diff of IOs from all replica queue.
 		 */
-		clock_gettime(CLOCK_MONOTONIC, &now);
-		timesdiff(CLOCK_MONOTONIC, last_time, now, diff_time);
+		clock_gettime(CLOCK_MONOTONIC_RAW, &now);
+		timesdiff(CLOCK_MONOTONIC_RAW, last_time, now, diff_time);
+		polling_timeout = (replica_timeout / 4) * 1000;
+		if (epoll_timeout > polling_timeout)
+			epoll_timeout = polling_timeout;
+
 		if (((diff_time.tv_sec * 1000) +
 		    (diff_time.tv_nsec / 1000000)) > epoll_timeout) {
 			epoll_timeout = polling_timeout;
@@ -786,7 +869,7 @@ initialize_error:
 			 */
 			if (epoll_timeout < replica_timeout)
 				wait_count = 1;
-			clock_gettime(CLOCK_MONOTONIC, &last_time);
+			clock_gettime(CLOCK_MONOTONIC_RAW, &last_time);
 		}
 	}
 exit:

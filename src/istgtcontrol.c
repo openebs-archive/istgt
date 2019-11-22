@@ -1,4 +1,20 @@
 /*
+ * Copyright © 2017-2019 The OpenEBS Authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * This work is derived from earlier work available under:
+ *
  * Copyright (C) 2008-2012 Daisuke Aoyama <aoyama@peach.ne.jp>.
  * All rights reserved.
  *
@@ -49,6 +65,10 @@
 #include "istgt_sock.h"
 #include "istgt_misc.h"
 #include "istgt_md5.h"
+
+#ifdef REPLICATION
+#include "zrepl_prot.h"
+#endif
 
 #if !defined(__GNUC__)
 #undef __attribute__
@@ -888,6 +908,67 @@ exec_snap(UCTL_Ptr uctl)
 	return (UCTL_CMD_OK);
 }
 
+// exec_command is used for resize, scaleup and scaledown of replicas
+static int
+exec_command(UCTL_Ptr uctl)
+{
+	const char *delim = ARGS_DELIM;
+	char *arg, *result;
+	int rc = 0;
+	char *name = uctl->setargv[0];
+	char *value = uctl->setargv[1];
+	int i = 0, listcnt, memory_len;
+	char *id_list = NULL;
+
+	listcnt = uctl->setargcnt - 2;
+	if (listcnt > 0) {
+		// Since list of replicaIds sent via socket
+		// each replicaId should enclosed with in "" and space
+		memory_len = ((listcnt * REPLICA_ID_LEN) + (listcnt * 4));
+		id_list = (char *) malloc(sizeof(char) * memory_len);
+		memset(id_list, 0, sizeof(sizeof(char) * memory_len));
+		for (i=0; i < listcnt; i++) {
+			strcat(id_list, "\"");
+			strncat(id_list, uctl->setargv[i+2], REPLICA_ID_LEN);
+			strcat(id_list, "\" ");
+		}
+	}
+	//Release the momory
+	if (listcnt > 0) {
+		uctl_snprintf(uctl, "%s \"%s\" \"%s\" %s \n",
+		    uctl->cmd, name, value, id_list);
+		free(id_list);
+	} else {
+		uctl_snprintf(uctl, "%s \"%s\" \"%s\" \n",
+		    uctl->cmd, name, value);
+	}
+
+	rc = uctl_writeline(uctl);
+	if (rc != UCTL_CMD_OK) {
+		return (rc);
+	}
+
+		/* receive result */
+	while (1) {
+		rc = uctl_readline(uctl);
+		if (rc != UCTL_CMD_OK) {
+			return (rc);
+		}
+		arg = trim_string(uctl->recvbuf);
+		result = strsepq(&arg, delim);
+		strupr(result);
+		if (strcmp(result, uctl->cmd) != 0)
+			break;
+	}
+	if (strcmp(result, "OK") != 0) {
+		if (is_err_req_auth(uctl, arg))
+			return (UCTL_CMD_REQAUTH);
+		fprintf(stderr, "ERROR %s\n", arg);
+		return (UCTL_CMD_ERR);
+	}
+	return (UCTL_CMD_OK);
+}
+
 static int
 exec_mempool_stats(UCTL_Ptr uctl)
 {
@@ -968,6 +1049,52 @@ exec_replica(UCTL_Ptr uctl)
 		} else {
 			printf("%s\n", arg);
 		}
+	}
+	if (strcmp(result, "OK") != 0) {
+		if (is_err_req_auth(uctl, arg))
+			return (UCTL_CMD_REQAUTH);
+		fprintf(stderr, "ERROR %s\n", arg);
+		return (UCTL_CMD_ERR);
+	}
+	return (UCTL_CMD_OK);
+}
+
+static int
+exec_max_io_wait(UCTL_Ptr uctl)
+{
+	const char *delim = ARGS_DELIM;
+	char *arg;
+	int rc = 0;
+	char *s_io_wait_time;
+	char *result;
+
+	if (uctl->setargcnt >= 1)
+		s_io_wait_time = uctl->setargv[0];
+	else
+		s_io_wait_time = NULL;
+
+	if (s_io_wait_time)
+		uctl_snprintf(uctl, "%s \"%s\" \n", uctl->cmd, s_io_wait_time);
+	else
+		uctl_snprintf(uctl, "%s\n", uctl->cmd);
+
+	rc = uctl_writeline(uctl);
+	if (rc != UCTL_CMD_OK) {
+		return (rc);
+	}
+
+	/* receive result */
+	while (1) {
+		rc = uctl_readline(uctl);
+		if (rc != UCTL_CMD_OK) {
+			return (rc);
+		}
+		arg = trim_string(uctl->recvbuf);
+		result = strsepq(&arg, delim);
+		strupr(result);
+		if (strcmp(result, uctl->cmd) != 0)
+			break;
+		printf("%s\n", arg);
 	}
 	if (strcmp(result, "OK") != 0) {
 		if (is_err_req_auth(uctl, arg))
@@ -1232,7 +1359,10 @@ static EXEC_TABLE exec_table[] =
 #ifdef	REPLICATION
 	{"SNAPCREATE", exec_snap, 2, 0},
 	{"SNAPDESTROY", exec_snap, 2, 0},
+	{"RESIZE", exec_command, 2, 0},
+	{"DRF", exec_command, 2, 0},
 	{"REPLICA", exec_replica, 0, 0},
+	{"MAXIOWAIT", exec_max_io_wait, 0, 0},
 #endif
 	{ NULL,	NULL,	0,	0 },
 };
@@ -1719,6 +1849,9 @@ usage(void)
 #ifdef	REPLICATION
 	printf(" replica    list replica and its stats\n");
 	printf(" mempool    get mempool details\n");
+	printf(" maxiowait  get/set wait time for IO completion in seconds\n");
+	printf(" resize     read the size from command cli and updates the size\n");
+	printf(" drf        read the desired replication factor from command cli and update in memory\n");
 #endif
 	printf(" set        set values for variables:\n");
 	printf("            Syntax: istgtcontrol -t <iqn(ALL to set globally)> \
@@ -1994,7 +2127,10 @@ main(int argc, char *argv[])
 
 	if ((strcmp(cmd, "SNAPCREATE") == 0) ||
 	(strcmp(cmd, "SNAPDESTROY") == 0) ||
-	    (strcmp(cmd, "REPLICA") == 0)) {
+	    (strcmp(cmd, "REPLICA") == 0) ||
+	    (strcmp(cmd, "MAXIOWAIT") == 0) ||
+	    (strcmp(cmd, "RESIZE") == 0) ||
+	    (strcmp(cmd, "DRF") == 0)) {
 		uctl->setargv = argv;
 		uctl->setargcnt = argc;
 	}

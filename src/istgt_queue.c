@@ -1,4 +1,20 @@
 /*
+ * Copyright © 2017-2019 The OpenEBS Authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * This work is derived from earlier work available under:
+ *
  * Copyright (C) 2008-2012 Daisuke Aoyama <aoyama@peach.ne.jp>.
  * All rights reserved.
  *
@@ -186,7 +202,7 @@ istgt_queue_dequeue_middlei(ISTGT_QUEUE_Ptr head,
 	if (head == NULL || complete_queue_ptr == NULL ||
 	    complete_queue_ptr == head)
 		return (NULL);
-  
+
 	prev = complete_queue_ptr->prev;
 	next = complete_queue_ptr->next;
 
@@ -345,8 +361,8 @@ istgt_queue_walk(ISTGT_QUEUE_Ptr head, void ** cookie)
 	*cookie = cp->next;
 	if (unlikely(*cookie == NULL))
 		ISTGT_ERRLOG("cookie is NULL!!!!!!\n");
-  
-	return  (*cookie == NULL ? NULL :cp->elem);
+
+	return (*cookie == NULL ? NULL :cp->elem);
 }
 
 void *
@@ -383,6 +399,6 @@ istgt_queue_reverse_walk(ISTGT_QUEUE_Ptr head, void ** cookie)
 	*cookie = cp->prev;
 	if (unlikely(*cookie == NULL))
 		ISTGT_ERRLOG("cookie is NULL!!!!!!\n");
-	
-  return  (*cookie == NULL ? NULL :cp->elem);
+
+	return (*cookie == NULL ? NULL :cp->elem);
 }

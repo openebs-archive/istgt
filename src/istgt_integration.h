@@ -1,3 +1,19 @@
+/*
+ * Copyright © 2017-2019 The OpenEBS Authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #ifndef _ISTGT_INTEGRATION_H
 #define	_ISTGT_INTEGRATION_H
 
@@ -31,6 +47,8 @@ typedef enum zvol_status replica_state_t;
 
 typedef struct replica_s {
 	TAILQ_ENTRY(replica_s) r_next;
+	/* For Replicas which are connected with the quorum value as 0 */
+	TAILQ_ENTRY(replica_s) r_non_quorum_next;
 	TAILQ_ENTRY(replica_s) r_waitnext;
 	/* list of IOs queued from spec to replica */
 	rte_smempool_t cmdq;
@@ -46,15 +64,24 @@ typedef struct replica_s {
 	pthread_mutex_t r_mtx;
 	replica_state_t state;
 	spec_t *spec;
+	/* decides whether IOs need to send for the replica
+	 * or not. If it is enabled then don't send IOs for
+	 * this replica.
+	 */
+	int cordon;
 	int iofd;
 	/* management connection descriptor */
 	int mgmt_fd;
+	uint8_t quorum;
+	uint8_t reserved;
 	/* replica's IOs server port */
-	int port;
+	uint16_t port;
 	/* replica's IP */
 	char *ip;
 	uint64_t pool_guid;
 	uint64_t zvol_guid;
+	/* extra byte for printing and strlen functions */
+	char replica_id[REPLICA_ID_LEN + 1]; //UID to identify replica
 
 	/* payload for current IO response for a replica */
 	void *ongoing_io_buf;
@@ -86,6 +113,17 @@ typedef struct replica_s {
 
 	struct timespec create_time;
 
+	/* This is calculated from create time till the queued time into readyQ */
+	/* Total time(ns) waited in queue to send read_IO req */
+	uint64_t totalread_reqtime;
+	/* Total time(ns) waited in queue to send write_IO req */
+	uint64_t totalwrite_reqtime;
+
+	/* This is calculated from create time till the entire resp read from wire*/
+	/* Total time(ns) to recv read_IO resp */
+	uint64_t totalread_resptime;
+	/* Total time(ns) to recv write_IO resp */
+	uint64_t totalwrite_resptime;
 	/*
 	 * Following variables should be updated with atomic operation only
 	 */

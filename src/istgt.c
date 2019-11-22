@@ -1,4 +1,21 @@
 /*
+ * Copyright © 2017-2019 The OpenEBS Authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * This work is derived from earlier work available at:
+ * Source: http://www.peach.ne.jp/archives/istgt/
+ *
  * Copyright (C) 2008-2012 Daisuke Aoyama <aoyama@peach.ne.jp>.
  * All rights reserved.
  *
@@ -2778,7 +2795,8 @@ is_persist_enabled(void)
 	return (persist);
 }
 
-clockid_t clockid = CLOCK_UPTIME_FAST; // CLOCK_SECOND  CLOCK_MONOTONIC_FAST
+/* COARSE have precision till 1000Hz, which might be 1ms usually */
+clockid_t clockid = CLOCK_MONOTONIC_COARSE; // CLOCK_SECOND  CLOCK_MONOTONIC_FAST
 extern int detectDoubleFree;
 // int enable_xcopy = 0;
 int enable_oldBL = 0;
@@ -2795,7 +2813,6 @@ void *timerfn(void
 	ISTGT_LU_CMD_Ptr lu_cmd;
 	int ms;
 	struct timespec now, diff, last_check;
-	int check_interval = (replica_timeout / 4) * 1000;
 	clock_gettime(clockid, &last_check);
 #endif
 
@@ -2813,6 +2830,20 @@ void *timerfn(void
 			istgt_queue_enqueue(&closedconns, conn);
 
 #ifdef	REPLICATION
+		const char *s_replica_timeout = getenv("replicaTimeout");
+		int rep_timeout = 0;
+		if (s_replica_timeout != NULL)
+			rep_timeout = (int)strtol(s_replica_timeout,
+			    NULL, 10);
+		if ((rep_timeout > 30) && (rep_timeout != replica_timeout)) {
+			ISTGT_NOTICELOG("changing replica timeout "
+			    "from %d to %d", replica_timeout,
+			    rep_timeout);
+			replica_timeout = rep_timeout;
+		}
+		int check_interval = (replica_timeout / 4) * 1000;
+
+
 		clock_gettime(clockid, &now);
 		timesdiff(clockid, last_check, now, diff);
 		ms = diff.tv_sec * 1000;
@@ -2869,7 +2900,7 @@ void *timerfn(void
 		}
 #endif
 
-		sleep(60);
+		sleep(10);
 	}
 	return ((void *)NULL);
 }
