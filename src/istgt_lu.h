@@ -58,7 +58,7 @@
 #endif
 
 #ifdef __linux__
-#if (defined(__aarch64__) || defined(__arm__))
+#if defined(__aarch64__)
 #include <aarch64-linux-gnu/sys/queue.h>
 #else
 #include <x86_64-linux-gnu/sys/queue.h>
