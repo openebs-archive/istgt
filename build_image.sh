@@ -5,7 +5,6 @@ pwd
 
 # Determine the arch/os we're building for
 ARCH=$(uname -m)
-OS=$(uname)
 
 make clean
 bash autogen.sh
