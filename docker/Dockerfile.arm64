@@ -20,10 +20,10 @@ COPY entrypoint-istgtimage.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/entrypoint-istgtimage.sh
 
 ARG BUILD_DATE
-LABEL org.label-schema.name="cstor"
-LABEL org.label-schema.description="OpenEBS cstor"
+LABEL org.label-schema.name="istgt"
+LABEL org.label-schema.description="OpenEBS istgt"
 LABEL org.label-schema.url="http://www.openebs.io/"
-LABEL org.label-schema.vcs-url="https://github.com/openebs/cstor"
+LABEL org.label-schema.vcs-url="https://github.com/openebs/istgt"
 LABEL org.label-schema.schema-version="1.0"
 LABEL org.label-schema.build-date=$BUILD_DATE
 
