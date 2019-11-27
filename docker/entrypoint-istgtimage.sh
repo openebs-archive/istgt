@@ -20,6 +20,7 @@ touch /usr/local/etc/istgt/logfile
 export externalIP=0.0.0.0
 service rsyslog start
 
-export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so
+ARCH=$(uname -m)
+export LD_PRELOAD=/usr/lib/${ARCH}-linux-gnu/libjemalloc.so
 exec /usr/local/bin/istgt
 
