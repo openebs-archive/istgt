@@ -34,6 +34,10 @@
 #ifndef _RTE_ATOMIC_H_
 #define _RTE_ATOMIC_H_
 
+#ifndef RTE_FORCE_INTRINSICS
+#define RTE_FORCE_INTRINSICS
+#endif
+
 /**
  * @file
  * Atomic Operations
