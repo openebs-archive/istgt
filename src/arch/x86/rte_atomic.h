@@ -216,9 +216,9 @@ static inline int rte_atomic32_dec_and_test(rte_atomic32_t *v)
 }
 #endif
 
-#ifdef RTE_ARCH_I686
+#if defined(__i686__)
 #include "arch/x86/rte_atomic_32.h"
-#else
+#elif defined(__x86_64__)
 #include "arch/x86/rte_atomic_64.h"
 #endif
 
