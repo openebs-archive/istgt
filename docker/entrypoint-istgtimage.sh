@@ -20,6 +20,17 @@ touch /usr/local/etc/istgt/logfile
 export externalIP=0.0.0.0
 service rsyslog start
 
+# Disabling coredumps by default in the shell where istgt runs
+if [ -z "$ENABLE_COREDUMP" ]; then
+	echo "Disabling dumping core"
+	ulimit -c 0
+else
+	echo "Enabling coredumps"
+	ulimit -c unlimited
+        ## Remove hardcoded value. Take it via ENV
+	cd /var/openebs/sparse || exit
+fi
+
 ARCH=$(uname -m)
 export LD_PRELOAD=/usr/lib/${ARCH}-linux-gnu/libjemalloc.so
 exec /usr/local/bin/istgt
