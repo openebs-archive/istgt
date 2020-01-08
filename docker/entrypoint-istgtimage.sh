@@ -5,9 +5,9 @@ trap 'call_exit $LINE_NO' EXIT
 
 call_exit()
 {
-echo "at call_exit.."     
+echo "at call_exit.."
 echo  "exit code:" $?
-echo "reference: "  $0 
+echo "reference: "  $0
 }
 
 if [ ! -f "/usr/local/etc/istgt/istgt.conf" ];then
@@ -27,9 +27,11 @@ if [ -z "$ENABLE_COREDUMP" ]; then
 else
 	echo "Enabling coredumps"
 	ulimit -c unlimited
-        ## make PWD as $PERSISTENT_PATH. So container will dump the
-	## core in persistent path
-	cd $PERSISTENT_STORAGE_PATH || exit
+	## /var/openebs is mounted as persistent directory on
+	## host machine
+	cd /var/openebs || exit
+	mkdir -p core
+	cd core
 fi
 
 ARCH=$(uname -m)
