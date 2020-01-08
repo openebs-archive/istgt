@@ -27,8 +27,9 @@ if [ -z "$ENABLE_COREDUMP" ]; then
 else
 	echo "Enabling coredumps"
 	ulimit -c unlimited
-        ## Remove hardcoded value. Take it via ENV
-	cd /var/openebs/sparse || exit
+        ## make PWD as $PERSISTENT_PATH. So container will dump the
+	## core in persistent path
+	cd $PERSISTENT_STORAGE_PATH || exit
 fi
 
 ARCH=$(uname -m)
