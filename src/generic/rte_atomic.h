@@ -35,7 +35,9 @@
 #define _RTE_ATOMIC_H_
 
 #ifndef RTE_FORCE_INTRINSICS
+#if defined(__aarch64__) || defined(__arm__)
 #define RTE_FORCE_INTRINSICS
+#endif
 #endif
 
 /**

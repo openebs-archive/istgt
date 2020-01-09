@@ -9,7 +9,11 @@
 extern "C" {
 #endif
 
+#if defined(__aarch64__)
 #include "arch/arm/rte_pause_64.h"
+#else
+#include "arch/arm/rte_pause_32.h"
+#endif
 
 #ifdef __cplusplus
 }
