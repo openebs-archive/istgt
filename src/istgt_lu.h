@@ -904,6 +904,10 @@ typedef struct istgt_lu_disk_t {
 	pthread_mutex_t luworker_rmutex[ISTGT_MAX_NUM_LUWORKERS];
 	pthread_cond_t luworker_rcond[ISTGT_MAX_NUM_LUWORKERS];
 
+
+    // cleanup thread for spec mempool entries
+    pthread_t deadlist_cleanup_thread;
+
 	/* stats */
 	struct {
 		uint64_t	used;
