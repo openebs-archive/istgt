@@ -2352,8 +2352,8 @@ fatal_handler(int sig)
 	void *array[20];
 	size_t size;
 
-	fprintf(stderr, "Fatal signal received: %d\n", sig);
-	fprintf(stderr, "Stack trace:\n");
+    ISTGT_ERRLOG("Fatal signal received: %d\n", sig);
+	ISTGT_ERRLOG("Stack trace:\n");
 
 	size = backtrace(array, 20);
 	backtrace_symbols_fd(array, size, STDERR_FILENO);
