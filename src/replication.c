@@ -4380,13 +4380,14 @@ destroy_rcommon_deadlist(spec_t *spec)
     int mempool_stale_entry, i;
     rcommon_cmd_t *rcomm_cmd;
 
-    mempool_stale_entry= get_num_entries_from_mempool(&spec->rcommon_deadlist);
+    mempool_stale_entry = get_num_entries_from_mempool(&spec->rcommon_deadlist);
+    REPLICA_NOTICELOG("Cleaning up %d rcommon entry\n", mempool_stale_entry)
 
     while (mempool_stale_entry) {
         rcomm_cmd = get_from_mempool(&spec->rcommon_deadlist);
 
         destroy_resp_list(rcomm_cmd, rcomm_cmd->copies_sent + rcomm_cmd->non_quorum_copies_sent);
-        for (i=1; i<rcomm_cmd->iovcnt + 1; i++)
+        for (i = 1; i < rcomm_cmd->iovcnt + 1; i++)
             xfree(rcomm_cmd->iov[i].iov_base);
 
         free(rcomm_cmd);
