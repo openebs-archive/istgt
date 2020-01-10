@@ -4357,14 +4357,14 @@ destroy_volume(spec_t *spec)
     int ret = 0;
     void *res;
 
-    destroy_rcommon_deadlist(spec);
-
     pthread_cancel(spec->deadlist_cleanup_thread);
     ret = pthread_join(spec->deadlist_cleanup_thread, &res);
     if (ret != 0 || res != PTHREAD_CANCELED) {
         REPLICA_NOTICELOG("pthread_join returned ret:%d res:%p for mempool cleanup thread\n", ret, res);
         abort();
     }
+
+    destroy_rcommon_deadlist(spec);
 
     ASSERT0(get_num_entries_from_mempool(&spec->rcommon_deadlist));
 	destroy_mempool(&spec->rcommon_deadlist);
@@ -4545,13 +4545,21 @@ cleanup_deadlist(void *arg)
 {
 	spec_t *spec = (spec_t *)arg;
 	rcommon_cmd_t *rcomm_cmd;
-	int i, count = 0, entry_count = 0, copies_sent = 0;
+	int i, count = 0, entry_count = 0, copies_sent = 0, s;
 
 	while (1) {
 		entry_count = get_num_entries_from_mempool(&spec->rcommon_deadlist);
 		while (entry_count) {
 			count = 0;
-			rcomm_cmd = get_from_mempool(&spec->rcommon_deadlist);
+
+            s = pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
+            if (s != 0) {
+                REPLICA_ERRLOG("Failed to disable cancel state for "
+                  "mempool cleanup ret:%d\n", s);
+                abort();
+            }
+
+            rcomm_cmd = get_from_mempool(&spec->rcommon_deadlist);
 
 			ASSERT(rcomm_cmd->state == CMD_EXECUTION_DONE);
 
@@ -4572,7 +4580,16 @@ cleanup_deadlist(void *arg)
 			} else {
 				put_to_mempool(&spec->rcommon_deadlist, rcomm_cmd);
 			}
-			entry_count--;
+
+
+            s = pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+            if (s != 0) {
+                REPLICA_ERRLOG("Failed to enable cancel state for "
+                  "mempool cleanup ret:%d\n", s);
+                abort();
+            }
+
+            entry_count--;
 		}
 		sleep(1);	//add predefined time here
 	}
