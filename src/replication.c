@@ -4354,9 +4354,20 @@ initialize_replication()
 void
 destroy_volume(spec_t *spec)
 {
+    int ret = 0;
+    void *res;
+
     destroy_rcommon_deadlist(spec);
 
     pthread_cancel(spec->deadlist_cleanup_thread);
+    ret = pthread_join(spec->deadlist_cleanup_thread, &res);
+    if (ret != 0)
+        REPLICA_NOTICELOG("pthread_join returned %d for mempool cleanup thread\n", ret)
+
+    if (res != PTHREAD_CANCELED) {
+        REPLICA_NOTICELOG("cleanup mempool thread wasn't caneled! res:%p\n", res);
+    }
+
     ASSERT0(get_num_entries_from_mempool(&spec->rcommon_deadlist));
 	destroy_mempool(&spec->rcommon_deadlist);
 
@@ -4381,7 +4392,7 @@ destroy_rcommon_deadlist(spec_t *spec)
     rcommon_cmd_t *rcomm_cmd;
 
     mempool_stale_entry = get_num_entries_from_mempool(&spec->rcommon_deadlist);
-    REPLICA_NOTICELOG("Cleaning up %d rcommon entry\n", mempool_stale_entry)
+    REPLICA_NOTICELOG("Cleaning up rcommon entry:%d\n", mempool_stale_entry)
 
     while (mempool_stale_entry) {
         rcomm_cmd = get_from_mempool(&spec->rcommon_deadlist);
