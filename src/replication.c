@@ -4361,11 +4361,9 @@ destroy_volume(spec_t *spec)
 
     pthread_cancel(spec->deadlist_cleanup_thread);
     ret = pthread_join(spec->deadlist_cleanup_thread, &res);
-    if (ret != 0)
-        REPLICA_NOTICELOG("pthread_join returned %d for mempool cleanup thread\n", ret)
-
-    if (res != PTHREAD_CANCELED) {
-        REPLICA_NOTICELOG("cleanup mempool thread wasn't caneled! res:%p\n", res);
+    if (ret != 0 || res != PTHREAD_CANCELED) {
+        REPLICA_NOTICELOG("pthread_join returned ret:%d res:%p for mempool cleanup thread\n", ret, res);
+        abort();
     }
 
     ASSERT0(get_num_entries_from_mempool(&spec->rcommon_deadlist));
