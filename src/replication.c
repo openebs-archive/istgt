@@ -4354,19 +4354,19 @@ initialize_replication()
 void
 destroy_volume(spec_t *spec)
 {
-    int ret = 0;
-    void *res;
+	int ret = 0;
+	void *res;
 
-    destroy_rcommon_deadlist(spec);
+	pthread_cancel(spec->deadlist_cleanup_thread);
+	ret = pthread_join(spec->deadlist_cleanup_thread, &res);
+	if (ret != 0 || res != PTHREAD_CANCELED) {
+		REPLICA_NOTICELOG("pthread_join returned ret:%d res:%p for mempool cleanup thread\n", ret, res);
+		abort();
+	}
 
-    pthread_cancel(spec->deadlist_cleanup_thread);
-    ret = pthread_join(spec->deadlist_cleanup_thread, &res);
-    if (ret != 0 || res != PTHREAD_CANCELED) {
-        REPLICA_NOTICELOG("pthread_join returned ret:%d res:%p for mempool cleanup thread\n", ret, res);
-        abort();
-    }
+	destroy_rcommon_deadlist(spec);
 
-    ASSERT0(get_num_entries_from_mempool(&spec->rcommon_deadlist));
+	ASSERT0(get_num_entries_from_mempool(&spec->rcommon_deadlist));
 	destroy_mempool(&spec->rcommon_deadlist);
 
 	ASSERT(TAILQ_EMPTY(&spec->rcommon_waitq));
