@@ -29,7 +29,7 @@ else
 	ulimit -c unlimited
 	## /var/openebs is mounted as persistent directory on
 	## host machine
-	cd /var/openebs || exit
+	cd /var/openebs/cstor-target || exit
 	mkdir -p core
 	cd core
 fi
