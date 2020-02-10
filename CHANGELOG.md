@@ -1,3 +1,11 @@
+v1.7.0-RC1/ 2020-02-05
+========================
+
+* refactor(gitlab-yaml): removed the request to trigger pipeline in packet ([#308](https://github.com/openebs/istgt/pull/307),
+  [@nsathyaseelan](https://github.com/nsathyaseelan))
+* fix(core): dump cores on persistent location ([#307](https://github.com/openebs/istgt/pull/307),
+  [@mittachaitu](https://github.com/mittachaitu))
+
 v1.6/ 2020-01-15
 ========================
 
