@@ -1,4 +1,20 @@
 /*
+ * Copyright © 2017-2019 The OpenEBS Authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * This work is derived from earlier work available under:
+ *
  * Copyright (C) 2008-2012 Daisuke Aoyama <aoyama@peach.ne.jp>.
  * All rights reserved.
  *
@@ -91,10 +107,14 @@ ISTGT_LU_Ptr istgt_lu_find_target(ISTGT_Ptr istgt, const char *target_name);
 ISTGT_LU_Ptr istgt_lu_find_target_by_volname(ISTGT_Ptr istgt, const char *target_name);
 #ifdef	REPLICATION
 int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int, int);
+int istgt_lu_resize_volume(spec_t *spec, size_t size);
+int istgt_lu_remove_unknown_replica(spec_t *spec, int drf, char **replicas_id);
 int istgt_lu_destroy_snapshot(spec_t *spec, char *snapname);
 void istgt_lu_mempool_stats(char **resp);
 void istgt_lu_replica_stats(char *volname, char **resp);
 char *istgt_lu_fetch_snaplist(spec_t *spec, int);
+void istgt_set_max_io_wait_time(uint64_t new_io_wait_time);
+uint64_t istgt_get_max_io_wait_time(void);
 #endif
 int istgt_lu_add_nexus(ISTGT_LU_Ptr lu, char *initiator_port);
 int istgt_lu_remove_nexus(ISTGT_LU_Ptr lu, char *initiator_port);
@@ -292,7 +312,7 @@ istgt_lu_set_state(ISTGT_LU_Ptr lu, ISTGT_STATE state)
 }
 
 #ifdef REPLICATION
-//int initialize_volume(spec_t *, int, int);
+//int initialize_volume(spec_t *, int, int, int);
 #endif
 
 #endif /* USE_ATOMIC */

@@ -1,3 +1,19 @@
+/*
+ * Copyright © 2017-2019 The OpenEBS Authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #include <config.h>
 #include <stdio.h>
 #include <string.h>
@@ -36,6 +52,8 @@ __thread char  tinfo[50] =  {0};
 	mgmt_ack_data->pool_guid = replica_port;\
 	mgmt_ack_data->checkpointed_io_seq = 1000;\
 	mgmt_ack_data->zvol_guid = replica_port;\
+	strcpy(mgmt_ack_data->replica_id, replica_id);\
+	mgmt_ack_data->quorum = replica_quorum_state;\
 }
 
 bool degraded_mode = false;
@@ -45,6 +63,9 @@ int mdlist_fd = 0;
 size_t mdlist_size = 0;
 uint64_t read_ios;
 uint64_t write_ios;
+int replica_quorum_state = 0;
+char replica_id[REPLICA_ID_LEN];
+uint64_t replication_factor = 0;
 
 static void
 sig_handler(int sig)
@@ -124,7 +145,7 @@ static uint64_t
 fetch_update_io_buf(zvol_io_hdr_t *io_hdr, uint8_t *user_data,
     uint8_t **resp_data)
 {
-	uint32_t count = 0;
+	uint32_t count = 1;
 	uint64_t len = io_hdr->len;
 	uint64_t offset = io_hdr->offset;
 	uint64_t start = offset;
@@ -135,6 +156,7 @@ fetch_update_io_buf(zvol_io_hdr_t *io_hdr, uint8_t *user_data,
 	struct zvol_io_rw_hdr *last_io_rw_hdr;
 	uint8_t *resp;
 
+	md_io_num = read_metadata(start);
 	while (start < end) {
 		if (md_io_num != read_metadata(start)) {
 			count++;
@@ -228,9 +250,20 @@ test_read_data(int fd, uint8_t *data, uint64_t len)
 	return nbytes;
 }
 
+static bool
+is_valid_rebuild_status(zrepl_status_ack_t *zrepl_status) {
+	if (zrepl_status->state == ZVOL_STATUS_DEGRADED)
+		return true;
+	if (replication_factor == 1 &&
+	    zrepl_status->state == ZVOL_STATUS_HEALTHY &&
+	    zrepl_status->rebuild_status == ZVOL_REBUILDING_DONE)
+		return true;
+	return false;
+}
+
 static int
 send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
-    int replica_port, zrepl_status_ack_t *zrepl_status,
+    int replica_port, int delay_connection, zrepl_status_ack_t *zrepl_status,
     int *zrepl_status_msg_cnt)
 {
 	int i, nbytes = 0;
@@ -249,13 +282,23 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 	iovec[0].iov_len = sizeof (zvol_io_hdr_t);
 
 	if (opcode == ZVOL_OPCODE_SNAP_DESTROY) {
-
 		iovec_count = 1;
 		mgmt_ack_hdr->status = (random() % 2) ? ZVOL_OP_STATUS_FAILED : ZVOL_OP_STATUS_OK;
 		mgmt_ack_hdr->len = 0;
 	} else if (opcode == ZVOL_OPCODE_SNAP_CREATE) {
 		iovec_count = 1;
-		sleep(random()%3 + 1);
+		sleep(random()%2);
+		mgmt_ack_hdr->status = ZVOL_OP_STATUS_OK;
+		// TODO: Need to have retry logic for failed replica
+		// if it is helper replica during snap create command
+		//mgmt_ack_hdr->status = (random() % 5 == 0) ? ZVOL_OP_STATUS_FAILED : ZVOL_OP_STATUS_OK;
+		if ( mgmt_ack_hdr->status == ZVOL_OP_STATUS_FAILED) {
+			REPLICA_ERRLOG("Random failure on replica(%s:%d) for SNAP_CREATE "
+			    "opcode\n", replica_ip, replica_port);
+		}
+		mgmt_ack_hdr->len = 0;
+	} else if (opcode == ZVOL_OPCODE_SNAP_PREPARE) {
+		iovec_count = 1;
 		mgmt_ack_hdr->status = (random() % 5 == 0) ? ZVOL_OP_STATUS_FAILED : ZVOL_OP_STATUS_OK;
 		mgmt_ack_hdr->len = 0;
 	} else if (opcode == ZVOL_OPCODE_REPLICA_STATUS) {
@@ -271,12 +314,24 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 			(*zrepl_status_msg_cnt) += 1;
 		}
 
+		// Injecting delays while sending acknowledge to target
+		if (delay_connection > 0 )
+			sleep(delay_connection);
+
+		replica_quorum_state = 1;
 		mgmt_ack_hdr->len = sizeof (zrepl_status_ack_t);
 		iovec_count = 2;
 		iovec[1].iov_base = zrepl_status;
 		iovec[1].iov_len = sizeof (zrepl_status_ack_t);
 	} else if (opcode == ZVOL_OPCODE_START_REBUILD) {
-		zrepl_status->rebuild_status = ZVOL_REBUILDING_SNAP;
+		if (!is_valid_rebuild_status(zrepl_status)) {
+			REPLICA_ERRLOG("START_REBUILD is on invalid repl "
+			    "status %d\n", zrepl_status->state);
+			exit(1);
+		}
+		if (zrepl_status->state == ZVOL_STATUS_DEGRADED)
+			zrepl_status->rebuild_status = ZVOL_REBUILDING_SNAP;
+
 		mgmt_ack_hdr->len = 0;
 		iovec_count = 1;
 	} else if (opcode == ZVOL_OPCODE_STATS) {
@@ -296,6 +351,9 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 		iovec[1].iov_len = sizeof (*snap_details) + strlen(dummy);
 		mgmt_ack_hdr->len = sizeof (*snap_details) + strlen(dummy);
 		iovec_count = 2;
+	} else if (opcode == ZVOL_OPCODE_RESIZE) {
+		mgmt_ack_hdr->len = 0;
+		iovec_count = 1;
 	} else {
 		build_mgmt_ack_data;
 
@@ -328,6 +386,7 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 			}
 		}
 	}
+
 	ret = 0;
 out:
 	if (mgmt_ack_hdr)
@@ -408,10 +467,13 @@ usage(void)
 	printf(" -P replica port\n");
 	printf(" -r retry if failed to connect\n");
 	printf(" -V volume path\n");
+	printf(" -q replica quorum(default is set to 0)\n");
 	printf(" -n number of IOs to serve before sleeping for 60 seconds\n");
 	printf(" -d run in degraded mode only\n");
 	printf(" -e error frequency (should be <= 10, default is 0)\n");
 	printf(" -t delay in response in seconds\n");
+	printf(" -s delay while forming the management connectioin and Rebuild respone in seconds\n");
+	printf(" -u unique replica identifier(replica ID)\n");
 }
 
 
@@ -431,7 +493,7 @@ main(int argc, char **argv)
 	int iofd = -1, mgmtfd, sfd, rc, epfd, event_count, i;
 	int64_t count;
 	struct epoll_event event, *events;
-	uint8_t *data, *data_ptr_cpy;
+	uint8_t *data, *mgmt_data;
 	uint64_t nbytes = 0;
 	int vol_fd;
 	zvol_op_code_t opcode;
@@ -447,9 +509,12 @@ main(int argc, char **argv)
 	int check = 1;
 	struct timespec now;
 	int delay = 0;
+	int delay_connection = 0;
 	bool retry = false;
 
-	while ((ch = getopt(argc, argv, "i:p:I:P:V:n:e:t:dr")) != -1) {
+	memset(replica_id, 0, REPLICA_ID_LEN);
+
+	while ((ch = getopt(argc, argv, "i:p:I:P:V:n:e:s:t:u:drq")) != -1) {
 		switch (ch) {
 			case 'i':
 				strncpy(ctrl_ip, optarg, sizeof(ctrl_ip));
@@ -471,6 +536,9 @@ main(int argc, char **argv)
 				strncpy(test_vol, optarg, sizeof(test_vol));
 				check |= 1 << 5;
 				break;
+			case 'q':
+				replica_quorum_state = 1;
+				break;
 			case 'n':
 				io_cnt = atoi(optarg);
 				break;
@@ -487,8 +555,15 @@ main(int argc, char **argv)
 			case 'r':
 				retry = true;
 				break;
+			case 's':
+				delay_connection = atoi(optarg);
+				break;
 			case 't':
 				delay = atoi(optarg);
+				break;
+			case 'u':
+				strcpy(replica_id, optarg);
+				check |= 1 << 6;
 				break;
 			default:
 				usage();
@@ -496,7 +571,7 @@ main(int argc, char **argv)
 		}
 	}
 
-	if(check != 63) {
+	if(check != 127) {
 		usage();
 	}
 
@@ -506,20 +581,20 @@ main(int argc, char **argv)
 	io_hdr = malloc(sizeof(zvol_io_hdr_t));
 	mgmtio = malloc(sizeof(zvol_io_hdr_t));
 	zrepl_status = (zrepl_status_ack_t *)malloc(sizeof (zrepl_status_ack_t));
-	zrepl_status->state = ZVOL_STATUS_DEGRADED; 
-	zrepl_status->rebuild_status = ZVOL_REBUILDING_INIT; 
+	zrepl_status->state = ZVOL_STATUS_DEGRADED;
+	zrepl_status->rebuild_status = ZVOL_REBUILDING_INIT;
 	if (init_mdlist(test_vol)) {
 		REPLICA_ERRLOG("Failed to initialize mdlist for replica(%d)\n", ctrl_port);
 		close(vol_fd);
 		exit(EXIT_FAILURE);
 	}
 
-	clock_gettime(CLOCK_MONOTONIC, &now);
+	clock_gettime(CLOCK_MONOTONIC_RAW, &now);
 	srandom(now.tv_sec);
 
 	data = NULL;
 	epfd = epoll_create1(0);
-	
+
 	//Create listener for io connections from controller and add to epoll
 	if((sfd = cstor_ops.conn_listen(replica_ip, replica_port, 32, 1)) < 0) {
                 REPLICA_LOG("conn_listen() failed, err:%d replica(%d)", errno, ctrl_port);
@@ -599,9 +674,11 @@ again:
 				}
 
 				if(mgmtio->len) {
-					data = data_ptr_cpy = malloc(mgmtio->len);
-					count = test_read_data(events[i].data.fd, (uint8_t *)data, mgmtio->len);
+					mgmt_data = malloc(mgmtio->len);
+					count = test_read_data(events[i].data.fd, (uint8_t *)mgmt_data, mgmtio->len);
 					if (count < 0) {
+						REPLICA_ERRLOG("Failed to read from %d for len %lu and opcode %d\n",
+						    events[i].data.fd, mgmtio->len, mgmtio->opcode);
 						rc = -1;
 						goto error;
 					} else if ((uint64_t)count != mgmtio->len) {
@@ -612,12 +689,16 @@ again:
 					}
 				}
 				opcode = mgmtio->opcode;
-				send_mgmt_ack(mgmtfd, opcode, data, replica_ip, replica_port, zrepl_status, &zrepl_status_msg_cnt);
+				send_mgmt_ack(mgmtfd, opcode, mgmt_data, replica_ip, replica_port, delay_connection, zrepl_status, &zrepl_status_msg_cnt);
 			} else if (events[i].data.fd == sfd) {
 				struct sockaddr saddr;
 				socklen_t slen;
 				char hbuf[NI_MAXHOST], sbuf[NI_MAXSERV];
 				slen = sizeof(saddr);
+				// Injecting delay while forming data connection to perform test
+				if (delay_connection > 0)
+					sleep(delay_connection);
+
 				iofd = accept(sfd, &saddr, &slen);
 				if (iofd == -1) {
 					if((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
@@ -654,6 +735,8 @@ again:
 					if (read_rem_data) {
 						count = test_read_data(events[i].data.fd, (uint8_t *)data + recv_len, total_len - recv_len);
 						if (count < 0) {
+							REPLICA_ERRLOG("Failed to read from datafd %d with rem_data for opcode: %d\n",
+							    iofd, io_hdr->opcode);
 							rc = -1;
 							goto error;
 						} else if ((uint64_t)count < (total_len - recv_len)) {
@@ -670,6 +753,7 @@ again:
 					} else if (read_rem_hdr) {
 						count = test_read_data(events[i].data.fd, (uint8_t *)io_hdr + recv_len, total_len - recv_len);
 						if (count < 0) {
+							REPLICA_ERRLOG("Failed to read from datafd %d with rem_hdr\n", iofd);
 							rc = -1;
 							goto error;
 						} else if ((uint64_t)count < (total_len - recv_len)) {
@@ -684,6 +768,7 @@ again:
 					} else {
 						count = test_read_data(events[i].data.fd, (uint8_t *)io_hdr, io_hdr_len);
 						if (count < 0) {
+							REPLICA_ERRLOG("Failed to read from datafd %d\n", iofd);
 							rc = -1;
 							goto error;
 						} else if ((uint64_t)count < io_hdr_len) {
@@ -705,6 +790,8 @@ again:
 							nbytes = 0;
 							count = test_read_data(events[i].data.fd, (uint8_t *)data, io_hdr->len);
 							if (count < 0) {
+								REPLICA_ERRLOG("Failed to read from datafd %d with opcode %d\n",
+								    iofd, io_hdr->opcode);
 								rc = -1;
 								goto error;
 							} else if ((uint64_t)count < io_hdr->len) {
@@ -716,14 +803,20 @@ again:
 							read_rem_data = false;
 						}
 					}
-
+execute_io:
 					if (io_hdr->opcode == ZVOL_OPCODE_OPEN) {
 						open_ptr = (zvol_op_open_data_t *)data;
+						replication_factor = open_ptr->replication_factor;
+						if (replication_factor == 1 &&
+						    replica_quorum_state == 1) {
+							zrepl_status->state = ZVOL_STATUS_HEALTHY;
+							zrepl_status->rebuild_status = ZVOL_REBUILDING_DONE;
+						}
 						io_hdr->status = ZVOL_OP_STATUS_OK;
-						REPLICA_LOG("Volume name:%s blocksize:%d timeout:%d.. replica(%d)\n",
-						    open_ptr->volname, open_ptr->tgt_block_size, open_ptr->timeout, ctrl_port);
+						REPLICA_LOG("Volume name:%s blocksize:%d timeout:%d.. replica(%d) state: %d\n",
+						    open_ptr->volname, open_ptr->tgt_block_size, open_ptr->timeout, ctrl_port,
+						    zrepl_status->state);
 					}
-execute_io:
 					if ((io_cnt > 0) && (io_hdr->opcode == ZVOL_OPCODE_WRITE ||
 							io_hdr->opcode == ZVOL_OPCODE_READ)) {
 						io_cnt --;
@@ -764,6 +857,10 @@ execute_io:
 						usleep(sleeptime);
 						write_ios++;
 					} else if(io_hdr->opcode == ZVOL_OPCODE_READ) {
+						if ( replica_quorum_state == 0) {
+							REPLICA_ERRLOG("Received Read IO's request on non-quorum replica \n");
+							goto error;
+						}
 						uint8_t *user_data = NULL;
 						if (delay > 0)
 							sleep(delay);
@@ -822,7 +919,7 @@ execute_io:
 
 error:
 	REPLICA_ERRLOG("shutting down replica(%s:%d) IOs(read:%lu write:%lu)\n",
-	    ctrl_ip, ctrl_port, read_ios, write_ios);
+	    replica_ip, replica_port, read_ios, write_ios);
 	if (data)
 		free(data);
 	close(vol_fd);

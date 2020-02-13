@@ -1,3 +1,19 @@
+/*
+ * Copyright © 2017-2019 The OpenEBS Authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -385,6 +401,13 @@ send_mgmt_ack(int fd, zvol_io_hdr_t *mgmt_ack_hdr, void *buf, int *zrepl_status_
 			mgmt_ack_hdr->len = 0;
 			break;
 
+		case ZVOL_OPCODE_SNAP_PREPARE:
+			iovec_count = 3;
+			sleep(random()%3 + 1);
+			mgmt_ack_hdr->status = (random() % 5 == 0) ? ZVOL_OP_STATUS_FAILED : ZVOL_OP_STATUS_OK;
+			mgmt_ack_hdr->len = 0;
+			break;
+
 		case ZVOL_OPCODE_REPLICA_STATUS:
 			zrepl_status.state = ZVOL_STATUS_DEGRADED;
 //			zrepl_status.state = ZVOL_STATUS_HEALTHY;
@@ -430,9 +453,12 @@ send_mgmt_ack(int fd, zvol_io_hdr_t *mgmt_ack_hdr, void *buf, int *zrepl_status_
 		case ZVOL_OPCODE_HANDSHAKE:
 			strcpy(mgmt_ack_data.ip, replica_ip);
 			strcpy(mgmt_ack_data.volname, buf);
+			memset(mgmt_ack_data.replica_id, 0, REPLICA_ID_LEN);
+			sprintf(mgmt_ack_data.replica_id, "%d", replica_port);
 			mgmt_ack_data.port = replica_port;
 			mgmt_ack_data.pool_guid = replica_port;
 			mgmt_ack_data.zvol_guid = replica_port;
+			mgmt_ack_data.quorum = 1;
 
 			iovec[3].iov_base = &mgmt_ack_data;
 			iovec[3].iov_len = 50;
@@ -596,7 +622,7 @@ errored_replica(void *arg)
 	io_hdr = malloc(sizeof(zvol_io_hdr_t));
 	mgmtio = malloc(sizeof(zvol_io_hdr_t));
 
-	clock_gettime(CLOCK_MONOTONIC, &now);
+	clock_gettime(CLOCK_MONOTONIC_RAW, &now);
 	srandom(now.tv_sec);
 
 	snprintf(tinfo, 50, "mock_nwrepl%d", replica_port);

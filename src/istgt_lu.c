@@ -1,4 +1,20 @@
 /*
+ * Copyright © 2017-2019 The OpenEBS Authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * This work is derived from earlier work available under:
+ *
  * Copyright (C) 2008-2012 Daisuke Aoyama <aoyama@peach.ne.jp>.
  * All rights reserved.
  *
@@ -75,7 +91,6 @@
 #include "istgt_scsi.h"
 
 #define	MAX_MASKBUF 128
-
 
 static int
 istgt_lu_allow_ipv6(const char *netmask, const char *addr)
@@ -1368,6 +1383,67 @@ istgt_lu_set_local_settings(ISTGT_Ptr istgt, CF_SECTION *sp, ISTGT_LU_Ptr lu)
 
 extern int g_num_luworkers;
 
+static void set_queue_depth(CF_SECTION *sp, ISTGT_LU_Ptr lu)
+{
+	const char* val = getenv("QueueDepth");
+	if (val)
+		ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "setting queuedepth from env to %s\n", val);
+	else
+		val = istgt_get_val(sp, "QueueDepth");
+
+	if (val == NULL) {
+		switch (lu->type) {
+		case ISTGT_LU_TYPE_DISK:
+			lu->queue_depth = DEFAULT_LU_QUEUE_DEPTH;
+			// lu->queue_depth = 0;
+			break;
+		case ISTGT_LU_TYPE_DVD:
+		case ISTGT_LU_TYPE_TAPE:
+		default:
+			lu->queue_depth = 0;
+			break;
+		}
+	} else {
+		lu->queue_depth = (int) strtol(val, NULL, 10);
+	}
+	if (lu->queue_depth < 1 || lu->queue_depth >= MAX_LU_QUEUE_DEPTH) {
+		ISTGT_ERRLOG("LU%d: queue depth %d is not in range, resetting to %d\n", lu->num, lu->queue_depth, DEFAULT_LU_QUEUE_DEPTH);
+		lu->queue_depth = DEFAULT_LU_QUEUE_DEPTH;
+	}
+}
+
+static void set_luworkers(CF_SECTION *sp, ISTGT_LU_Ptr lu)
+{
+	const char* val = getenv("Luworkers");
+	if (val)
+		ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "setting luworkers from env to %s\n", val);
+	else
+		val = istgt_get_val(sp, "Luworkers");
+
+	if (val == NULL) {
+		switch (lu->type) {
+		case ISTGT_LU_TYPE_DISK:
+			lu->luworkers = g_num_luworkers;
+			break;
+		case ISTGT_LU_TYPE_DVD:
+		case ISTGT_LU_TYPE_TAPE:
+		default:
+			lu->luworkers = 0;
+			break;
+		}
+	} else {
+		lu->luworkers = (int) strtol(val, NULL, 10);
+		if (lu->luworkers > (ISTGT_MAX_NUM_LUWORKERS - 1)) {
+			ISTGT_ERRLOG("LU%d: luworkers %d is not in range, resetting to %d\n", lu->num, lu->luworkers, ISTGT_MAX_NUM_LUWORKERS - 1);
+			lu->luworkers = (ISTGT_MAX_NUM_LUWORKERS - 1);
+		}
+		else if (lu->luworkers < 1) {
+			ISTGT_ERRLOG("LU%d: luworkers %d is not in range, resetting to %d\n", lu->num, lu->luworkers, 1);
+			lu->luworkers = ISTGT_NUM_LUWORKERS_DEFAULT;
+		}
+	}
+}
+
 static int
 istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 {
@@ -1391,6 +1467,9 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	int i, j, k;
 	int rc;
 	int gotstorage = 0;
+#ifdef REPLICATION
+	trusty_replica_t *trusty_replica;
+#endif
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "add unit %d\n", sp->num);
 
 	if (sp->num >= MAX_LOGICAL_UNIT) {
@@ -1634,6 +1713,23 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "ReadOnly %s\n",
 	    lu->readonly ? "Yes" : "No");
 #ifdef REPLICATION
+	val = istgt_get_val(sp, "DesiredReplicationFactor");
+	if (val == NULL) {
+		ISTGT_ERRLOG("Desired ReplicationFactor not found in conf file\n");
+		goto error_return;
+	} else {
+		lu->desired_replication_factor = (int) strtol(val, NULL, 10);
+		if (lu->desired_replication_factor > MAXREPLICA) {
+			ISTGT_ERRLOG("Max replication factor is %d.."
+			    " given desired replication factor %d\n",
+			    MAXREPLICA, lu->desired_replication_factor);
+			goto error_return;
+		}
+	}
+
+	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "Desired ReplicationFactor %d\n",
+	    lu->desired_replication_factor);
+
 	val = istgt_get_val(sp, "ReplicationFactor");
 	if (val == NULL) {
 		ISTGT_ERRLOG("ReplicationFactor not found in conf file\n");
@@ -1641,8 +1737,8 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	} else {
 		lu->replication_factor = (int) strtol(val, NULL, 10);
 		if (lu->replication_factor > MAXREPLICA) {
-			ISTGT_ERRLOG("Max replication factor is %d.. "
-			    "given %d\n", MAXREPLICA, lu->replication_factor);
+			ISTGT_ERRLOG("Max replication factor is %d.. given %d\n",
+			    MAXREPLICA, lu->replication_factor);
 			goto error_return;
 		}
 	}
@@ -1661,9 +1757,48 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "ConsistencyFactor %d\n",
 	    lu->consistency_factor);
 
+	if (lu->replication_factor > lu->desired_replication_factor) {
+		ISTGT_ERRLOG("Invalid config ReplicationFactor(%d) is"
+		    " greater than Desired ReplicationFactor(%d)\n",
+		    lu->replication_factor, lu->desired_replication_factor);
+		goto error_return;
+	}
 	if (lu->replication_factor <= 0 || lu->consistency_factor <= 0 ||
 		lu->replication_factor < lu->consistency_factor) {
 		ISTGT_ERRLOG("Invalid ReplicationFactor/ConsistencyFactor or their ratio\n");
+		goto error_return;
+	}
+	/* Read trusty replica details from conf file and maintain in memory structure*/
+	/* Replica configuration in istgt conf file looks like
+	 * Replica 6061 6061
+	 * Replica 6062 6062
+	 * Replica 6063 6063
+	 */
+	val = istgt_get_val(sp, "Replica");
+	i = 0;
+	TAILQ_INIT(&lu->trusty_replicas);
+	if (val != NULL) {
+		for (i=0; ; i++) {
+			key = istgt_get_nmval(sp, "Replica", i, 0);
+			if (key == NULL) {
+				break;
+			}
+			trusty_replica = xmalloc(sizeof (trusty_replica_t));
+			memset(trusty_replica, 0, sizeof(trusty_replica_t));
+			val = istgt_get_nmval(sp, "Replica", i, 1);
+			strncpy(trusty_replica->replica_id, key, REPLICA_ID_LEN);
+			trusty_replica->zvol_guid = (uint64_t) strtoul(val, NULL, 10);
+			TAILQ_INSERT_TAIL(&lu->trusty_replicas, trusty_replica, next);
+			ISTGT_LOG("trusty replica key {%s} and"
+			    " zvol guid {%lu}\n",trusty_replica->replica_id, trusty_replica->zvol_guid);
+		}
+	}
+	// It is useful in case where multiple copies of data
+	// is lost and to reconstruct the data from other replicas
+	// RF and CF will be updated to correspondig values
+	if (i > lu->desired_replication_factor) {
+		ISTGT_ERRLOG("trusty replica count %d is greater than desired replication factor %d\n",
+		    i, lu->replication_factor);
 		goto error_return;
 	}
 #endif
@@ -1800,27 +1935,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 		}
 	}
 
-	val = istgt_get_val(sp, "QueueDepth");
-	if (val == NULL) {
-		switch (lu->type) {
-		case ISTGT_LU_TYPE_DISK:
-			lu->queue_depth = DEFAULT_LU_QUEUE_DEPTH;
-			// lu->queue_depth = 0;
-			break;
-		case ISTGT_LU_TYPE_DVD:
-		case ISTGT_LU_TYPE_TAPE:
-		default:
-			lu->queue_depth = 0;
-			break;
-		}
-	} else {
-		lu->queue_depth = (int) strtol(val, NULL, 10);
-	}
-	if (lu->queue_depth < 0 || lu->queue_depth >= MAX_LU_QUEUE_DEPTH) {
-		ISTGT_ERRLOG("LU%d: queue depth %d is not in range, resetting to %d\n", lu->num, lu->queue_depth, DEFAULT_LU_QUEUE_DEPTH);
-		lu->queue_depth = DEFAULT_LU_QUEUE_DEPTH;
-		goto error_return;
-	}
+	set_queue_depth(sp, lu);
 
 	lu->luworkers = 0;
 	lu->luworkersActive = 0;
@@ -1830,25 +1945,7 @@ istgt_lu_add_unit(ISTGT_Ptr istgt, CF_SECTION *sp)
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "BlockLength %d, PhysRecordLength %d, QueueDepth %d\n",
 		lu->blocklen, lu->recordsize, lu->queue_depth);
 
-	val = istgt_get_val(sp, "Luworkers");
-	if (val == NULL) {
-		switch (lu->type) {
-		case ISTGT_LU_TYPE_DISK:
-			lu->luworkers = g_num_luworkers;
-			break;
-		case ISTGT_LU_TYPE_DVD:
-		case ISTGT_LU_TYPE_TAPE:
-		default:
-			lu->luworkers = 0;
-			break;
-		}
-	} else {
-		lu->luworkers = (int) strtol(val, NULL, 10);
-		if (lu->luworkers > (ISTGT_MAX_NUM_LUWORKERS - 1))
-			lu->luworkers = (ISTGT_MAX_NUM_LUWORKERS - 1);
-		else if (lu->luworkers < 1)
-			lu->luworkers = 1;
-	}
+	set_luworkers(sp, lu);
 
 	lu->maxlun = 0;
 	for (i = 0; i < MAX_LU_LUN; i++) {
@@ -2278,6 +2375,13 @@ error_return:
 		}
 		MTX_UNLOCK(&istgt->mutex);
 	}
+#ifdef REPLICATION
+	/* Releasing in memory details */
+	while (trusty_replica = TAILQ_FIRST(&lu->trusty_replicas)) {
+                TAILQ_REMOVE(&lu->trusty_replicas, trusty_replica, next);
+                xfree(trusty_replica);
+        }
+#endif
 
 	xfree(lu);
 	return (-1);
@@ -2529,10 +2633,20 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 				ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "Device file=%s\n",
 							    lu->lun[i].u.device.file);
 			} else if (strcasecmp(val, "Storage") == 0) {
+#ifndef	REPLICATION
 				file = istgt_get_nmval(sp, buf, j, 1);
 				size = istgt_get_nmval(sp, buf, j, 2);
 				rsz  = istgt_get_nmval(sp, buf, j, 3);
+#else
+				size = istgt_get_nmval(sp, buf, j, 1);
+				rsz  = istgt_get_nmval(sp, buf, j, 2);
+#endif
+
+#ifndef	REPLICATION
 				if (file == NULL || size == NULL) {
+#else
+				if (size == NULL) {
+#endif
 					ISTGT_ERRLOG("LU%d: LUN%d: format error\n", lu->num, i);
 					goto error_return;
 				}
@@ -2574,9 +2688,15 @@ istgt_lu_update_unit(ISTGT_LU_Ptr lu, CF_SECTION *sp)
 						new_rsize = (uint32_t)vall;
 				}
 
+#ifndef	REPLICATION
 				if (old_size == new_size && new_rsize == old_rsize &&
 					spec != NULL && strcasecmp(file, spec->file) == 0)
 					continue;
+#else
+				if (old_size == new_size && new_rsize == old_rsize &&
+					spec != NULL)
+					continue;
+#endif
 
 				lu->lun[i].u.storage.size = new_size;
 				lu->lun[i].u.storage.rsize = new_rsize;
@@ -3733,6 +3853,8 @@ istgt_lu_create_task(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd, int lun, ISTGT_LU_D
 	}
 
 #ifdef REPLICATION
+	lu_task->lu_cmd.lu_start_time.tv_sec = 0;
+	lu_task->lu_cmd.repl_start_time.tv_sec = 0;
 	lu_task->lu_cmd.start_rw_time = lu_cmd->start_rw_time;
 #endif
 	lu_task->condwait = 0;
@@ -4345,7 +4467,7 @@ luworker(void *arg)
 	{	\
 		if ((_n.tv_nsec - _s.tv_nsec) < 0) {        \
 			_r.tv_sec  = _n.tv_sec - _s.tv_sec-1;   \
-			_r.tv_nsec = 1000000000 + _n.tv_nsec - _s.tv_nsec; \
+			_r.tv_nsec = SEC_IN_NS + _n.tv_nsec - _s.tv_nsec; \
 		} else {                                    \
 			_r.tv_sec  = _n.tv_sec - _s.tv_sec;     \
 			_r.tv_nsec = _n.tv_nsec - _s.tv_nsec;   \
@@ -4353,8 +4475,8 @@ luworker(void *arg)
 		spec->avgs[id].count++;	\
 		spec->avgs[id].tot_sec += _r.tv_sec;	\
 		spec->avgs[id].tot_nsec += _r.tv_nsec;	\
-		secs = spec->avgs[id].tot_nsec/1000000000;	\
-		nsecs = spec->avgs[id].tot_nsec%1000000000;	\
+		secs = spec->avgs[id].tot_nsec/SEC_IN_NS;	\
+		nsecs = spec->avgs[id].tot_nsec%SEC_IN_NS;	\
 		spec->avgs[id].tot_sec += secs;	\
 		spec->avgs[id].tot_nsec = nsecs;	\
 	}	\
@@ -4507,6 +4629,7 @@ luworker(void *arg)
 			tdiff(second2, third, r);
 #ifdef REPLICATION
 			lu_task->lu_cmd.luworkerindx = tind;
+			clock_gettime(CLOCK_MONOTONIC_RAW, &lu_task->lu_cmd.lu_start_time);
 #endif
 			lu_task->lu_cmd.flags |= ISTGT_WORKER_PICKED;
 			rc = istgt_lu_disk_queue_start(lu, lu_num, tind);
@@ -4552,7 +4675,7 @@ luscheduler(void *arg)
 	{	\
 		if ((_n.tv_nsec - _s.tv_nsec) < 0) {        \
 			_r.tv_sec  = _n.tv_sec - _s.tv_sec-1;   \
-			_r.tv_nsec = 1000000000 + _n.tv_nsec - _s.tv_nsec; \
+			_r.tv_nsec = SEC_IN_NS + _n.tv_nsec - _s.tv_nsec; \
 		} else {                                    \
 			_r.tv_sec  = _n.tv_sec - _s.tv_sec;     \
 			_r.tv_nsec = _n.tv_nsec - _s.tv_nsec;   \
@@ -4560,8 +4683,8 @@ luscheduler(void *arg)
 		spec->avgs[id].count++;	\
 		spec->avgs[id].tot_sec += _r.tv_sec;	\
 		spec->avgs[id].tot_nsec += _r.tv_nsec;	\
-		secs = spec->avgs[id].tot_nsec/1000000000;	\
-		nsecs = spec->avgs[id].tot_nsec%1000000000;	\
+		secs = spec->avgs[id].tot_nsec/SEC_IN_NS;	\
+		nsecs = spec->avgs[id].tot_nsec%SEC_IN_NS;	\
 		spec->avgs[id].tot_sec += secs;	\
 		spec->avgs[id].tot_nsec = nsecs;	\
 	}	\

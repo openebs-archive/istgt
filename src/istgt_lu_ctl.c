@@ -1,4 +1,20 @@
 /*
+ * Copyright © 2017-2019 The OpenEBS Authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * This work is derived from earlier work available under:
+ *
  * Copyright (C) 2008-2012 Daisuke Aoyama <aoyama@peach.ne.jp>.
  * All rights reserved.
  *
@@ -78,7 +94,6 @@ typedef struct istgt_uctl_t {
 	ISTGT_Ptr istgt;
 	PORTAL portal;
 	int sock;
-	pthread_t thread;
 
 	int family;
 	char caddr[MAX_ADDRBUF];
@@ -553,7 +568,7 @@ istgt_uctl_cmd_snap(UCTL_Ptr uctl)
 	char *volname, *snapname;
 	int rc = 0, ret = UCTL_CMD_ERR, io_wait_time, wait_time;
 	char *arg;
-	bool r;
+	int r;
 	arg = uctl->arg;
 
 	CHECK_ARG_AND_GOTO_ERROR;
@@ -579,7 +594,7 @@ istgt_uctl_cmd_snap(UCTL_Ptr uctl)
 		    wait_time);
 	else
 		r = istgt_lu_destroy_snapshot(spec, snapname);
-	if (r == true) {
+	if (r) {
 		istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
 		ret = UCTL_CMD_OK;
 	}
@@ -592,6 +607,176 @@ error_return:
 	}
 	return (ret);
 }
+
+static int
+istgt_uctl_cmd_resize(UCTL_Ptr uctl)
+{
+	ISTGT_LU_Ptr lu = NULL;
+	ISTGT_LU_DISK *spec = NULL;
+	int rc = 0, ret = UCTL_CMD_ERR;
+	char *volname, *size_str, *arg;
+	uint64_t new_size, old_size;
+	bool r;
+	const char *delim = ARGS_DELIM;
+	arg = uctl->arg;
+	//NOTE: We are hard coding replica block size as of
+	//now we don't have any information related to block size of replica
+	uint64_t replica_block_size = 4096;
+
+	CHECK_ARG_AND_GOTO_ERROR;
+	volname = strsepq(&arg, delim);
+
+	CHECK_ARG_AND_GOTO_ERROR;
+	size_str = strsepq(&arg, delim);
+
+	if (size_str == NULL) {
+		istgt_uctl_snprintf(uctl, "ERR LUN format error\n");
+		goto error_return;
+	} else if (*size_str == '-') {
+		istgt_uctl_snprintf(uctl, "ERR invalid size\n");
+		goto error_return;
+	}
+	ISTGT_LOG("volume(%s) requested to resize %s\n", volname, size_str);
+
+	lu = istgt_lu_find_target_by_volname(uctl->istgt, volname);
+	if (lu == NULL) {
+		istgt_uctl_snprintf(uctl, "ERR target not found\n");
+		goto error_return;
+	}
+	spec = lu->lun[0].spec;
+	//old_size = lu->lun[0].u.storage.size;
+	old_size = spec->size;
+	new_size = istgt_lu_parse_size(size_str);
+
+	if (old_size > new_size) {
+		ISTGT_ERRLOG("volume(%s) size is already greater than requested resize\n", volname);
+		istgt_uctl_snprintf(uctl, "ERR current size is already greater than requested size\n");
+		goto error_return;
+	}
+	if ((new_size % replica_block_size) != 0) {
+		ISTGT_ERRLOG("failed to resize volume %s new size %s "
+			"is not in multiples of block length %lu\n",
+			volname, size_str, spec->blocklen);
+		istgt_uctl_snprintf(uctl, "ERR new size %s is "
+			"not in multiples of block length %lu\n", size_str, spec->blocklen);
+		goto error_return;
+	}
+	if (old_size == new_size) {
+		ISTGT_LOG("volume(%s) size is already equal to requested resize\n", volname);
+		istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
+	} else {
+		r = istgt_lu_resize_volume(spec, new_size);
+
+		if (r == true) {
+			istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
+			ret = UCTL_CMD_OK;
+			lu->lun[0].u.storage.size = new_size;
+		}
+		else
+			istgt_uctl_snprintf(uctl, "ERR failed %s\n", uctl->cmd);
+	}
+error_return:
+	rc = istgt_uctl_writeline(uctl);
+	if (rc != UCTL_CMD_OK) {
+		return (rc);
+	}
+	return (ret);
+}
+
+static int
+istgt_uctl_cmd_desired_rf(UCTL_Ptr uctl)
+{
+	ISTGT_LU_Ptr lu = NULL;
+	ISTGT_LU_DISK *spec = NULL;
+	int rc = 0, ret = UCTL_CMD_ERR;
+	char *volname, *arg, *s_drf;
+	int drf, i;
+	const char *delim = ARGS_DELIM;
+	arg = uctl->arg;
+	char **known_replica_id_list = NULL;
+
+	CHECK_ARG_AND_GOTO_ERROR;
+	volname = strsepq(&arg, delim);
+
+	CHECK_ARG_AND_GOTO_ERROR;
+	s_drf = strsepq(&arg, delim);
+	drf = strtol(s_drf, NULL, 10);
+	if (errno) {
+		istgt_uctl_snprintf(uctl, "ERR error code:%d\n", errno);
+		(void) istgt_uctl_writeline(uctl);
+		return (UCTL_CMD_ERR);
+	}
+	if (drf > MAXREPLICA) {
+		ISTGT_ERRLOG("desired replication factor(%d) can not "
+		    "be greater than MAXREPLICAS(%d)\n", drf, MAXREPLICA);
+		istgt_uctl_snprintf(uctl, "ERR desired replication factor(%d)"
+		    " can not be greater than MAXREPLICA(%d)\n", drf, (int)MAXREPLICA);
+		goto error_return;
+	}
+
+	lu = istgt_lu_find_target_by_volname(uctl->istgt, volname);
+	if (lu == NULL) {
+		istgt_uctl_snprintf(uctl, "ERR target not found\n");
+		goto error_return;
+	}
+	spec = lu->lun[0].spec;
+
+	if (drf < spec->desired_replication_factor) {
+
+		// TODO: I think this check is not required(get confirmation during review process)
+		// If user want to remove scalingup replica should we need to allow this process?
+		if ( spec->desired_replication_factor != spec->replication_factor ||
+		    drf != spec->replication_factor - 1) {
+			ISTGT_ERRLOG("current desired replication factor(%d) "
+			    "and replication factor(%d) but requested desired "
+			    "replication factor(%d) are invalid changes\n",
+			    spec->desired_replication_factor,
+			    spec->replication_factor, drf);
+			istgt_uctl_snprintf(uctl, "ERR current desired "
+			    "replication factor(%d) and replication factor(%d) "
+			    "but requested desired replication factor(%d) are "
+			    "invalid changes\n", spec->desired_replication_factor,
+			    spec->replication_factor, drf);
+			goto error_return;
+		}
+		// In case of scale down read known replica list
+		known_replica_id_list = (char **) xmalloc(sizeof(char *) * drf);
+		memset(known_replica_id_list, 0, sizeof(char *) * drf);
+		for (i=0; i < drf; i++) {
+			CHECK_ARG_AND_GOTO_ERROR;
+			known_replica_id_list[i] = strsepq(&arg, delim);
+		}
+		rc = istgt_lu_remove_unknown_replica(spec, drf, known_replica_id_list);
+		if (rc == 0) {
+			istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
+			ret = UCTL_CMD_OK;
+		}
+		else
+			istgt_uctl_snprintf(uctl, "ERR failed %s\n", uctl->cmd);
+	} else if (drf == spec->desired_replication_factor) {
+		ISTGT_LOG("desired replication factor is already equal to "
+		    "requested desired replication factor\n");
+		istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
+	} else {
+		MTX_LOCK(&spec->rq_mtx);
+		spec->desired_replication_factor = drf;
+		spec->lu->desired_replication_factor = drf;
+		MTX_UNLOCK(&spec->rq_mtx);
+		ISTGT_LOG("successfully updated the desired replication factor to %d\n", drf);
+		istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
+		ret = UCTL_CMD_OK;
+	}
+error_return:
+	if (known_replica_id_list != NULL) {
+		free(known_replica_id_list);
+	}
+	rc = istgt_uctl_writeline(uctl);
+	if (rc != UCTL_CMD_OK) {
+		return (rc);
+	}
+	return (ret);
+}
+
 
 static int
 istgt_uctl_cmd_mempoolstats(UCTL_Ptr uctl)
@@ -690,16 +875,53 @@ istgt_uctl_cmd_snaplist(UCTL_Ptr uctl)
 error_return:
 	rc = istgt_uctl_writeline(uctl);
 	if (rc != UCTL_CMD_OK) {
-		return rc;
+		return (rc);
+	}
+	istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
+	rc = istgt_uctl_writeline(uctl);
+	if (rc != UCTL_CMD_OK) {
+		return (rc);
+	}
+	return (UCTL_CMD_OK);
+}
+
+static int
+istgt_uctl_cmd_max_io_wait(UCTL_Ptr uctl)
+{
+	const char *delim = ARGS_DELIM;
+	int rc = 0;
+	char *arg;
+	uint64_t max_wait_time, new_wait_time;
+	char *s_io_wait_time = NULL;
+	arg = uctl->arg;
+
+	if (arg) {
+		s_io_wait_time = strsepq(&arg, delim);
+		new_wait_time = strtoull(s_io_wait_time, NULL, 10);
+		if (errno) {
+			istgt_uctl_snprintf(uctl, "ERR error code:%d\n", errno);
+			(void) istgt_uctl_writeline(uctl);
+			return (UCTL_CMD_ERR);
+		}
+
+		istgt_set_max_io_wait_time(new_wait_time);
+	}
+
+	max_wait_time = istgt_get_max_io_wait_time();
+	istgt_uctl_snprintf(uctl, "%s  %lu\n", uctl->cmd, max_wait_time);
+	rc = istgt_uctl_writeline(uctl);
+	if (rc != UCTL_CMD_OK) {
+		return (rc);
 	}
 
 	istgt_uctl_snprintf(uctl, "OK %s\n", uctl->cmd);
 	rc = istgt_uctl_writeline(uctl);
 	if (rc != UCTL_CMD_OK) {
-		return rc;
+		return (rc);
 	}
-	return UCTL_CMD_OK;
+	return (UCTL_CMD_OK);
 }
+
 #endif
 
 static int
@@ -3108,7 +3330,7 @@ istgt_uctl_cmd_que(UCTL_Ptr uctl)
 #define	tdiff(_s, _n, _r) {                     \
 	if ((_n.tv_nsec - _s.tv_nsec) < 0) {        \
 		_r.tv_sec  = _n.tv_sec - _s.tv_sec-1;   \
-		_r.tv_nsec = 1000000000 + _n.tv_nsec - _s.tv_nsec; \
+		_r.tv_nsec = SEC_IN_NS + _n.tv_nsec - _s.tv_nsec; \
 	} else {                                    \
 		_r.tv_sec  = _n.tv_sec - _s.tv_sec;     \
 		_r.tv_nsec = _n.tv_nsec - _s.tv_nsec;   \
@@ -3204,7 +3426,7 @@ istgt_uctl_cmd_que(UCTL_Ptr uctl)
 			    (signed long)(spec->avgs[0].tot_nsec))) < 0) {
 				spec->avgs[0].tot_sec  =
 				    now.tv_sec - spec->avgs[0].tot_sec - 1;
-				spec->avgs[0].tot_nsec = 1000000000 +
+				spec->avgs[0].tot_nsec = SEC_IN_NS +
 				    now.tv_nsec - spec->avgs[0].tot_nsec;
 			} else {
 				spec->avgs[0].tot_sec =
@@ -3381,7 +3603,7 @@ _verb_istat ISCSIstat_rslt[ISCSI_ARYSZ] = { {0, 0, 0} };
 static int
 istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 {
-	int rc;
+	int rc, replica_cnt;
 	uint64_t usedlogicalblocks;
 	struct timespec now;
 	uint64_t time_diff;
@@ -3403,7 +3625,7 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 		json_object_object_add(jobj, "TotalWriteBytes",
 		    json_object_new_uint64(spec->writebytes));
 		json_object_object_add(jobj, "TotalReadBytes",
-		    json_object_new_uint64(spec->reads));
+		    json_object_new_uint64(spec->readbytes));
 		json_object_object_add(jobj, "Size",
 		    json_object_new_uint64(spec->size));
 
@@ -3421,31 +3643,46 @@ istgt_uctl_cmd_iostats(UCTL_Ptr uctl)
 
 		json_object_object_add(jobj, "TotalReadTime",
 		    json_object_new_uint64(spec->totalreadtime));
+		json_object_object_add(jobj, "LUTotalReadTime",
+		    json_object_new_uint64(spec->totalreadlutime));
+		json_object_object_add(jobj, "ReplicationTotalReadTime",
+		    json_object_new_uint64(spec->totalreadrepltime));
 		json_object_object_add(jobj, "TotalWriteTime",
 		    json_object_new_uint64(spec->totalwritetime));
+		json_object_object_add(jobj, "LUTotalWriteTime",
+		    json_object_new_uint64(spec->totalwritelutime));
+		json_object_object_add(jobj, "ReplicationTotalWriteTime",
+		    json_object_new_uint64(spec->totalwriterepltime));
 		json_object_object_add(jobj, "TotalReadBlockCount",
 		    json_object_new_uint64(spec->totalreadblockcount));
 		json_object_object_add(jobj, "TotalWriteBlockCount",
 		    json_object_new_uint64(spec->totalwriteblockcount));
+
+                replica_cnt = spec->healthy_rcount + spec->degraded_rcount;
 		json_object_object_add(jobj, "ReplicaCounter",
-		    json_object_new_int(spec->healthy_rcount +
-			spec->degraded_rcount));
+		    json_object_new_int(replica_cnt));
 		json_object_object_add(jobj, "RevisionCounter",
 		    json_object_new_uint64(spec->io_seq));
 		json_object_object_add(jobj, "Status",
-		    json_object_new_string(((spec->ready == 1) ?
-			"RW" : "RO")));
+		    json_object_new_string(get_cv_status(spec)));
 
 		json_object *jobj_arr = json_object_new_array();
 		MTX_LOCK(&spec->rq_mtx);
 		TAILQ_FOREACH(replica, &spec->rq, r_next) {
 		    MTX_LOCK(&replica->r_mtx);
-		    json_object *jobjarr = json_object_new_object();
-		    json_object_object_add(jobjarr, "Address",
-			json_object_new_string(replica->ip));
-		    json_object_object_add(jobjarr, "Mode",
-			json_object_new_string(((replica->state ==
-			    ZVOL_STATUS_HEALTHY) ? "HEALTHY" : "DEGRADED")));
+
+		    struct json_object *jobjarr = NULL;
+		    get_replica_stats_json(replica, &jobjarr);
+
+		    json_object_object_add(jobjarr, "ReadReqTime",
+			json_object_new_uint64(replica->totalread_reqtime));
+		    json_object_object_add(jobjarr, "ReadRespTime",
+			json_object_new_uint64(replica->totalread_resptime));
+
+		    json_object_object_add(jobjarr, "WriteReqTime",
+			json_object_new_uint64(replica->totalwrite_reqtime));
+		    json_object_object_add(jobjarr, "WriteRespTime",
+			json_object_new_uint64(replica->totalwrite_resptime));
 		    MTX_UNLOCK(&replica->r_mtx);
 		    json_object_array_add(jobj_arr, jobjarr);
 		}
@@ -3719,8 +3956,11 @@ static ISTGT_UCTL_CMD_TABLE istgt_uctl_cmd_table[] =
 #ifdef	REPLICATION
 	{ "SNAPCREATE", istgt_uctl_cmd_snap},
 	{ "SNAPDESTROY", istgt_uctl_cmd_snap},
+	{ "RESIZE", istgt_uctl_cmd_resize},
+	{ "DRF", istgt_uctl_cmd_desired_rf},
 	{ "REPLICA", istgt_uctl_cmd_replica_stats},
 	{ "SNAPLIST", istgt_uctl_cmd_snaplist},
+	{ "MAXIOWAIT", istgt_uctl_cmd_max_io_wait},
 #endif
 	{ NULL, NULL },
 };
@@ -3827,7 +4067,7 @@ uctlworker(void *arg)
 	rc = istgt_uctl_writeline(uctl);
 	if (rc != UCTL_CMD_OK) {
 		ISTGT_ERRLOG("uctl_writeline() failed\n");
-		return (NULL);
+		goto error;
 	}
 
 	while (1) {
@@ -3863,6 +4103,7 @@ uctlworker(void *arg)
 
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "exiting ctlworker\n");
 
+error:
 	close(uctl->sock);
 	uctl->sock = -1;
 	istgt_free_uctl(uctl);
@@ -3893,6 +4134,7 @@ istgt_create_uctl(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock,
 	UCTL_Ptr uctl;
 	int rc;
 	int i;
+	pthread_t thread;
 
 	uctl = xmalloc(sizeof (*uctl));
 	memset(uctl, 0, sizeof (*uctl));
@@ -4014,25 +4256,26 @@ istgt_create_uctl(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock,
 
 	/* create new thread */
 #ifdef ISTGT_STACKSIZE
-	rc = pthread_create(&uctl->thread, &istgt->attr, &uctlworker,
+	rc = pthread_create(&thread, &istgt->attr, &uctlworker,
 	    (void *)uctl);
 #else
-	rc = pthread_create(&uctl->thread, NULL, &uctlworker, (void *)uctl);
+	rc = pthread_create(&thread, NULL, &uctlworker, (void *)uctl);
 #endif
 	if (rc != 0) {
 		ISTGT_ERRLOG("pthread_create() failed\n");
-	error_return:
+error_return:
+		xfree(uctl->mediadirectory);
 		xfree(uctl->portal.label);
 		xfree(uctl->portal.host);
 		xfree(uctl->portal.port);
 		xfree(uctl);
 		return (-1);
 	}
-	rc = pthread_detach(uctl->thread);
+	rc = pthread_detach(thread);
 	if (rc != 0) {
 		ISTGT_ERRLOG("pthread_detach() failed\n");
-		goto error_return;
 	}
+
 	return (0);
 }
 

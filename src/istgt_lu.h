@@ -1,4 +1,20 @@
 /*
+ * Copyright © 2017-2019 The OpenEBS Authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * This work is derived from earlier work available under:
+ *
  * Copyright (C) 2008-2012 Daisuke Aoyama <aoyama@peach.ne.jp>.
  * All rights reserved.
  *
@@ -42,7 +58,11 @@
 #endif
 
 #ifdef __linux__
+#if defined(__aarch64__)
+#include <aarch64-linux-gnu/sys/queue.h>
+#else
 #include <x86_64-linux-gnu/sys/queue.h>
+#endif
 #endif
 #include <stdbool.h>
 #ifdef __FreeBSD__
@@ -329,10 +349,20 @@ typedef struct istgt_lu_t {
 	int conns;
 #ifdef REPLICATION
 	uint8_t replication_factor;
+	uint8_t desired_replication_factor;
 	uint8_t consistency_factor;
+	TAILQ_HEAD(, trusty_replica_s) trusty_replicas; //Contains list of trusty replicas
 #endif
 } ISTGT_LU;
 typedef ISTGT_LU *ISTGT_LU_Ptr;
+
+#ifdef REPLICATION
+typedef struct trusty_replica_s {
+	char replica_id[REPLICA_ID_LEN + 1];
+	uint64_t zvol_guid;
+	TAILQ_ENTRY(trusty_replica_s) next;
+} trusty_replica_t;
+#endif
 
 typedef enum {
 	ISTGT_TAG_UNTAGGED,
@@ -430,6 +460,8 @@ typedef struct istgt_lu_cmd_t {
 #ifdef REPLICATION
 	uint32_t   luworkerindx;
 	struct timespec start_rw_time;
+	struct timespec lu_start_time;
+	struct timespec repl_start_time;
 #endif
 } ISTGT_LU_CMD;
 typedef ISTGT_LU_CMD *ISTGT_LU_CMD_Ptr;
@@ -784,6 +816,10 @@ typedef struct istgt_lu_disk_t {
 	uint64_t writebytes;
 	uint64_t totalreadtime;
 	uint64_t totalwritetime;
+	uint64_t totalreadlutime; /* Time for read IO at LU worker */
+	uint64_t totalwritelutime; /* Similar to above */
+	uint64_t totalreadrepltime; /* Time for read IO at replication module */
+	uint64_t totalwriterepltime; /* Similar to above */
 	uint64_t totalreadblockcount;
 	uint64_t totalwriteblockcount;
 #endif
@@ -843,7 +879,9 @@ typedef struct istgt_lu_disk_t {
 	rte_smempool_t rcommon_deadlist;	// Contains completed IOs
 	TAILQ_HEAD(, replica_s) rq; //Queue of replicas connected to this spec(volume)
 	TAILQ_HEAD(, replica_s) rwaitq; //Queue of replicas completed handshake, and yet to have data connection to this spec(volume)
+	TAILQ_HEAD(, replica_s) non_quorum_rq; //Queue of non_quorum replicas connected to this spec
 	TAILQ_HEAD(, known_replica_s) identified_replica;	/* List of replicas known to spec */
+	int desired_replication_factor;
 	int replication_factor;
 	int consistency_factor;
 	int healthy_rcount;
@@ -855,12 +893,20 @@ typedef struct istgt_lu_disk_t {
 		bool rebuild_in_progress;
 	} rebuild_info;
 
+	/* scalingup_replica will set during scaleup replica cases
+	 * when consistency changes
+	 */
+	struct replica_s *scalingup_replica;
 	/*Common for both the above queues,
 	Since same cmd is part of both the queues*/
 	pthread_mutex_t rq_mtx; 
 	pthread_mutex_t rcommonq_mtx; 
 	pthread_mutex_t luworker_rmutex[ISTGT_MAX_NUM_LUWORKERS];
 	pthread_cond_t luworker_rcond[ISTGT_MAX_NUM_LUWORKERS];
+
+
+    // cleanup thread for spec mempool entries
+    pthread_t deadlist_cleanup_thread;
 
 	/* stats */
 	struct {

@@ -5,9 +5,9 @@ trap 'call_exit $LINE_NO' EXIT
 
 call_exit()
 {
-echo "at call_exit.."     
+echo "at call_exit.."
 echo  "exit code:" $?
-echo "reference: "  $0 
+echo "reference: "  $0
 }
 
 if [ ! -f "/usr/local/etc/istgt/istgt.conf" ];then
@@ -20,6 +20,21 @@ touch /usr/local/etc/istgt/logfile
 export externalIP=0.0.0.0
 service rsyslog start
 
-export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so
+# Disabling coredumps by default in the shell where istgt runs
+if [ -z "$ENABLE_COREDUMP" ]; then
+	echo "Disabling dumping core"
+	ulimit -c 0
+else
+	echo "Enabling coredumps"
+	ulimit -c unlimited
+	## /var/openebs is mounted as persistent directory on
+	## host machine
+	cd /var/openebs/cstor-target || exit
+	mkdir -p core
+	cd core
+fi
+
+ARCH=$(uname -m)
+export LD_PRELOAD=/usr/lib/${ARCH}-linux-gnu/libjemalloc.so
 exec /usr/local/bin/istgt
 

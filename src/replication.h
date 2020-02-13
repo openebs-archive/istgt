@@ -1,3 +1,19 @@
+/*
+ * Copyright © 2017-2019 The OpenEBS Authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #ifndef _REPLICATION_H
 #define	_REPLICATION_H
 
@@ -16,6 +32,7 @@
 #include <syslog.h>
 #include <stdbool.h>
 #include "replication_log.h"
+#include <json-c/json_object.h>
 #include "zrepl_prot.h"
 
 #define	MAXREPLICA 5
@@ -35,6 +52,8 @@
 
 #define	MAX_OF(a, b) (((a) > (b))?(a):(b))
 
+#define CONSISTENCY_FACTOR(a) (((a)/2) + 1)
+
 typedef enum zvol_cmd_type_e {
 	CMD_IO = 1,
 	CND_MGMT,
@@ -48,10 +67,20 @@ typedef enum rcomm_cmd_state_s {
 } rcomm_cmd_state_t;
 
 typedef enum rcmd_state_s {
+	/*  Received successful response from replica */
 	RECEIVED_OK = 1 << 0,
+
+	/* Received error from replica */
 	RECEIVED_ERR = 1 << 1,
-	SENT_TO_HEALTHY = 1 << 2,
-	SENT_TO_DEGRADED = 1 << 3,
+
+	/* Didn't received a response within io_max_wait_time seconds for rcmd*/
+	REPLICATE_TIMED_OUT = 1 << 2,
+
+	/* command sent to healthy replica */
+	SENT_TO_HEALTHY = 1 << 3,
+
+	/* command sent to degraded replica */
+	SENT_TO_DEGRADED = 1 << 4,
 } rcmd_state_t;
 
 typedef struct resp_data {
@@ -60,6 +89,7 @@ typedef struct resp_data {
 } resp_data_t;
 
 struct replica_rcomm_resp {
+	struct replica_s *replica;
 	zvol_io_hdr_t io_resp_hdr;
 	uint8_t *data_ptr;
 	rcmd_state_t status;
@@ -71,10 +101,11 @@ typedef struct rcommon_cmd_s {
 	TAILQ_ENTRY(rcommon_cmd_s)  wait_cmd_next; /* for rcommon_waitq */
 	int luworker_id;
 	int copies_sent;
+	int non_quorum_copies_sent;
 	uint8_t replication_factor;
 	uint8_t consistency_factor;
+	struct replica_s *scalingup_replica;
 	zvol_op_code_t opcode;
-	int healthy_count;	/* number of healthy replica when cmd queued */
 	uint64_t io_seq;
 	uint64_t lun_id;
 	uint64_t offset;
@@ -96,13 +127,13 @@ typedef struct rcmd_s {
 	uint64_t io_seq;
 	void *rcommq_ptr;
 	uint8_t *iov_data;	/* for header to be sent to replica */
-	int healthy_count;	/* number of healthy replica when cmd queued */
 	int idx;		/* index for rcommon_cmd in resp_list */
 	int64_t iovcnt;
 	uint64_t offset;
 	uint64_t data_len;
 	struct iovec iov[41];
-	struct timespec queued_time;
+	struct timespec start_time;
+	struct timespec ready_time;
 } rcmd_t;
 
 typedef struct replica_s replica_t;
@@ -179,12 +210,22 @@ extern int do_drainfd(int);
 void close_fd(int epollfd, int fd);
 int64_t perform_read_write_on_fd(int fd, uint8_t *data, uint64_t len,
     int state);
-int initialize_volume(spec_t *spec, int, int);
+int initialize_volume(spec_t *spec, int, int, int);
 void destroy_volume(spec_t *spec);
 void inform_mgmt_conn(replica_t *r);
+extern const char * get_cv_status(spec_t *spec);
+extern void get_replica_stats_json(replica_t *replica, struct json_object **jobj);
 
 /* Replica default timeout is 200 seconds */
 #define	REPLICA_DEFAULT_TIMEOUT	200
+
+// Volume status
+#define VOL_STATUS_OFFLINE "Offline"
+#define VOL_STATUS_DEGRADED "Degraded"
+#define VOL_STATUS_HEALTHY "Healthy"
+// Replica status
+#define REPLICA_STATUS_DEGRADED "Degraded"
+#define REPLICA_STATUS_HEALTHY "Healthy"
 
 #define	DECREMENT_INFLIGHT_REPLICA_IO_CNT(_r, _opcode)			\
 	do {								\

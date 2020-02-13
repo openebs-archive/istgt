@@ -1,3 +1,19 @@
+/*
+ * Copyright © 2017-2019 The OpenEBS Authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -21,6 +37,7 @@
 __thread char tinfo[50] = {0};
 int g_trace_flag = 0;
 pthread_t new_replica[10] = { 0 };
+int desired_replication_factor = 3;
 int replication_factor = 3, consistency_factor = 2;
 int new_replica_count = 3;	/* Assign same number as replication factor */
 
@@ -48,6 +65,7 @@ typedef struct snapshot_resp_s {
 	int test_id;
 	int success_cnt;
 	int failure_cnt;
+	int prep_success_cnt;
 } snapshot_resp_t;
 
 snapshot_resp_t snap_resp;
@@ -59,6 +77,8 @@ typedef struct rargs_s {
 	/* IP:Port on which replica is listening */
 	char replica_ip[MAX_IP_LEN];
 	uint16_t replica_port;
+	uint64_t zvol_guid;
+	char replica_id[REPLICA_ID_LEN];
 
 	/* IP:Port on which controller is listening */
 	char ctrl_ip[MAX_IP_LEN];
@@ -143,6 +163,7 @@ zio_cmd_alloc(zvol_io_hdr_t *hdr)
 	    (hdr->opcode == ZVOL_OPCODE_REPLICA_STATUS) ||
 	    (hdr->opcode == ZVOL_OPCODE_OPEN) ||
 	    (hdr->opcode == ZVOL_OPCODE_SNAP_CREATE) ||
+	    (hdr->opcode == ZVOL_OPCODE_SNAP_PREPARE) ||
 	    (hdr->opcode == ZVOL_OPCODE_SNAP_DESTROY) ||
 	    (hdr->opcode == ZVOL_OPCODE_STATS) ||
 	    (hdr->opcode == ZVOL_OPCODE_START_REBUILD) ||
@@ -218,10 +239,10 @@ static void
 handle_replica_start_rebuild(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 {
 	zvol_io_hdr_t *hdr = &(zio_cmd->hdr);
-	mgmt_ack_t *mgmt_ack_data = (mgmt_ack_t *)zio_cmd->buf;
+	rebuild_req_t *rebuild_req = (rebuild_req_t *)zio_cmd->buf;
 
 	/* Mark rebuild is in progress */
-	if ((strcmp(mgmt_ack_data->volname, "")) == 0) {
+	if ((strcmp(rebuild_req->volname, "")) == 0) {
 		rargs->zrepl_status = ZVOL_STATUS_HEALTHY;
 		rargs->zrepl_rebuild_status = ZVOL_REBUILDING_DONE;
 	} else {
@@ -265,6 +286,7 @@ update_snap_resp_list(spec_t *spec)
 	snap_resp.required_resp = spec->consistency_factor;
 	snap_resp.success_cnt = 0;
 	snap_resp.failure_cnt = 0;
+	snap_resp.prep_success_cnt = 0;
 	snap_resp.test_id = (++snap_resp.test_id) % SNAP_TEST_COUNT;
 	MTX_UNLOCK(&snap_resp.snap_resp_mtx);
 }
@@ -277,6 +299,9 @@ verify_snap_response(int res)
 		VERIFY(snap_resp.success_cnt < snap_resp.required_resp);
 	} else {
 		VERIFY(snap_resp.success_cnt >= snap_resp.required_resp);
+		if (res == 2) {
+			VERIFY(snap_resp.prep_success_cnt);
+		}
 	}
 	snap_resp.required_resp = 0;
 	MTX_UNLOCK(&snap_resp.snap_resp_mtx);
@@ -299,6 +324,29 @@ handle_snap_opcode(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 		REPLICA_ERRLOG("name mismatch %s %s\n",
 			(char *)zio_cmd->buf, rargs->volname);
 		exit(1);
+	}
+
+	if (hdr->opcode == ZVOL_OPCODE_SNAP_PREPARE) {
+		MTX_LOCK(&snap_resp.snap_resp_mtx);
+		switch (snap_resp.test_id) {
+			case  SNAP_CREATE_TIMEOUT:
+				// skip putting this hdr to the reply queue
+				rargs->snap_error = 1;
+				hdr->status = ZVOL_OP_STATUS_OK;
+				break;
+
+			case  SNAP_CREATE_FAILURE:
+				hdr->status = ZVOL_OP_STATUS_FAILED;
+				break;
+
+			default:
+				hdr->status = ZVOL_OP_STATUS_OK;
+				snap_resp.prep_success_cnt++;
+				break;
+		}
+		MTX_UNLOCK(&snap_resp.snap_resp_mtx);
+
+		goto send_response;
 	}
 
 	if (hdr->opcode == ZVOL_OPCODE_SNAP_DESTROY) {
@@ -392,11 +440,10 @@ handle_stats(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 	zvol_op_stat_t *stats;
 	zvol_io_hdr_t *hdr = &(zio_cmd->hdr);
 
-	if (strcmp(zio_cmd->buf, rargs->volname) != 0)
+	if (strcmp(zio_cmd->buf, rargs->volname) != 0) {
+		REPLICA_ERRLOG("%s and %s volume names are not matching\n", (char *)zio_cmd->buf, rargs->volname);
 		exit(1);
-
-	if (rargs->zrepl_status != ZVOL_STATUS_HEALTHY)
-		exit(1);
+	}
 
 	if (zio_cmd->buf)
 		free(zio_cmd->buf);
@@ -463,8 +510,10 @@ handle_handshake(rargs_t *rargs, zvol_io_cmd_t *zio_cmd)
 	mgmt_ack->zvol_guid = rargs->replica_port;
 	mgmt_ack->port = rargs->replica_port;
 	mgmt_ack->checkpointed_io_seq = 10000;
+	mgmt_ack->quorum = 1;
 	strncpy(mgmt_ack->ip, rargs->replica_ip, sizeof (mgmt_ack->ip));
 	strncpy(mgmt_ack->volname, rargs->volname, sizeof (mgmt_ack->volname));
+	strncpy(mgmt_ack->replica_id, rargs->replica_id, sizeof (rargs->replica_id));
 	hdr->status = ZVOL_OP_STATUS_OK;
 	hdr->len = sizeof (mgmt_ack_t);
 
@@ -676,7 +725,7 @@ mock_repl_io_worker(void *args)
 	snprintf(tinfo, 50, "mockiowork%d", rargs->replica_port);
 	prctl(PR_SET_NAME, tinfo, 0, 0, 0);
 
-	clock_gettime(CLOCK_MONOTONIC, &prev);
+	clock_gettime(CLOCK_MONOTONIC_RAW, &prev);
 	while (1) {
 		MTX_LOCK(&rargs->io_recv_mtx);
 		while (TAILQ_EMPTY(&(rargs->io_recv_list))) {
@@ -712,7 +761,7 @@ mock_repl_io_worker(void *args)
 				break;
 		}
 
-		clock_gettime(CLOCK_MONOTONIC, &now);
+		clock_gettime(CLOCK_MONOTONIC_RAW, &now);
 		if (now.tv_sec - prev.tv_sec > 1) {
 			prev = now;
 			REPLICA_LOG("read %d wrote %d sync %d from %s\n",
@@ -764,6 +813,7 @@ mock_repl_mgmt_worker(void *args)
 				break;
 			case ZVOL_OPCODE_SNAP_CREATE:
 			case ZVOL_OPCODE_SNAP_DESTROY:
+			case ZVOL_OPCODE_SNAP_PREPARE:
 				handle_snap_opcode(rargs, zio_cmd);
 				break;
 			case ZVOL_OPCODE_REPLICA_STATUS:
@@ -1017,6 +1067,7 @@ mock_repl(void *args)
 	pthread_create(&io_worker1, NULL, &mock_repl_io_worker, args);
 	pthread_create(&io_worker2, NULL, &mock_repl_io_worker, args);
 	pthread_create(&io_worker3, NULL, &mock_repl_io_worker, args);
+
 	while(1) {
 		sleep(2);
 		if (rargs->kill_replica == true || rargs->snap_error == 2) {
@@ -1101,6 +1152,7 @@ exit:
 	REPLICA_LOG("mock_repl exiting....\n");
 	if (rargs->snap_error == 2 && !rargs->kill_is_over)
 		reregister_replica(rargs->volname, rargs, rargs->replica_port);
+
 	return (NULL);
 }
 
@@ -1134,6 +1186,8 @@ create_mock_replicas(int r_factor, char *volname)
 		rargs->replica_port = 6061 + i;
 		rargs->kill_replica = false;
 		rargs->kill_is_over = false;
+		rargs->zvol_guid = rargs->replica_port;
+		sprintf(rargs->replica_id, "%d", rargs->replica_port);
 
 		strncpy(rargs->ctrl_ip, "127.0.0.1", MAX_IP_LEN);
 		rargs->ctrl_port = 6060;
@@ -1320,7 +1374,7 @@ rebuild_test(void *arg)
 					rargs->kill_replica = true;
 					test_args->state++;
 				}
-				break; 
+				break;
 
 				case UNIT_TEST_STATE_REREGISTER_REPLICA:
 				if (rargs->kill_is_over == true) {
@@ -1383,6 +1437,7 @@ main(int argc, char **argv)
 {
 	int rc;
 	spec_t *spec = (spec_t *)malloc(sizeof (spec_t));
+	ISTGT_LU_Ptr lu = (ISTGT_LU_Ptr)malloc(sizeof (ISTGT_LU));
 	pthread_t replica_thread;
 	struct stat sbuf;
 	pthread_t rebuild_test_thread;
@@ -1391,7 +1446,7 @@ main(int argc, char **argv)
 	int i;
 	bool do_snap = false;
 
-	clock_gettime(CLOCK_MONOTONIC, &now);
+	clock_gettime(CLOCK_MONOTONIC_RAW, &now);
 	srandom(now.tv_sec);
 
 	replica_poll_time = 5;
@@ -1442,7 +1497,11 @@ main(int argc, char **argv)
 		return (1);
 	}
 
-	initialize_volume(spec, replication_factor, consistency_factor);
+	// Assign desired_replication_facto as replication factor
+	lu->desired_replication_factor = desired_replication_factor;
+	TAILQ_INIT(&lu->trusty_replicas);
+	spec->lu = lu;
+	initialize_volume(spec, replication_factor, consistency_factor, desired_replication_factor);
 
 	pthread_create(&replica_thread, NULL, &init_replication, (void *)NULL);
 
@@ -1475,7 +1534,7 @@ main(int argc, char **argv)
 
 	shutdown_errored_replica();
 
-	/* This can be avoided by cancelling mock client threads */
+        /* This can be avoided by cancelling mock client threads */
 	wait_for_mock_clients();
 
 	create_mock_replicas(spec->replication_factor, spec->volname);
@@ -1493,7 +1552,6 @@ main(int argc, char **argv)
 	test_args->data_read_write_test_done = true;
 	pthread_cond_wait(&test_args->test_state_cv, &test_args->test_mtx);
 	MTX_UNLOCK(&test_args->test_mtx);
-
 	REPLICA_LOG("Killing all replicas\n");
 	kill_all_replicas();
 

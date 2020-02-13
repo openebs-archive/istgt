@@ -1,4 +1,20 @@
 /*
+ * Copyright © 2017-2019 The OpenEBS Authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * This work is derived from earlier work available under:
+ *
  * Copyright (C) 2008-2012 Daisuke Aoyama <aoyama@peach.ne.jp>.
  * All rights reserved.
  *
@@ -242,6 +258,7 @@ find_first_bit(ISTGT_LU_CMD_Ptr lu_cmd)
 		nbits >>= 6;
 		if (!nbits)
 			continue;
+#if defined(__x86_64__)
 		asm volatile(
 				"   repe; scasq\n"
 				"   jz 1f\n"
@@ -253,8 +270,21 @@ find_first_bit(ISTGT_LU_CMD_Ptr lu_cmd)
 				:"=a" (res), "=&c" (d0), "=&D" (d1)
 				:"0" (0ULL), "1" (nbits), "2" (addr),
 				[addr] "r" (addr) : "memory");
-		res_final +=res;
-		if((unsigned long)res != nbits)
+#else
+		unsigned long idx;
+		res = 0;
+		for (idx = 0; idx < nbits; idx++) {
+			if (addr[idx]) {
+				res += __builtin_ffsl(addr[idx]) - 1;
+				break;
+			} else {
+				// there is no set bit in this addr part, res should add the bits of addr.
+				res += sizeof(*addr) << 3;
+			}
+		}
+#endif
+		res_final += res;
+		if ((unsigned long)res != nbits << 6)
 			return res_final;
 	}	
 	return res_final;
@@ -1051,7 +1081,8 @@ istgt_lu_disk_init(ISTGT_Ptr istgt __attribute__((__unused__)), ISTGT_LU_Ptr lu)
 		}
 		istgt_queue_init(&spec->blocked_queue);
 #ifdef REPLICATION
-		rc = initialize_volume(spec, spec->lu->replication_factor, spec->lu->consistency_factor);
+		rc = initialize_volume(spec, spec->lu->replication_factor,
+			spec->lu->consistency_factor, spec->lu->desired_replication_factor);
 		if (rc != 0) {
 			ISTGT_ERRLOG("LU%d: persistent reservation mutex_init() failed errno:%d\n", lu->num, errno);
 			return -1;
@@ -7715,7 +7746,7 @@ istgt_lu_print_q(ISTGT_LU_Ptr lu, int lun)
 #define tdiff(_s, _n, _r) {                     \
 	if ((_n.tv_nsec - _s.tv_nsec) < 0) {        \
 		_r.tv_sec  = _n.tv_sec - _s.tv_sec-1;   \
-		_r.tv_nsec = 1000000000 + _n.tv_nsec - _s.tv_nsec; \
+		_r.tv_nsec = SEC_IN_NS + _n.tv_nsec - _s.tv_nsec; \
 	} else {                                    \
 		_r.tv_sec  = _n.tv_sec - _s.tv_sec;     \
 		_r.tv_nsec = _n.tv_nsec - _s.tv_nsec;   \
@@ -8237,7 +8268,7 @@ istgt_lu_disk_queue(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 	{	\
                 if ((_n.tv_nsec - _s.tv_nsec) < 0) {        \
                         _r.tv_sec  = _n.tv_sec - _s.tv_sec-1;   \
-                        _r.tv_nsec = 1000000000 + _n.tv_nsec - _s.tv_nsec; \
+                        _r.tv_nsec = SEC_IN_NS + _n.tv_nsec - _s.tv_nsec; \
                 } else {                                    \
                         _r.tv_sec  = _n.tv_sec - _s.tv_sec;     \
                         _r.tv_nsec = _n.tv_nsec - _s.tv_nsec;   \
@@ -8245,8 +8276,8 @@ istgt_lu_disk_queue(CONN_Ptr conn, ISTGT_LU_CMD_Ptr lu_cmd)
 		spec->avgs[id].count++;	\
 		spec->avgs[id].tot_sec += _r.tv_sec;	\
 		spec->avgs[id].tot_nsec += _r.tv_nsec;	\
-		secs = spec->avgs[id].tot_nsec/1000000000;	\
-		nsecs = spec->avgs[id].tot_nsec%1000000000;	\
+		secs = spec->avgs[id].tot_nsec/SEC_IN_NS;	\
+		nsecs = spec->avgs[id].tot_nsec%SEC_IN_NS;	\
 		spec->avgs[id].tot_sec += secs;	\
 		spec->avgs[id].tot_nsec = nsecs;	\
 	}	\
@@ -8861,10 +8892,10 @@ istgt_lu_disk_queue_start(ISTGT_LU_Ptr lu, int lun, int worker_id)
 						INFLIGHT_IO_CLEANUP;
 						lu_task->error = 1;
 						lu_task->lu_cmd.aborted = 1;
+						MTX_UNLOCK(&lu_task->trans_mutex);
 						MTX_LOCK(&spec->wait_lu_task_mutex);
 						spec->wait_lu_task[worker_id] = NULL;
 						MTX_UNLOCK(&spec->wait_lu_task_mutex);
-						MTX_UNLOCK(&lu_task->trans_mutex);
 
 						now = time(NULL);
 						ISTGT_ERRLOG("c#%d timeout trans_cond CmdSN=0x%x "
