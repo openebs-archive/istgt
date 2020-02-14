@@ -849,12 +849,18 @@ istgt_uctl_cmd_snaplist(UCTL_Ptr uctl)
 	char *resp;
 	arg = uctl->arg;
 	const char *volname;
+	char *snapname;
 
 	CHECK_ARG_AND_GOTO_ERROR;
 	volname = strsepq(&arg, delim);
 
 	CHECK_ARG_AND_GOTO_ERROR;
 	wait_time = atoi(strsepq(&arg, delim));
+
+	snapname = strchr(volname, '@');
+	if (snapname != NULL) {
+		*snapname++ = '\0';
+	}
 
 	lu = istgt_lu_find_target_by_volname(uctl->istgt, volname);
 
@@ -863,7 +869,7 @@ istgt_uctl_cmd_snaplist(UCTL_Ptr uctl)
 		goto error_return;
 	}
 	spec = lu->lun[0].spec;
-	resp = istgt_lu_fetch_snaplist(spec, wait_time);
+	resp = istgt_lu_fetch_snaplist(spec, wait_time, snapname);
 	if (resp) {
 		istgt_uctl_snprintf(uctl, "%s %s\n", uctl->cmd, resp);
 		ret = UCTL_CMD_OK;

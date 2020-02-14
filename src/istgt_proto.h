@@ -112,7 +112,7 @@ int istgt_lu_remove_unknown_replica(spec_t *spec, int drf, char **replicas_id);
 int istgt_lu_destroy_snapshot(spec_t *spec, char *snapname);
 void istgt_lu_mempool_stats(char **resp);
 void istgt_lu_replica_stats(char *volname, char **resp);
-char *istgt_lu_fetch_snaplist(spec_t *spec, int);
+char *istgt_lu_fetch_snaplist(spec_t *spec, int, char *);
 void istgt_set_max_io_wait_time(uint64_t new_io_wait_time);
 uint64_t istgt_get_max_io_wait_time(void);
 #endif

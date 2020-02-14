@@ -361,6 +361,8 @@ check_header_sanity(zvol_io_hdr_t *resp_hdr)
 				    resp_hdr->len);
 				return -1;
 			}
+			if (resp_hdr->status == ZVOL_OP_STATUS_OK)
+				return 0;
 			break;
 
 		default:
@@ -1956,7 +1958,9 @@ handle_snap_list_response(replica_t *replica, void *resp_data, mgmt_cmd_t *mgmt_
 	    (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_failed + rcomm_mgmt->cmds_succeeded)))
 		delete = true;
 
-	for (i = 0, assigned = false; i < rcomm_mgmt->buf_size; i += sizeof (*snap_resp_array)) {
+	for (i = 0, assigned = false;
+	    i < (rcomm_mgmt->buf_size / sizeof (*snap_resp_array));
+		i++) {
 		if (snap_resp_array[i] == NULL) {
 			snap_resp_array[i] = (struct zvol_snapshot_list *)snap_details;
 			assigned = true;
@@ -1974,15 +1978,31 @@ handle_snap_list_response(replica_t *replica, void *resp_data, mgmt_cmd_t *mgmt_
 	}
 }
 
+static char *
+get_replica_id_for_guid(spec_t *spec, uint64_t guid)
+{
+	replica_t *replica;
+
+	ASSERT(MTX_LOCKED(&spec->rq_mtx));
+	TAILQ_FOREACH(replica, &spec->rq, r_next) {
+		if (replica->zvol_guid == guid) {
+			return replica->replica_id;
+		}
+	}
+	return NULL;
+}
+
 static void
-process_snaplist_response(char **resp, void *buf, int rcount)
+process_snaplist_response(spec_t *spec, char **resp, void *buf, int rcount)
 {
 	struct zvol_snapshot_list **snap_resp_array = (struct zvol_snapshot_list **)buf;
 	int i = 0;
 	uint64_t total_len;
-	char *msg = NULL;
+	char *msg = NULL, *replica_id = NULL;
 	const char *json_string = NULL;
 	struct json_object *jobj, *jarray, *resp_obj, *snap_obj;
+
+	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 
 	jarray = json_object_new_array();
 
@@ -1991,7 +2011,13 @@ process_snaplist_response(char **resp, void *buf, int rcount)
 			resp_obj = snap_obj = NULL;
 			jobj = json_object_new_object();
 
-			json_object_object_add(jobj, "replica", json_object_new_uint64(snap_resp_array[i]->zvol_guid));
+			replica_id = get_replica_id_for_guid(spec, snap_resp_array[i]->zvol_guid);
+			if(!replica_id) {
+				REPLICA_ERRLOG("No replica_id for replica:%lu", snap_resp_array[i]->zvol_guid);
+				continue;
+			}
+
+			json_object_object_add(jobj, "replica_id", json_object_new_string(replica_id));
 
 			resp_obj = json_tokener_parse(snap_resp_array[i]->data);
 			(void) json_object_object_get_ex(resp_obj,
@@ -2002,7 +2028,7 @@ process_snaplist_response(char **resp, void *buf, int rcount)
 		}
 	}
 	jobj = json_object_new_object();
-	json_object_object_add(jobj, "snapshot list", jarray);
+	json_object_object_add(jobj, "snapshots", jarray);
 
 	json_string = json_object_to_json_string_ext(jobj, JSON_C_TO_STRING_PLAIN);
 	total_len = strlen(json_string) + 1;
@@ -2014,7 +2040,7 @@ process_snaplist_response(char **resp, void *buf, int rcount)
 }
 
 char *
-istgt_lu_fetch_snaplist(spec_t *spec, int wait_time)
+istgt_lu_fetch_snaplist(spec_t *spec, int wait_time, char *snapname)
 {
 	replica_t *replica;
 	int free_rcomm_mgmt = 0;
@@ -2037,12 +2063,16 @@ istgt_lu_fetch_snaplist(spec_t *spec, int wait_time)
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
 		mgmt_cmd = malloc(sizeof(mgmt_cmd_t));
 		memset(mgmt_cmd, 0, sizeof (mgmt_cmd_t));
-		data_len = strlen(spec->volname) + 2;
+
+		data_len = strlen(spec->volname) + ((snapname) ? strlen(snapname) + 1: 0) + 2;
 
 		BUILD_REPLICA_MGMT_HDR(mgmt_io_hdr, ZVOL_OPCODE_SNAP_LIST, data_len);
 
 		mgmt_cmd->data = (char *)malloc(data_len);
-		snprintf(mgmt_cmd->data, data_len, "%s", spec->volname);
+		if (snapname)
+			snprintf(mgmt_cmd->data, data_len, "%s@%s", spec->volname, snapname);
+		else
+			snprintf(mgmt_cmd->data, data_len, "%s", spec->volname);
 
 		mgmt_cmd->rcomm_mgmt = rcomm_mgmt;
 		mgmt_cmd->io_hdr = mgmt_io_hdr;
@@ -2089,7 +2119,7 @@ istgt_lu_fetch_snaplist(spec_t *spec, int wait_time)
 	if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed)) {
 		free_rcomm_mgmt = 1;
 		if ((rcomm_mgmt->cmds_succeeded == spec->replication_factor) && (rcomm_mgmt->cmds_failed == 0)) {
-			process_snaplist_response(&response, rcomm_mgmt->buf, num_replica);
+			process_snaplist_response(spec, &response, rcomm_mgmt->buf, num_replica);
 		}
 	}
 	MTX_UNLOCK(&rcomm_mgmt->mtx);

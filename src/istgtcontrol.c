@@ -1893,7 +1893,7 @@ usage(void)
 	printf(" snapcreate create snapshot on replica\n");
 	printf(" snapdestroy destroy snapshot on replica\n");
 	printf(" replica    list replica and its stats\n");
-	printf(" snaplist   get list of snapshots created on replica\n");
+	printf(" snaplist   get list of snapshots or snapshot, with details, created on replica, ex: snaplist <vol or vol@snap>\n");
 	printf(" mempool    get mempool details\n");
 	printf(" maxiowait  get/set wait time for IO completion in seconds\n");
 	printf(" resize     read the size from command cli and updates the size\n");
