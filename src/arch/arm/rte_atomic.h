@@ -7,7 +7,7 @@
 
 #if defined(__aarch64__)
 #include "arch/arm/rte_atomic_64.h"
-else
+#else
 #include "arch/arm/rte_atomic_32.h"
 #endif
 
