@@ -243,7 +243,7 @@ int istgt_lu_disk_copy_reservation(ISTGT_LU_DISK *spec_bkp, ISTGT_LU_DISK *spec)
 static inline long
 find_first_bit(ISTGT_LU_CMD_Ptr lu_cmd)
 {
-	long d0, d1;
+	long d0 __attribute__((unused)), d1 __attribute__((unused));
 	long res, res_final=0;
 	int iovcnt, i;
 	uint64_t nbytes;
