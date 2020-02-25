@@ -850,6 +850,8 @@ istgt_uctl_cmd_snaplist(UCTL_Ptr uctl)
 	arg = uctl->arg;
 	const char *volname;
 	char *snapname;
+	uint64_t resp_len, written = 0, wlen;
+	char tmpbuf[MAX_LINEBUF] = { 0 };
 
 	CHECK_ARG_AND_GOTO_ERROR;
 	volname = strsepq(&arg, delim);
@@ -871,9 +873,34 @@ istgt_uctl_cmd_snaplist(UCTL_Ptr uctl)
 	spec = lu->lun[0].spec;
 	resp = istgt_lu_fetch_snaplist(spec, wait_time, snapname);
 	if (resp) {
-		istgt_uctl_snprintf(uctl, "%s %s\n", uctl->cmd, resp);
-		ret = UCTL_CMD_OK;
-		free(resp);
+		resp_len = strlen(resp);
+		if (resp_len < (MAX_LINEBUF - strlen(uctl->cmd) - 5)) {
+			istgt_uctl_snprintf(uctl, "%s %s\n", uctl->cmd, resp);
+			ret = UCTL_CMD_OK;
+			free(resp);
+		} else {
+write_again:
+			wlen = MAX_LINEBUF - strlen(uctl->cmd) - 5;
+			if ((wlen + written) > resp_len) {
+				wlen = resp_len - written;
+			}
+
+			strncpy(tmpbuf, resp + written, wlen);
+			tmpbuf[wlen] = '\0';
+			written += wlen;
+			istgt_uctl_snprintf(uctl, "%s %s\n", uctl->cmd, tmpbuf);
+
+			if (written >= resp_len) {
+				goto error_return;
+			}
+
+			rc = istgt_uctl_writeline(uctl);
+			if (rc != UCTL_CMD_OK) {
+				free(resp);
+				return (rc);
+			}
+			goto write_again;
+		}
 	}
 	else
 		istgt_uctl_snprintf(uctl, "ERR failed %s\n", uctl->cmd);

@@ -2099,7 +2099,7 @@ istgt_lu_fetch_snaplist(spec_t *spec, int wait_time, char *snapname)
 	if (rcomm_mgmt->cmds_sent != num_replica) {
 		rcomm_mgmt->caller_gone = 1;
 		MTX_UNLOCK(&rcomm_mgmt->mtx);
-		REPLICA_ERRLOG("Failed to send cmd to all replica... sent to %d replica.. connected replica(%d).. \n",
+		REPLICA_ERRLOG("Failed to send SNAP_LIST cmd to all replica... sent to %d replica.. connected replica(%d).. \n",
 		    rcomm_mgmt->cmds_sent, num_replica);
 		goto done;
 	}
@@ -2118,8 +2118,11 @@ istgt_lu_fetch_snaplist(spec_t *spec, int wait_time, char *snapname)
 	rcomm_mgmt->caller_gone = 1;
 	if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed)) {
 		free_rcomm_mgmt = 1;
-		if ((rcomm_mgmt->cmds_succeeded == spec->replication_factor) && (rcomm_mgmt->cmds_failed == 0)) {
+		if ((rcomm_mgmt->cmds_succeeded >= spec->consistency_factor)) {
 			process_snaplist_response(spec, &response, rcomm_mgmt->buf, num_replica);
+		} else {
+			REPLICA_ERRLOG("SNAP_LIST failed succeeed(%d) failed(%d)\n",
+			    rcomm_mgmt->cmds_succeeded, rcomm_mgmt->cmds_failed);
 		}
 	}
 	MTX_UNLOCK(&rcomm_mgmt->mtx);

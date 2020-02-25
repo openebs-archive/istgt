@@ -1090,8 +1090,11 @@ exec_snaplist(UCTL_Ptr uctl)
 		strupr(result);
 		if (strcmp(result, uctl->cmd) != 0)
 			break;
-		fprintf(stdout, "%s\n", arg);
+		fprintf(stdout, "%s", arg);
 	}
+
+	fprintf(stdout, "\n");
+
 	if (strcmp(result, "OK") != 0) {
 		if (is_err_req_auth(uctl, arg))
 			return UCTL_CMD_REQAUTH;
