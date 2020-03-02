@@ -1949,7 +1949,7 @@ handle_snap_list_response(replica_t *replica, void *resp_data, mgmt_cmd_t *mgmt_
 	zvol_io_hdr_t *hdr = replica->mgmt_io_resp_hdr;
 	struct zvol_snapshot_list *snap_details;
 	rcommon_mgmt_cmd_t *rcomm_mgmt = mgmt_cmd->rcomm_mgmt;
-	bool delete = false, assigned;
+	bool delete = false, assigned, failed = false;
 	struct zvol_snapshot_list **snap_resp_array = (struct zvol_snapshot_list **)rcomm_mgmt->buf;
 	uint64_t i = 0;
 
@@ -1958,14 +1958,20 @@ handle_snap_list_response(replica_t *replica, void *resp_data, mgmt_cmd_t *mgmt_
 	free(resp_data);
 
 	MTX_LOCK(&rcomm_mgmt->mtx);
-	if (hdr->status != ZVOL_OP_STATUS_OK)
+	if (hdr->status != ZVOL_OP_STATUS_OK || snap_details->error) {
 		rcomm_mgmt->cmds_failed++;
-	else
+		free(snap_details);
+		failed = true;
+	} else {
 		rcomm_mgmt->cmds_succeeded++;
+	}
 
 	if ((rcomm_mgmt->caller_gone == 1) &&
 	    (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_failed + rcomm_mgmt->cmds_succeeded)))
 		delete = true;
+
+	if (failed)
+		goto out;
 
 	for (i = 0, assigned = false;
 	    i < (rcomm_mgmt->buf_size / sizeof (*snap_resp_array));
@@ -1978,6 +1984,8 @@ handle_snap_list_response(replica_t *replica, void *resp_data, mgmt_cmd_t *mgmt_
 	}
 
 	ASSERT(assigned);
+
+out:
 
 	MTX_UNLOCK(&rcomm_mgmt->mtx);
 
