@@ -891,6 +891,7 @@ write_again:
 			istgt_uctl_snprintf(uctl, "%s %s\n", uctl->cmd, tmpbuf);
 
 			if (written >= resp_len) {
+				free(resp);
 				goto error_return;
 			}
 

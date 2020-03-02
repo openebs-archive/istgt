@@ -1825,7 +1825,8 @@ send_replica_snapshot(spec_t *spec, replica_t *replica, uint64_t io_seq,
 	mgmt_cmd = malloc(sizeof(mgmt_cmd_t));
 	memset(mgmt_cmd, 0, sizeof (mgmt_cmd_t));
 	mgmt_cmd->rcomm_mgmt = rcomm_mgmt;
-	data_len = strlen(spec->volname) +  ((snapname) ? strlen(snapname) + 1: 0) + 2;
+	// snapname can be null in case of SNAP_LIST
+	data_len = strlen(spec->volname) +  ((snapname) ? strlen(snapname) + 1: 0) + 1;
 
 	BUILD_REPLICA_MGMT_HDR(rmgmtio, mgmt_opcode, data_len);
 
@@ -2028,6 +2029,9 @@ process_snaplist_response(spec_t *spec, char **resp, void *buf, int rcount)
 			}
 
 			json_object_object_add(jobj, "replica_id", json_object_new_string(replica_id));
+			if (snap_resp_array[i]->error)
+				REPLICA_ERRLOG("SNAP_LIST recieved an error(%d) for replica(%s)\n", snap_resp_array[i]->error, replica_id);
+
 			free(replica_id);
 
 			resp_obj = json_tokener_parse(snap_resp_array[i]->data);
@@ -2045,7 +2049,7 @@ process_snaplist_response(spec_t *spec, char **resp, void *buf, int rcount)
 	total_len = strlen(json_string) + 1;
 	msg = malloc(total_len);
 	memset(msg, 0, total_len);
-	strncpy(msg, json_string, total_len);
+	strncpy(msg, json_string, total_len - 1);
 	json_object_put(jobj);
 	*resp = msg;
 }
@@ -2062,7 +2066,7 @@ istgt_lu_fetch_snaplist(spec_t *spec, int wait_time, char *snapname)
 
 	clock_gettime(CLOCK_MONOTONIC, &last);
 
-	REPLICA_LOG("fetching snapshot list for %s", snapname);
+	REPLICA_LOG("fetching snapshot list for %s@%s", spec->volname, snapname);
 
 	MTX_LOCK(&spec->rq_mtx);
 	num_replica = spec->healthy_rcount + spec->degraded_rcount;
@@ -2083,6 +2087,8 @@ istgt_lu_fetch_snaplist(spec_t *spec, int wait_time, char *snapname)
 
 	MTX_UNLOCK(&spec->rq_mtx);
 
+	// We need to have snapshot info from minimum consistency_factor replica, since
+	// Control plane is using this SNAPLIST to update CVR for rebuild progress
 	if ((rcomm_mgmt->cmds_succeeded >= spec->consistency_factor)) {
 		process_snaplist_response(spec, &response, rcomm_mgmt->buf, num_replica);
 	}
