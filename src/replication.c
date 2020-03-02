@@ -1993,7 +1993,6 @@ get_replica_id_for_guid(spec_t *spec, uint64_t guid)
 	replica_t *replica;
 	char *replica_id = NULL;
 
-	MTX_LOCK(&spec->rq_mtx);
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
 		if (replica->zvol_guid == guid) {
 			replica_id = xstrdup(replica->replica_id);
@@ -2001,7 +2000,6 @@ get_replica_id_for_guid(spec_t *spec, uint64_t guid)
 		}
 	}
 
-	MTX_UNLOCK(&spec->rq_mtx);
 	return replica_id;
 }
 
@@ -2085,14 +2083,13 @@ istgt_lu_fetch_snaplist(spec_t *spec, int wait_time, char *snapname)
 		free_rcomm_mgmt = 1;
 	}
 
-	MTX_UNLOCK(&spec->rq_mtx);
-
 	// We need to have snapshot info from minimum consistency_factor replica, since
 	// Control plane is using this SNAPLIST to update CVR for rebuild progress
 	if ((rcomm_mgmt->cmds_succeeded >= spec->consistency_factor)) {
 		process_snaplist_response(spec, &response, rcomm_mgmt->buf, num_replica);
 	}
 	MTX_UNLOCK(&rcomm_mgmt->mtx);
+	MTX_UNLOCK(&spec->rq_mtx);
 
 	if (free_rcomm_mgmt == 1) {
 		DESTROY_SNAPSHOT_RESP_LIST(rcomm_mgmt);
