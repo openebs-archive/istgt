@@ -1824,12 +1824,15 @@ send_replica_snapshot(spec_t *spec, replica_t *replica, uint64_t io_seq,
 	mgmt_cmd = malloc(sizeof(mgmt_cmd_t));
 	memset(mgmt_cmd, 0, sizeof (mgmt_cmd_t));
 	mgmt_cmd->rcomm_mgmt = rcomm_mgmt;
-	data_len = strlen(spec->volname) + strlen(snapname) + 2;
+	data_len = strlen(spec->volname) +  ((snapname) ? strlen(snapname) + 1: 0) + 2;
 
 	BUILD_REPLICA_MGMT_HDR(rmgmtio, mgmt_opcode, data_len);
 
 	data = (char *)malloc(data_len);
-	snprintf(data, data_len, "%s@%s", spec->volname, snapname);
+	if (snapname)
+		snprintf(data, data_len, "%s@%s", spec->volname, snapname);
+	else
+		snprintf(data, data_len, "%s", spec->volname);
 
 	rmgmtio->io_seq = io_seq;
 
@@ -1939,14 +1942,19 @@ disconnect_nonresponding_replica(replica_t *replica, uint64_t io_seq,
 }
 
 static void
-handle_snap_list_response(replica_t *replica, void *resp_data, mgmt_cmd_t *mgmt_cmd)
+handle_snap_list_response(replica_t *replica, void *resp_data, mgmt_cmd_t *mgmt_cmd, uint64_t len)
 {
 	zvol_io_hdr_t *hdr = replica->mgmt_io_resp_hdr;
-	struct zvol_snapshot_list *snap_details = (struct zvol_snapshot_list *)resp_data;
+	struct zvol_snapshot_list *snap_details;
+//	struct zvol_snapshot_list *snap_details = (struct zvol_snapshot_list *)resp_data;
 	rcommon_mgmt_cmd_t *rcomm_mgmt = mgmt_cmd->rcomm_mgmt;
 	bool delete = false, assigned;
 	struct zvol_snapshot_list **snap_resp_array = (struct zvol_snapshot_list **)rcomm_mgmt->buf;
 	uint64_t i = 0;
+
+	snap_details = calloc(1, len);
+	memcpy(snap_details, resp_data, len);
+	free(resp_data);
 
 	MTX_LOCK(&rcomm_mgmt->mtx);
 	if (hdr->status != ZVOL_OP_STATUS_OK)
@@ -1982,14 +1990,18 @@ static char *
 get_replica_id_for_guid(spec_t *spec, uint64_t guid)
 {
 	replica_t *replica;
+	char *replica_id = NULL;
 
-	ASSERT(MTX_LOCKED(&spec->rq_mtx));
+	MTX_LOCK(&spec->rq_mtx);
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
 		if (replica->zvol_guid == guid) {
-			return replica->replica_id;
+			replica_id = xstrdup(replica->replica_id);
+			break;
 		}
 	}
-	return NULL;
+
+	MTX_UNLOCK(&spec->rq_mtx);
+	return replica_id;
 }
 
 static void
@@ -2001,8 +2013,6 @@ process_snaplist_response(spec_t *spec, char **resp, void *buf, int rcount)
 	char *msg = NULL, *replica_id = NULL;
 	const char *json_string = NULL;
 	struct json_object *jobj, *jarray, *resp_obj, *snap_obj;
-
-	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 
 	jarray = json_object_new_array();
 
@@ -2018,6 +2028,7 @@ process_snaplist_response(spec_t *spec, char **resp, void *buf, int rcount)
 			}
 
 			json_object_object_add(jobj, "replica_id", json_object_new_string(replica_id));
+			free(replica_id);
 
 			resp_obj = json_tokener_parse(snap_resp_array[i]->data);
 			(void) json_object_object_get_ex(resp_obj,
@@ -2046,12 +2057,8 @@ istgt_lu_fetch_snaplist(spec_t *spec, int wait_time, char *snapname)
 	int free_rcomm_mgmt = 0;
 	struct timespec last, now, diff;
 	rcommon_mgmt_cmd_t *rcomm_mgmt;
-	mgmt_cmd_t *mgmt_cmd;
-	size_t data_len;
 	char *response = NULL;
 	int num_replica = 0;
-	zvol_io_hdr_t *mgmt_io_hdr = NULL;
-	uint64_t num;
 
 	clock_gettime(CLOCK_MONOTONIC, &last);
 
@@ -2061,36 +2068,7 @@ istgt_lu_fetch_snaplist(spec_t *spec, int wait_time, char *snapname)
 	free_rcomm_mgmt = 0;
 
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
-		mgmt_cmd = malloc(sizeof(mgmt_cmd_t));
-		memset(mgmt_cmd, 0, sizeof (mgmt_cmd_t));
-
-		data_len = strlen(spec->volname) + ((snapname) ? strlen(snapname) + 1: 0) + 2;
-
-		BUILD_REPLICA_MGMT_HDR(mgmt_io_hdr, ZVOL_OPCODE_SNAP_LIST, data_len);
-
-		mgmt_cmd->data = (char *)malloc(data_len);
-		if (snapname)
-			snprintf(mgmt_cmd->data, data_len, "%s@%s", spec->volname, snapname);
-		else
-			snprintf(mgmt_cmd->data, data_len, "%s", spec->volname);
-
-		mgmt_cmd->rcomm_mgmt = rcomm_mgmt;
-		mgmt_cmd->io_hdr = mgmt_io_hdr;
-		mgmt_cmd->mgmt_cmd_state = WRITE_IO_SEND_HDR;
-
-		MTX_LOCK(&replica->r_mtx);
-		TAILQ_INSERT_TAIL(&replica->mgmt_cmd_queue, mgmt_cmd, mgmt_cmd_next);
-		MTX_UNLOCK(&replica->r_mtx);
-
-		rcomm_mgmt->cmds_sent++;
-
-		num = 1;
-		if (write(replica->mgmt_eventfd1, &num, sizeof (num)) != sizeof (num)) {
-			REPLICA_ERRLOG("Failed to inform to mgmt_eventfd for "
-			    "replica(%lu)\n", replica->zvol_guid);
-			rcomm_mgmt->caller_gone = 1;
-			goto done;
-		}
+		(void) send_replica_snapshot(spec, replica, 0, snapname, ZVOL_OPCODE_SNAP_LIST, rcomm_mgmt);
 	}
 
 	timesdiff(CLOCK_MONOTONIC, last, now, diff);
@@ -2099,6 +2077,7 @@ istgt_lu_fetch_snaplist(spec_t *spec, int wait_time, char *snapname)
 	if (rcomm_mgmt->cmds_sent != num_replica) {
 		rcomm_mgmt->caller_gone = 1;
 		MTX_UNLOCK(&rcomm_mgmt->mtx);
+		MTX_UNLOCK(&spec->rq_mtx);
 		REPLICA_ERRLOG("Failed to send SNAP_LIST cmd to all replica... sent to %d replica.. connected replica(%d).. \n",
 		    rcomm_mgmt->cmds_sent, num_replica);
 		goto done;
@@ -2118,17 +2097,20 @@ istgt_lu_fetch_snaplist(spec_t *spec, int wait_time, char *snapname)
 	rcomm_mgmt->caller_gone = 1;
 	if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed)) {
 		free_rcomm_mgmt = 1;
+		MTX_UNLOCK(&rcomm_mgmt->mtx);
+		MTX_UNLOCK(&spec->rq_mtx);
 		if ((rcomm_mgmt->cmds_succeeded >= spec->consistency_factor)) {
 			process_snaplist_response(spec, &response, rcomm_mgmt->buf, num_replica);
 		} else {
 			REPLICA_ERRLOG("SNAP_LIST failed succeeed(%d) failed(%d)\n",
 			    rcomm_mgmt->cmds_succeeded, rcomm_mgmt->cmds_failed);
 		}
+		goto done;
 	}
 	MTX_UNLOCK(&rcomm_mgmt->mtx);
+	MTX_UNLOCK(&spec->rq_mtx);
 
 done:
-	MTX_UNLOCK(&spec->rq_mtx);
 	if (free_rcomm_mgmt == 1) {
 		DESTROY_SNAPSHOT_RESP_LIST(rcomm_mgmt);
 		free_rcommon_mgmt_cmd(rcomm_mgmt);
@@ -3594,7 +3576,7 @@ read_io_resp_hdr:
 
 				case ZVOL_OPCODE_SNAP_LIST:
 					assert(fd != replica->iofd);
-					handle_snap_list_response(replica, *resp_data, mgmt_cmd);
+					handle_snap_list_response(replica, *resp_data, mgmt_cmd, resp_hdr->len);
 					break;
 
 				default:
