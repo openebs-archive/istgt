@@ -2081,10 +2081,12 @@ istgt_lu_fetch_snaplist(spec_t *spec, int wait_time, char *snapname)
 		free_rcomm_mgmt = 1;
 	}
 
-	MTX_UNLOCK(&rcomm_mgmt->mtx);
 	MTX_UNLOCK(&spec->rq_mtx);
 
-	process_snaplist_response(spec, &response, rcomm_mgmt->buf, num_replica);
+	if ((rcomm_mgmt->cmds_succeeded >= spec->consistency_factor)) {
+		process_snaplist_response(spec, &response, rcomm_mgmt->buf, num_replica);
+	}
+	MTX_UNLOCK(&rcomm_mgmt->mtx);
 
 	if (free_rcomm_mgmt == 1) {
 		DESTROY_SNAPSHOT_RESP_LIST(rcomm_mgmt);
