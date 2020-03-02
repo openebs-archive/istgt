@@ -54,6 +54,7 @@ int replication_initialized = 0;
 size_t rcmd_mempool_count = RCMD_MEMPOOL_ENTRIES;
 struct timespec istgt_start_time;
 
+static inline int timeout_wait_for_command(spec_t *spec, rcommon_mgmt_cmd_t *rcomm_mgmt, int wait_time, struct timespec last);
 static void destroy_rcommon_deadlist(spec_t *spec);
 static void destroy_resp_list(rcommon_cmd_t *rcomm_cmd, int copies_sent);
 static int start_rebuild(void *buf, replica_t *replica, uint64_t data_len);
@@ -1946,7 +1947,6 @@ handle_snap_list_response(replica_t *replica, void *resp_data, mgmt_cmd_t *mgmt_
 {
 	zvol_io_hdr_t *hdr = replica->mgmt_io_resp_hdr;
 	struct zvol_snapshot_list *snap_details;
-//	struct zvol_snapshot_list *snap_details = (struct zvol_snapshot_list *)resp_data;
 	rcommon_mgmt_cmd_t *rcomm_mgmt = mgmt_cmd->rcomm_mgmt;
 	bool delete = false, assigned;
 	struct zvol_snapshot_list **snap_resp_array = (struct zvol_snapshot_list **)rcomm_mgmt->buf;
@@ -2054,13 +2054,15 @@ char *
 istgt_lu_fetch_snaplist(spec_t *spec, int wait_time, char *snapname)
 {
 	replica_t *replica;
-	int free_rcomm_mgmt = 0;
-	struct timespec last, now, diff;
+	int free_rcomm_mgmt = 0, success;
+	struct timespec last;
 	rcommon_mgmt_cmd_t *rcomm_mgmt;
 	char *response = NULL;
 	int num_replica = 0;
 
 	clock_gettime(CLOCK_MONOTONIC, &last);
+
+	REPLICA_LOG("fetching snapshot list for %s", snapname);
 
 	MTX_LOCK(&spec->rq_mtx);
 	num_replica = spec->healthy_rcount + spec->degraded_rcount;
@@ -2071,46 +2073,19 @@ istgt_lu_fetch_snaplist(spec_t *spec, int wait_time, char *snapname)
 		(void) send_replica_snapshot(spec, replica, 0, snapname, ZVOL_OPCODE_SNAP_LIST, rcomm_mgmt);
 	}
 
-	timesdiff(CLOCK_MONOTONIC, last, now, diff);
 	MTX_LOCK(&rcomm_mgmt->mtx);
-
-	if (rcomm_mgmt->cmds_sent != num_replica) {
-		rcomm_mgmt->caller_gone = 1;
-		MTX_UNLOCK(&rcomm_mgmt->mtx);
-		MTX_UNLOCK(&spec->rq_mtx);
-		REPLICA_ERRLOG("Failed to send SNAP_LIST cmd to all replica... sent to %d replica.. connected replica(%d).. \n",
-		    rcomm_mgmt->cmds_sent, num_replica);
-		goto done;
-	}
-
-	while (diff.tv_sec < wait_time) {
-		if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed))
-			break;
-		MTX_UNLOCK(&rcomm_mgmt->mtx);
-		MTX_UNLOCK(&spec->rq_mtx);
-		sleep(1);
-		MTX_LOCK(&spec->rq_mtx);
-		MTX_LOCK(&rcomm_mgmt->mtx);
-		timesdiff(CLOCK_MONOTONIC, last, now, diff);
-	}
+	success = timeout_wait_for_command(spec, rcomm_mgmt, wait_time, last);
 
 	rcomm_mgmt->caller_gone = 1;
 	if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed)) {
 		free_rcomm_mgmt = 1;
-		MTX_UNLOCK(&rcomm_mgmt->mtx);
-		MTX_UNLOCK(&spec->rq_mtx);
-		if ((rcomm_mgmt->cmds_succeeded >= spec->consistency_factor)) {
-			process_snaplist_response(spec, &response, rcomm_mgmt->buf, num_replica);
-		} else {
-			REPLICA_ERRLOG("SNAP_LIST failed succeeed(%d) failed(%d)\n",
-			    rcomm_mgmt->cmds_succeeded, rcomm_mgmt->cmds_failed);
-		}
-		goto done;
 	}
+
 	MTX_UNLOCK(&rcomm_mgmt->mtx);
 	MTX_UNLOCK(&spec->rq_mtx);
 
-done:
+	process_snaplist_response(spec, &response, rcomm_mgmt->buf, num_replica);
+
 	if (free_rcomm_mgmt == 1) {
 		DESTROY_SNAPSHOT_RESP_LIST(rcomm_mgmt);
 		free_rcommon_mgmt_cmd(rcomm_mgmt);
@@ -2224,13 +2199,11 @@ static inline int
 timeout_wait_for_command(spec_t *spec, rcommon_mgmt_cmd_t *rcomm_mgmt, int wait_time, struct timespec last)
 {
 	struct timespec diff, now;
-	int8_t free_rcomm_mgmt = 0;
 
 	ASSERT(MTX_LOCKED(&spec->rq_mtx));
+	ASSERT(MTX_LOCKED(&rcomm_mgmt->mtx));
 
 	timesdiff(CLOCK_MONOTONIC_COARSE, last, now, diff);
-
-	MTX_LOCK(&rcomm_mgmt->mtx);
 
 	while (diff.tv_sec < wait_time) {
 		if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed))
@@ -2242,17 +2215,7 @@ timeout_wait_for_command(spec_t *spec, rcommon_mgmt_cmd_t *rcomm_mgmt, int wait_
 		MTX_LOCK(&rcomm_mgmt->mtx);
 		timesdiff(CLOCK_MONOTONIC_COARSE, last, now, diff);
 	}
-	rcomm_mgmt->caller_gone = 1;
-	if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed)) {
-		free_rcomm_mgmt = 1;
-	}
-	int success = rcomm_mgmt->cmds_succeeded;
-
-	MTX_UNLOCK(&rcomm_mgmt->mtx);
-
-	if (free_rcomm_mgmt)
-		free_rcommon_mgmt_cmd(rcomm_mgmt);
-	return (success);
+	return (rcomm_mgmt->cmds_succeeded);
 }
 
 /*
@@ -2270,6 +2233,7 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	struct timespec last;
 	rcommon_mgmt_cmd_t *rcomm_mgmt;
 	uint64_t io_seq;
+	int8_t free_rcomm_mgmt = 0;
 
 	clock_gettime(CLOCK_MONOTONIC_COARSE, &last);
 	MTX_LOCK(&spec->rq_mtx);
@@ -2305,7 +2269,18 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 		(void) send_replica_snapshot(spec, hr, io_seq, snapname, ZVOL_OPCODE_SNAP_PREPARE, rmgmt);
 
 		sent = rmgmt->cmds_sent;
+
+		MTX_LOCK(&rmgmt->mtx);
 		success = timeout_wait_for_command(spec, rmgmt, wait_time, last);
+		rmgmt->caller_gone = 1;
+		if (rmgmt->cmds_sent == (rmgmt->cmds_succeeded + rmgmt->cmds_failed)) {
+			free_rcomm_mgmt = 1;
+		}
+
+		MTX_UNLOCK(&rmgmt->mtx);
+
+		if (free_rcomm_mgmt)
+			free_rcommon_mgmt_cmd(rmgmt);
 
 		if (success != sent) {
 			spec->quiesce = 0;
@@ -2328,7 +2303,18 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 		(void) send_replica_snapshot(spec, replica, io_seq, snapname, ZVOL_OPCODE_SNAP_CREATE, rcomm_mgmt);
 	}
 
+	free_rcomm_mgmt = 0;
+	MTX_LOCK(&rcomm_mgmt->mtx);
 	success = timeout_wait_for_command(spec, rcomm_mgmt, wait_time, last);
+
+	rcomm_mgmt->caller_gone = 1;
+	if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed)) {
+		free_rcomm_mgmt = 1;
+	}
+	MTX_UNLOCK(&rcomm_mgmt->mtx);
+
+	if (free_rcomm_mgmt)
+		free_rcommon_mgmt_cmd(rcomm_mgmt);
 
 	if (success >= cf) {
 		r = true;
