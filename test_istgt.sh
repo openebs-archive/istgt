@@ -1112,6 +1112,8 @@ run_resize_test ()
 	logout_of_volume
 	echo "run_resize_test is completed"
 
+	## Unset the volume size
+	VOLUME_SIZE=""
 	pkill -9 -P $replica1_pid
 	pkill -9 -P $replica2_pid
 	stop_istgt
