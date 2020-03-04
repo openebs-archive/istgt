@@ -1441,19 +1441,19 @@ verify_resize_command()
 	vol_name=$(cat $CONF_FILE | grep TargetName | awk '{print $2}')
 
 	$ISTGTCONTROL resize "${vol_name}invalid" "${new_size}G"
-	if [ $? -eq 0 ]; then echo"resize should fail due to invalid volume name"; exit 1; fi
+	if [ $? -eq 0 ]; then echo "resize should fail due to invalid volume name"; exit 1; fi
 
 	$ISTGTCONTROL resize ${vol_name} "${lower_size}G"
-	if [ $? -eq 0 ]; then echo"resize should fail due to lower size than current"; exit 1; fi
+	if [ $? -eq 0 ]; then echo "resize should fail due to lower size than current"; exit 1; fi
 
 	$ISTGTCONTROL resize ${vol_name} ${invalid_bs}
-	if [ $? -eq 0 ]; then echo"resize should fail due to invalid block size"; exit 1; fi
+	if [ $? -eq 0 ]; then echo "resize should fail due to invalid block size"; exit 1; fi
 
 	$ISTGTCONTROL resize ${vol_name}
-	if [ $? -eq 0 ]; then echo"resize should fail due to invalid arguments"; exit 1; fi
+	if [ $? -eq 0 ]; then echo "resize should fail due to invalid arguments"; exit 1; fi
 
 	$ISTGTCONTROL resize ${vol_name} "${old_size}G"
-	if [ $? -ne 0 ]; then echo"Failed to resize volume with same size"; exit 1; fi
+	if [ $? -ne 0 ]; then echo "Failed to resize volume with same size"; exit 1; fi
 
 	$ISTGTCONTROL resize $vol_name "${new_size}G"
 	if [ $? -ne 0 ]
@@ -1570,7 +1570,7 @@ data_integrity_with_unknown_replica()
 	fi
 
 	## Checking the read IO's with quorum and non-quorum replicas
-	sudo dd if=$device_name of=/dev/null bs=4k count=100
+	sudo dd if=/dev/$device_name of=/dev/null bs=4k count=100
 	if ps -p $replica3_pid > /dev/null 2>&1
 	then
 		echo "Passed the read IO test on non-quorum"
