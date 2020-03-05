@@ -1006,7 +1006,7 @@ wait_for_no_of_replicas ()
 	fi
 }
 
-# run_resize_test will test the resize functionality when replicas are in different state
+# run_resize_test will test the resize functionality when replicas are not in healthy state
 run_resize_test ()
 {
 	local replica1_port="6161"
@@ -1028,11 +1028,11 @@ run_resize_test ()
 	CONSISTENCY_FACTOR=2
 	VOLUME_SIZE=1G
 
+	echo "[Test Started] Resize of volume when replicas are not in Healthy state"
 	setup_test_env
 
 	local vol_name=$(cat $CONF_FILE | grep TargetName | awk '{print $2}')
 	local new_size=2
-	echo "Resize of volume when replicas are in different state"
 	$ISTGTCONTROL resize $vol_name "${new_size}G"
 	if [ $? -ne 0 ]
 	then
@@ -1110,8 +1110,8 @@ run_resize_test ()
 	fi
 
 	logout_of_volume
-	echo "run_resize_test is completed"
 
+	echo "[Test Completed] Resize of volume when replicas are not in Healthy state"
 	## Unset the volume size
 	VOLUME_SIZE=""
 	pkill -9 -P $replica1_pid
