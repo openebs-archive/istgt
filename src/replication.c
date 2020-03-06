@@ -54,7 +54,8 @@ int replication_initialized = 0;
 size_t rcmd_mempool_count = RCMD_MEMPOOL_ENTRIES;
 struct timespec istgt_start_time;
 
-static inline int timeout_wait_for_command(spec_t *spec, rcommon_mgmt_cmd_t *rcomm_mgmt, int wait_time, struct timespec last);
+static inline int timeout_wait_for_response(spec_t *spec, rcommon_mgmt_cmd_t *rcomm_mgmt,
+    int wait_time, struct timespec last, char **response);
 static void destroy_rcommon_deadlist(spec_t *spec);
 static void destroy_resp_list(rcommon_cmd_t *rcomm_cmd, int copies_sent);
 static int start_rebuild(void *buf, replica_t *replica, uint64_t data_len);
@@ -1947,20 +1948,18 @@ static void
 handle_snap_list_response(replica_t *replica, void *resp_data, mgmt_cmd_t *mgmt_cmd, uint64_t len)
 {
 	zvol_io_hdr_t *hdr = replica->mgmt_io_resp_hdr;
-	struct zvol_snapshot_list *snap_details;
+	struct zvol_snapshot_list *snap_details = NULL;
+	char *sbuf = NULL;
 	rcommon_mgmt_cmd_t *rcomm_mgmt = mgmt_cmd->rcomm_mgmt;
 	bool delete = false, assigned, failed = false;
 	struct zvol_snapshot_list **snap_resp_array = (struct zvol_snapshot_list **)rcomm_mgmt->buf;
 	uint64_t i = 0;
 
-	snap_details = calloc(1, len);
-	memcpy(snap_details, resp_data, len);
-	free(resp_data);
+	snap_details = (struct zvol_snapshot_list *)resp_data;
 
 	MTX_LOCK(&rcomm_mgmt->mtx);
 	if (hdr->status != ZVOL_OP_STATUS_OK || snap_details->error) {
 		rcomm_mgmt->cmds_failed++;
-		free(snap_details);
 		failed = true;
 	} else {
 		rcomm_mgmt->cmds_succeeded++;
@@ -1974,14 +1973,24 @@ handle_snap_list_response(replica_t *replica, void *resp_data, mgmt_cmd_t *mgmt_
 	    (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_failed + rcomm_mgmt->cmds_succeeded)))
 		delete = true;
 
-	if (failed)
+	if (failed || rcomm_mgmt->caller_gone) {
+		// if command is failed then we don't need to store the response
+		// if caller is gone then we don't need to update the response
+		free(snap_details);
 		goto out;
+	}
+
+	// We need to allocate new buffer and copy snap_details
+	// caller must free this buffer
+	sbuf = calloc(1, len);
+	memcpy(sbuf, snap_details, len);
+	free(snap_details);
 
 	for (i = 0, assigned = false;
 	    i < (rcomm_mgmt->buf_size / sizeof (*snap_resp_array));
 		i++) {
 		if (snap_resp_array[i] == NULL) {
-			snap_resp_array[i] = (struct zvol_snapshot_list *)snap_details;
+			snap_resp_array[i] = (struct zvol_snapshot_list *)sbuf;
 			assigned = true;
 			break;
 		}
@@ -1993,10 +2002,8 @@ out:
 
 	MTX_UNLOCK(&rcomm_mgmt->mtx);
 
-	if (delete == true) {
-		DESTROY_SNAPSHOT_RESP_LIST(rcomm_mgmt);
+	if (delete == true)
 		free_rcommon_mgmt_cmd(rcomm_mgmt);
-	}
 }
 
 static char *
@@ -2004,6 +2011,8 @@ get_replica_id_for_guid(spec_t *spec, uint64_t guid)
 {
 	replica_t *replica;
 	char *replica_id = NULL;
+
+	ASSERT(MTX_LOCKED(&spec->rq_mtx));
 
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
 		if (replica->zvol_guid == guid) {
@@ -2016,9 +2025,9 @@ get_replica_id_for_guid(spec_t *spec, uint64_t guid)
 }
 
 static void
-process_snaplist_response(spec_t *spec, char **resp, void *buf, int rcount)
+process_snaplist_response(spec_t *spec, char **resp,
+    struct zvol_snapshot_list **snap_resp_array, int rcount)
 {
-	struct zvol_snapshot_list **snap_resp_array = (struct zvol_snapshot_list **)buf;
 	int i = 0;
 	uint64_t total_len;
 	char *msg = NULL, *replica_id = NULL;
@@ -2030,19 +2039,18 @@ process_snaplist_response(spec_t *spec, char **resp, void *buf, int rcount)
 	for (i = 0; i < rcount; i += 1) {
 		if (snap_resp_array[i]) {
 			resp_obj = snap_obj = NULL;
-			jobj = json_object_new_object();
-
 			replica_id = get_replica_id_for_guid(spec, snap_resp_array[i]->zvol_guid);
 			if(!replica_id) {
 				REPLICA_ERRLOG("No replica_id for replica:%lu", snap_resp_array[i]->zvol_guid);
 				continue;
 			}
 
-			json_object_object_add(jobj, "replica_id", json_object_new_string(replica_id));
-			if (snap_resp_array[i]->error)
-				REPLICA_ERRLOG("SNAP_LIST recieved an error(%d) for replica(%s)\n", snap_resp_array[i]->error, replica_id);
+			jobj = json_object_new_object();
 
+			json_object_object_add(jobj, "replica_id", json_object_new_string(replica_id));
 			free(replica_id);
+
+			ASSERT(snap_resp_array[i]->error == 0);
 
 			resp_obj = json_tokener_parse(snap_resp_array[i]->data);
 			(void) json_object_object_get_ex(resp_obj,
@@ -2068,11 +2076,12 @@ char *
 istgt_lu_fetch_snaplist(spec_t *spec, int wait_time, char *snapname)
 {
 	replica_t *replica;
-	int free_rcomm_mgmt = 0, success;
+	int success, cmd_sent;
 	struct timespec last;
 	rcommon_mgmt_cmd_t *rcomm_mgmt;
-	char *response = NULL;
+	char *response = NULL, *rbuf = NULL;
 	int num_replica = 0;
+	struct zvol_snapshot_list **snap_list_resp = NULL;
 
 	clock_gettime(CLOCK_MONOTONIC, &last);
 
@@ -2081,32 +2090,33 @@ istgt_lu_fetch_snaplist(spec_t *spec, int wait_time, char *snapname)
 	MTX_LOCK(&spec->rq_mtx);
 	num_replica = spec->healthy_rcount + spec->degraded_rcount;
 	rcomm_mgmt = allocate_rcommon_mgmt_cmd(sizeof (struct zvol_snapshot_list *) * num_replica);
-	free_rcomm_mgmt = 0;
 
 	TAILQ_FOREACH(replica, &spec->rq, r_next) {
 		(void) send_replica_snapshot(spec, replica, 0, snapname, ZVOL_OPCODE_SNAP_LIST, rcomm_mgmt);
 	}
 
-	MTX_LOCK(&rcomm_mgmt->mtx);
-	success = timeout_wait_for_command(spec, rcomm_mgmt, wait_time, last);
+	cmd_sent = rcomm_mgmt->cmds_sent;
+	success = timeout_wait_for_response(spec, rcomm_mgmt, wait_time, last, &rbuf);
 
-	rcomm_mgmt->caller_gone = 1;
-	if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed)) {
-		free_rcomm_mgmt = 1;
-	}
+	ASSERT(rbuf);
+
+	snap_list_resp = (struct zvol_snapshot_list **)rbuf;
 
 	// We need to have snapshot info from minimum consistency_factor replica, since
 	// Control plane is using this SNAPLIST to update CVR for rebuild progress
-	if ((rcomm_mgmt->cmds_succeeded >= spec->consistency_factor)) {
-		process_snaplist_response(spec, &response, rcomm_mgmt->buf, num_replica);
+	if ((success >= spec->consistency_factor) && snap_list_resp) {
+		process_snaplist_response(spec, &response, snap_list_resp, num_replica);
 	}
-	MTX_UNLOCK(&rcomm_mgmt->mtx);
 	MTX_UNLOCK(&spec->rq_mtx);
 
-	if (free_rcomm_mgmt == 1) {
-		DESTROY_SNAPSHOT_RESP_LIST(rcomm_mgmt);
-		free_rcommon_mgmt_cmd(rcomm_mgmt);
+	for (cmd_sent--;cmd_sent >= 0; cmd_sent--) {
+		if (snap_list_resp[cmd_sent])
+			free(snap_list_resp[cmd_sent]);
 	}
+	free(rbuf);
+
+	REPLICA_LOG("snapshot list for %s@%s completed%s", spec->volname, snapname,
+	    (response==NULL)? " with empty response":"");
 	return response;
 }
 
@@ -2209,16 +2219,23 @@ int istgt_lu_destroy_snapshot(spec_t *spec, char *snapname)
 }
 
 /*
- * will wait for the command till the timeout or command completetion
+ * will wait for the response till the timeout or command completetion
  * this function should be called while holding the spec->rq_mtx lock
+ * Note:
+ * if response is set then this function will allocate buffer and set it
+ * with rcommon_mgmt_cmd_t->buf
  */
 static inline int
-timeout_wait_for_command(spec_t *spec, rcommon_mgmt_cmd_t *rcomm_mgmt, int wait_time, struct timespec last)
+timeout_wait_for_response(spec_t *spec, rcommon_mgmt_cmd_t *rcomm_mgmt, int wait_time, struct timespec last, char **response)
 {
 	struct timespec diff, now;
+	int cmds_succeeded = 0;
+	int8_t free_rcomm_mgmt = 0;
+	char *rbuf = NULL;
 
 	ASSERT(MTX_LOCKED(&spec->rq_mtx));
-	ASSERT(MTX_LOCKED(&rcomm_mgmt->mtx));
+
+	MTX_LOCK(&rcomm_mgmt->mtx);
 
 	timesdiff(CLOCK_MONOTONIC_COARSE, last, now, diff);
 
@@ -2232,7 +2249,24 @@ timeout_wait_for_command(spec_t *spec, rcommon_mgmt_cmd_t *rcomm_mgmt, int wait_
 		MTX_LOCK(&rcomm_mgmt->mtx);
 		timesdiff(CLOCK_MONOTONIC_COARSE, last, now, diff);
 	}
-	return (rcomm_mgmt->cmds_succeeded);
+
+	rcomm_mgmt->caller_gone = 1;
+	if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed)) {
+		free_rcomm_mgmt = 1;
+	}
+
+	cmds_succeeded = rcomm_mgmt->cmds_succeeded;
+	if (response) {
+		rbuf = malloc(rcomm_mgmt->buf_size);
+		memcpy(rbuf, rcomm_mgmt->buf, rcomm_mgmt->buf_size);
+		*response = rbuf;
+	}
+	MTX_UNLOCK(&rcomm_mgmt->mtx);
+
+	if (free_rcomm_mgmt)
+		free_rcommon_mgmt_cmd(rcomm_mgmt);
+
+	return (cmds_succeeded);
 }
 
 /*
@@ -2287,17 +2321,7 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 
 		sent = rmgmt->cmds_sent;
 
-		MTX_LOCK(&rmgmt->mtx);
-		success = timeout_wait_for_command(spec, rmgmt, wait_time, last);
-		rmgmt->caller_gone = 1;
-		if (rmgmt->cmds_sent == (rmgmt->cmds_succeeded + rmgmt->cmds_failed)) {
-			free_rcomm_mgmt = 1;
-		}
-
-		MTX_UNLOCK(&rmgmt->mtx);
-
-		if (free_rcomm_mgmt)
-			free_rcommon_mgmt_cmd(rmgmt);
+		success = timeout_wait_for_response(spec, rmgmt, wait_time, last, NULL);
 
 		if (success != sent) {
 			spec->quiesce = 0;
@@ -2321,17 +2345,7 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	}
 
 	free_rcomm_mgmt = 0;
-	MTX_LOCK(&rcomm_mgmt->mtx);
-	success = timeout_wait_for_command(spec, rcomm_mgmt, wait_time, last);
-
-	rcomm_mgmt->caller_gone = 1;
-	if (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_succeeded + rcomm_mgmt->cmds_failed)) {
-		free_rcomm_mgmt = 1;
-	}
-	MTX_UNLOCK(&rcomm_mgmt->mtx);
-
-	if (free_rcomm_mgmt)
-		free_rcommon_mgmt_cmd(rcomm_mgmt);
+	success = timeout_wait_for_response(spec, rcomm_mgmt, wait_time, last, NULL);
 
 	if (success >= cf) {
 		r = true;
