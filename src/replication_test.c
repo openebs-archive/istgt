@@ -29,6 +29,7 @@
 #include "replication.h"
 #include "istgt_integration.h"
 #include "replication_misc.h"
+#include "snaplist_test.h"
 
 cstor_conn_ops_t cstor_ops = {
 	.conn_listen = replication_listen,
@@ -66,6 +67,7 @@ uint64_t write_ios;
 int replica_quorum_state = 0;
 char replica_id[REPLICA_ID_LEN];
 uint64_t replication_factor = 0;
+bool snap_list_error = false;
 
 static void
 sig_handler(int sig)
@@ -342,14 +344,25 @@ send_mgmt_ack(int fd, zvol_op_code_t opcode, void *buf, char *replica_ip,
 		iovec[1].iov_len = sizeof (zvol_op_stat_t);
 		iovec_count = 2;
 	}  else if (opcode == ZVOL_OPCODE_SNAP_LIST) {
-		const char *dummy = "{\"snapshot\":[{\"name\":\"snap0\",\"properties\":{\"logicalreferenced\":6144,\"compressratio\":100,\"used\":0}}]}";
-		snap_details = malloc(strlen(dummy) + sizeof (*snap_details));
-		snap_details->data_len = strlen(dummy);
-		memcpy(snap_details->data, dummy, snap_details->data_len);
+		const char *dummy_snap_data;
+		if (strchr((char *) buf, '@') == NULL) {
+			dummy_snap_data = ALL_SNAP_DATA;
+		} else {
+			dummy_snap_data = SNAP_DATA;
+		}
+		snap_details = malloc(strlen(dummy_snap_data) + sizeof (*snap_details));
+		memset(snap_details, 0, strlen(dummy_snap_data) + sizeof (*snap_details));
+		snap_details->data_len = strlen(dummy_snap_data);
+		memcpy(snap_details->data, dummy_snap_data, snap_details->data_len);
+
 		snap_details->zvol_guid = replica_port;
+
+		if (snap_list_error)
+			snap_details->error = ENOENT;
+
 		iovec[1].iov_base = snap_details;
-		iovec[1].iov_len = sizeof (*snap_details) + strlen(dummy);
-		mgmt_ack_hdr->len = sizeof (*snap_details) + strlen(dummy);
+		iovec[1].iov_len = sizeof (*snap_details) + strlen(dummy_snap_data);
+		mgmt_ack_hdr->len = sizeof (*snap_details) + strlen(dummy_snap_data);
 		iovec_count = 2;
 	} else if (opcode == ZVOL_OPCODE_RESIZE) {
 		mgmt_ack_hdr->len = 0;
@@ -474,6 +487,7 @@ usage(void)
 	printf(" -t delay in response in seconds\n");
 	printf(" -s delay while forming the management connectioin and Rebuild respone in seconds\n");
 	printf(" -u unique replica identifier(replica ID)\n");
+	printf(" -l send error on snapshot list\n");
 }
 
 
@@ -514,7 +528,7 @@ main(int argc, char **argv)
 
 	memset(replica_id, 0, REPLICA_ID_LEN);
 
-	while ((ch = getopt(argc, argv, "i:p:I:P:V:n:e:s:t:u:drq")) != -1) {
+	while ((ch = getopt(argc, argv, "i:p:I:P:V:n:e:s:t:u:drql")) != -1) {
 		switch (ch) {
 			case 'i':
 				strncpy(ctrl_ip, optarg, sizeof(ctrl_ip));
@@ -564,6 +578,9 @@ main(int argc, char **argv)
 			case 'u':
 				strcpy(replica_id, optarg);
 				check |= 1 << 6;
+				break;
+			case 'l':
+				snap_list_error = true;
 				break;
 			default:
 				usage();

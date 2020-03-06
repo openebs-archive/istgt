@@ -17,6 +17,7 @@ CONTROLLER_PORT="6060"
 REPLICATION_FACTOR=3
 CONSISTTENCY_FACTOR=2
 IOPING="ioping"
+SNAP_DATA_FILE=src/snaplist_test.h
 
 CURDIR=$PWD
 
@@ -1908,7 +1909,114 @@ run_io_timeout_test()
 	rm -rf ${replica1_vdev::-1}*
 }
 
+verify_snap_list_response()
+{
+	status=$1
+
+	expected_asnap=$(cat  $SNAP_DATA_FILE  |grep ALL_SNAP_DATA -w |awk -F ' ' '{print $3}' | sed 's/\\//g' |tail -c +2 |head -c -2 | jq -S  -M -c -r '.snapshot[]')
+	expected_snap=$(cat  $SNAP_DATA_FILE  |grep SNAP_DATA -w |awk -F ' ' '{print $3}' | sed 's/\\//g' |tail -c +2 |head -c -2 | jq -S  -M -c -r '.snapshot[]')
+
+	expected_asnap=$(echo $expected_asnap | sed 's/} {/},{/g')
+	expected_snap=$(echo $expected_snap | sed 's/} {/},{/g')
+
+	echo "Checking for all snapshot info"
+	ares=$($ISTGTCONTROL -q snaplist vol1)
+	rvalue=$?
+	if [ $status -ne $rvalue ]; then
+		echo "snaplist failed.. expected return value $status, got $rvalue"
+		exit 1
+	fi
+	if [ $status -eq 0 ]; then
+		asnap=$(echo $ares |jq -S  -M  -r '.snapshots[0].snapshot' -c  |tr -d ']' |tr -d '[')
+		diff <(echo "$asnap") <(echo "$expected_asnap")
+		if [ $? -ne 0 ]; then
+			echo "mismatch in snap_list response for all snapshot"
+			echo $asnap
+			echo "====="
+			echo $expected_asnap
+			exit 1
+		fi
+	fi
+
+	echo "Checking for specific snapshot info"
+	sres=$($ISTGTCONTROL -q snaplist vol1@213)
+	rvalue=$?
+	if [ $status -ne $rvalue ]; then
+		echo "snaplist failed.. expected return value $status, got $rvalue"
+		exit 1
+	fi
+
+	if [ $status -eq 0 ]; then
+		snap=$(echo $sres |jq -S  -M  -r '.snapshots[0].snapshot' -c  |tr -d ']' |tr -d '[')
+		diff <(echo "$snap") <(echo "$expected_snap")
+		if [ $? -ne 0 ]; then
+			echo "mismatch in snap_list response for specific snapshot"
+			echo $snap
+			echo "====="
+			echo $expected_snap
+		exit 1
+		fi
+	fi
+}
+
+run_snapshot_list_test()
+{
+	local replica1_port="6161"
+	local replica2_port="6162"
+	local replica3_port="6163"
+	local replica1_id="6161"
+	local replica2_id="6162"
+	local replica3_id="6163"
+	local replica1_ip="127.0.0.1"
+	local replica2_ip="127.0.0.1"
+	local replica3_ip="127.0.0.1"
+
+	setup_test_env
+
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V "/tmp/test_vol1" -u "$replica1_id" -q  &
+	replica1_pid=$!
+
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V "/tmp/test_vol2" -u "$replica2_id" -q  &
+	replica2_pid=$!
+
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica3_ip" -P "$replica3_port" -V "/tmp/test_vol3" -u "$replica3_id" -q &
+	replica3_pid=$!
+	sleep 15
+
+	# snapshot list should not fail
+	verify_snap_list_response 0
+
+	pkill -9 -P $replica1_pid
+
+	# snapshot list should not fail
+	verify_snap_list_response 0
+
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V "/tmp/test_vol1" -u "$replica1_id" -q  -l &
+	replica1_pid=$!
+	sleep 2
+
+	# snapshot list should not fail
+	verify_snap_list_response 0
+
+	pkill -9 -P $replica2_pid
+
+	# snapshot list should fail
+	verify_snap_list_response 1
+
+	pkill -9 -P $replica3_pid
+
+	kill -SIGKILL $replica1_pid
+	kill -SIGKILL $replica2_pid
+	kill -SIGKILL $replica3_pid
+
+	cleanup_test_env
+
+	ps -auxwww
+	ps -o pid,ppid,command
+}
+
 run_lu_rf_test
+run_snapshot_list_test
 run_replica_connection_test
 run_scaleup_scaledown_test
 run_quorum_test

@@ -1966,6 +1966,10 @@ handle_snap_list_response(replica_t *replica, void *resp_data, mgmt_cmd_t *mgmt_
 		rcomm_mgmt->cmds_succeeded++;
 	}
 
+	if (snap_details->error)
+		REPLICA_ERRLOG("replica (%lu) returns error(%d) for snap_list\n",
+		    replica->zvol_guid, snap_details->error);
+
 	if ((rcomm_mgmt->caller_gone == 1) &&
 	    (rcomm_mgmt->cmds_sent == (rcomm_mgmt->cmds_failed + rcomm_mgmt->cmds_succeeded)))
 		delete = true;
