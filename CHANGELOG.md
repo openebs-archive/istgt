@@ -1,3 +1,19 @@
+v1.8.0-RC2/ 2020-03-13
+=======================
+
+**No changes since v1.8.0-RC2**
+
+v1.8.0-RC1/ 2020-03-05
+=======================
+
+* fix(resize): add resize test cases when replicas are in different states([#311](https://github.com/openebs/istgt/pull/311),
+  [@mittachaitu](https://github.com/mittachaitu))
+
+v1.7.0/ 2020-02-15
+=======================
+
+**No changes since v1.7.0-RC1**
+
 v1.7.0-RC1/ 2020-02-05
 ========================
 
