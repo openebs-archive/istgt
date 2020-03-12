@@ -1992,6 +1992,7 @@ run_io_timeout_test()
 		if [ $? -ne 0 ]; then
 			exit 1
 		fi
+		cat $iopinglog
 		latency=`awk -F ' '  '{print $6}' $iopinglog`
 		# ioping gives latency in usec for raw output
 		latency=$(( $latency / 1000000 ))
