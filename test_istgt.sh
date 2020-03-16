@@ -1989,13 +1989,14 @@ run_io_timeout_test()
 
 		ps -aux | grep istgt
 		iopinglog=`mktemp`
-		$IOPING -c 1 -B -WWW /dev/$device_name > $iopinglog
+		$IOPING -c 3 -B -WWW /dev/$device_name > $iopinglog
 		if [ $? -ne 0 ]; then
 			exit 1
 		fi
+		cat $iopinglog
 		latency=`awk -F ' '  '{print $6}' $iopinglog`
 		# ioping gives latency in usec for raw output
-		latency=$(( $latency / 1000000 ))
+		latency=$(( $latency / 1000000000 ))
 		echo "got latency $latency"
 		cat $iopinglog
 		if [ $latency -lt $injected_latency ]; then
@@ -2005,7 +2006,7 @@ run_io_timeout_test()
 
 		# Test to verify disconnection of replica if delay from replica is more than maxiowait
 		$ISTGTCONTROL maxiowait 5
-		$IOPING  -c 1 -B -WWW /dev/$device_name > $iopinglog
+		$IOPING  -c 3 -B -WWW /dev/$device_name > $iopinglog
 		wait $replica1_pid
 		if [ $? -eq 0 ]; then
 			echo "IO timeout test failed"
@@ -2027,7 +2028,7 @@ run_io_timeout_test()
 		sleep 2
 
 		# Test to verify volume status if all replica have delay more than maxiowait
-		$IOPING  -c 1 -B -WWW /dev/$device_name > $iopinglog
+		$IOPING  -c 3 -B -WWW /dev/$device_name > $iopinglog
 		if [ $? -eq 0 ]; then
 			echo "IO timeout test failed"
 			exit 1

@@ -1,7 +1,6 @@
 language: c
 sudo: required
-dist: trusty
-group: edge
+dist: bionic
 services:
   - docker
 before_install:
