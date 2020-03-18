@@ -2,7 +2,7 @@
 # This Dockerfile builds cstor istgt container running istgt from istgt base image
 #
 
-FROM openebs/cstor-ubuntu:xenial-20190515
+FROM openebs/cstor-ubuntu:bionic-20200219
 RUN apt-get update; exit 0
 RUN apt-get -y install rsyslog
 RUN apt-get -y install curl tcpdump dnsutils net-tools iputils-ping gdb
