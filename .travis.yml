@@ -28,3 +28,7 @@ script:
     - travis_wait 60 sudo bash ./test_istgt.sh || travis_terminate 1;
     - pwd
     - ./build_image.sh
+notifications:
+  email:
+    recipients:
+    - sai.chaithanya@mayadata.io
