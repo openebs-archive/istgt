@@ -8,16 +8,11 @@ run_istgt ()
 	local drf
 	local known_replica1_details
 
-	if [ $# -eq 1 ]; then
-		volume_size=$1
-	else
-		volume_size=10g
-	fi
-
 	[ ! -z $DESIRED_REPLICATION_FACTOR ] && drf=$DESIRED_REPLICATION_FACTOR || drf=3
 	[ ! -z $REPLICATION_FACTOR ] && rf=$REPLICATION_FACTOR || rf=3
 	[ ! -z $CONSISTENCY_FACTOR ] && cf=$CONSISTENCY_FACTOR || cf=2
 	[ ! -z "$KNOWN_REPLICA1_DETAILS" ] && known_replica1_details="$KNOWN_REPLICA1_DETAILS" || known_replica1_details=""
+	[ ! -z "$VOLUME_SIZE" ] && volume_size="$VOLUME_SIZE" || volume_size=5G
 
 	ulimit -c unlimited
 	rm -rf core
