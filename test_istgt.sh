@@ -239,13 +239,13 @@ write_data()
 setup_test_env() {
 	rm -f /tmp/test_vol*
 	mkdir -p /mnt/store
-	## We are doing resize to 7G
-	truncate -s 7G /tmp/test_vol1 /tmp/test_vol2 /tmp/test_vol3 $1
+	## We are doing multiple resizes
+	truncate -s 10G /tmp/test_vol1 /tmp/test_vol2 /tmp/test_vol3 $1
 	logout_of_volume
 	sudo killall -9 istgt
 	sudo killall -9 replication_test
 	touch $INTEGRATION_TEST_LOGFILE
-	start_istgt 5G
+	start_istgt
 }
 
 cleanup_test_env() {
@@ -985,6 +985,141 @@ run_replica_connection_test ()
 	rm -rf ${replica1_vdev::-1}*
 }
 
+## wait_for_no_of_replicas will wait and return if specified no.of replias are
+## connected to it or else it returns error. It accepts replica_count as first
+## argument
+wait_for_no_of_replicas ()
+{
+	local replica_count=$1
+	local retry_cnt=5
+
+	for (( i = 0; i < $retry_cnt; i++ )) do
+		connected_replica_cnt=$(get_connected_replica_count)
+		if [ $connected_replica_cnt -eq $replica_count ]; then
+			break
+		fi
+		sleep 1
+	done
+	if [ $connected_replica_cnt -ne $replica_count ]; then
+		echo "Disconnected the replica: $replica3_id but still connected replica count is $connected_replica_cnt"
+		exit 1
+	fi
+}
+
+# run_resize_test will test the resize functionality when replicas are not in healthy state
+run_resize_test ()
+{
+	local replica1_port="6161"
+	local replica2_port="6162"
+	local replica3_port="6163"
+	local replica1_id="6161"
+	local replica2_id="6162"
+	local replica3_id="6163"
+	local replica_ip="127.0.0.1"
+	local replica1_vdev="/tmp/test_vol1"
+	local replica2_vdev="/tmp/test_vol2"
+	local replica3_vdev="/tmp/test_vol3"
+	local CONF_FILE="/usr/local/etc/istgt/istgt.conf"
+	local current_size=""
+
+
+	DESIRED_REPLICATION_FACTOR=3
+	REPLICATION_FACTOR=3
+	CONSISTENCY_FACTOR=2
+	VOLUME_SIZE=1G
+
+	echo "[Test Started] Resize of volume when replicas are not in Healthy state"
+	setup_test_env
+
+	local vol_name=$(cat $CONF_FILE | grep TargetName | awk '{print $2}')
+	local new_size=2
+	$ISTGTCONTROL resize $vol_name "${new_size}G"
+	if [ $? -ne 0 ]
+	then
+		echo "Failed to resize the volume from ${VOLUME_SIZE} to  ${new_size}G"
+		exit 1
+	fi
+
+	echo "Test resize when all the replicas are in Degraded state"
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica_ip" -P "$replica1_port" -V $replica1_vdev -u "$replica1_id" -q &
+	replica1_pid=$!
+	sleep 2	#Replica will take some time to make successful connection to target
+
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica_ip" -P "$replica2_port" -V $replica2_vdev -u "$replica2_id" -q &
+	replica2_pid=$!
+	sleep 2
+
+	# As long as we are not running any IOs we can use the same vdev file
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica_ip" -P "$replica3_port" -V $replica3_vdev -u "$replica3_id" -q &
+	replica3_pid=$!
+	sleep 2
+
+	login_to_volume "$CONTROLLER_IP:3260"
+	sleep 10
+	device_name=$(get_scsi_disk)
+
+	## Verify updated size
+	disk_size=$(lsblk | grep $device_name |awk -F ' ' '{print $4+0}')
+	if [ $disk_size -ne $new_size ]; then
+		echo "LUN resize failed"
+		echo "Failed to resize the volume from ${VOLUME_SIZE} to  ${new_size}G"
+		exit 1
+	fi
+
+	## Check whether all replicas are in degraded state or not
+	cmd="$ISTGTCONTROL -q REPLICA vol1 | jq '.\"volumeStatus\"[0].\"replicaStatus\"[].Mode' | grep -w Degraded"
+	cnt=$(eval $cmd | wc -l)
+	if [ $cnt -ne $REPLICATION_FACTOR ]; then
+		echo "run_resize_test: Replicas are just now connected and all should be in degraded state"
+		exit 1
+	fi
+
+	## When all the replicas are in degraded state
+	verify_resize_command $device_name
+
+	## Disconnect one replica and trigger resize. Resize should succeed
+	pkill -9 -P $replica3_pid
+	wait_for_no_of_replicas 2
+
+	## When only two replicas are connected out of 3
+	verify_resize_command $device_name
+
+	## verify resize only when 1 replica is connected
+	pkill -9 -P $replica2_pid
+	wait_for_no_of_replicas 1
+
+	current_size=$(lsblk | grep $device_name |awk -F ' ' '{print $4+0}')
+	new_size=$(( $current_size + 1 ))
+
+	## Resize only when one replica is connected
+	$ISTGTCONTROL resize $vol_name "${new_size}G"
+	if [ $? -ne 0 ]
+	then
+		echo "Failed to resize the volume from ${current_size}G to  ${new_size}G"
+		exit 1
+	fi
+
+	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica_ip" -P "$replica2_port" -V $replica2_vdev -u "$replica2_id" -q &
+	replica2_pid=$!
+	sleep 2
+
+	sudo iscsiadm -m node -R
+	current_size=$(lsblk | grep $device_name |awk -F ' ' '{print $4+0}')
+	if [ $current_size -ne $new_size ]; then
+		echo "Resize failed when one replica is connected"
+	fi
+
+	logout_of_volume
+
+	echo "[Test Completed] Resize of volume when replicas are not in Healthy state"
+	## Unset the volume size
+	VOLUME_SIZE=""
+	pkill -9 -P $replica1_pid
+	pkill -9 -P $replica2_pid
+	stop_istgt
+	rm -rf ${replica1_vdev::-1}*
+}
+
 # run_quorum_test is used to test by connecting n Quorum replicas and m Non Quorum replicas
 run_quorum_test()
 {
@@ -1308,19 +1443,19 @@ verify_resize_command()
 	vol_name=$(cat $CONF_FILE | grep TargetName | awk '{print $2}')
 
 	$ISTGTCONTROL resize "${vol_name}invalid" "${new_size}G"
-	if [ $? -eq 0 ]; then echo"resize should fail due to invalid volume name"; exit 1; fi
+	if [ $? -eq 0 ]; then echo "resize should fail due to invalid volume name"; exit 1; fi
 
 	$ISTGTCONTROL resize ${vol_name} "${lower_size}G"
-	if [ $? -eq 0 ]; then echo"resize should fail due to lower size than current"; exit 1; fi
+	if [ $? -eq 0 ]; then echo "resize should fail due to lower size than current"; exit 1; fi
 
 	$ISTGTCONTROL resize ${vol_name} ${invalid_bs}
-	if [ $? -eq 0 ]; then echo"resize should fail due to invalid block size"; exit 1; fi
+	if [ $? -eq 0 ]; then echo "resize should fail due to invalid block size"; exit 1; fi
 
 	$ISTGTCONTROL resize ${vol_name}
-	if [ $? -eq 0 ]; then echo"resize should fail due to invalid arguments"; exit 1; fi
+	if [ $? -eq 0 ]; then echo "resize should fail due to invalid arguments"; exit 1; fi
 
 	$ISTGTCONTROL resize ${vol_name} "${old_size}G"
-	if [ $? -ne 0 ]; then echo"Failed to resize volume with same size"; exit 1; fi
+	if [ $? -ne 0 ]; then echo "Failed to resize volume with same size"; exit 1; fi
 
 	$ISTGTCONTROL resize $vol_name "${new_size}G"
 	if [ $? -ne 0 ]
@@ -1437,7 +1572,7 @@ data_integrity_with_unknown_replica()
 	fi
 
 	## Checking the read IO's with quorum and non-quorum replicas
-	sudo dd if=$device_name of=/dev/null bs=4k count=100
+	sudo dd if=/dev/$device_name of=/dev/null bs=4k count=100
 	if ps -p $replica3_pid > /dev/null 2>&1
 	then
 		echo "Passed the read IO test on non-quorum"
@@ -1853,13 +1988,14 @@ run_io_timeout_test()
 
 		ps -aux | grep istgt
 		iopinglog=`mktemp`
-		$IOPING -c 1 -B -WWW /dev/$device_name > $iopinglog
+		$IOPING -c 3 -B -WWW /dev/$device_name > $iopinglog
 		if [ $? -ne 0 ]; then
 			exit 1
 		fi
+		cat $iopinglog
 		latency=`awk -F ' '  '{print $6}' $iopinglog`
 		# ioping gives latency in usec for raw output
-		latency=$(( $latency / 1000000 ))
+		latency=$(( $latency / 1000000000 ))
 		echo "got latency $latency"
 		cat $iopinglog
 		if [ $latency -lt $injected_latency ]; then
@@ -1869,7 +2005,7 @@ run_io_timeout_test()
 
 		# Test to verify disconnection of replica if delay from replica is more than maxiowait
 		$ISTGTCONTROL maxiowait 5
-		$IOPING  -c 1 -B -WWW /dev/$device_name > $iopinglog
+		$IOPING  -c 3 -B -WWW /dev/$device_name > $iopinglog
 		wait $replica1_pid
 		if [ $? -eq 0 ]; then
 			echo "IO timeout test failed"
@@ -1891,7 +2027,7 @@ run_io_timeout_test()
 		sleep 2
 
 		# Test to verify volume status if all replica have delay more than maxiowait
-		$IOPING  -c 1 -B -WWW /dev/$device_name > $iopinglog
+		$IOPING  -c 3 -B -WWW /dev/$device_name > $iopinglog
 		if [ $? -eq 0 ]; then
 			echo "IO timeout test failed"
 			exit 1
@@ -1912,6 +2048,7 @@ run_lu_rf_test
 run_replica_connection_test
 run_scaleup_scaledown_test
 run_quorum_test
+run_resize_test
 data_integrity_with_unknown_replica
 run_non_quorum_replica_errored_test
 run_data_integrity_test

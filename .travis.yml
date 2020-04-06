@@ -1,7 +1,6 @@
 language: c
 sudo: required
-dist: trusty
-group: edge
+dist: bionic
 services:
   - docker
 
@@ -47,3 +46,7 @@ script:
       fi
     - pwd
     - ./build_image.sh
+notifications:
+  email:
+    recipients:
+    - sai.chaithanya@mayadata.io
