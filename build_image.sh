@@ -14,7 +14,7 @@ if [ "${ARCH}" = "x86_64" ]; then
 elif [ "${ARCH}" = "aarch64" ]; then
 	./configure --enable-replication --build=arm-linux
 else
-	echo "Unusable architecture: ${ARCH}"
+	echo "Unsupported architecture: ${ARCH}"
 	exit 1
 fi
 make clean
