@@ -1,3 +1,20 @@
+v1.9.0 / 2020-04-14
+======================
+
+* feat(build): enable auto build for arm64 binaries([#310](https://github.com/openebs/istgt/pull/310),
+  [@shubham](https://github.com/shubham14bajpai))
+
+v1.9.0-RC2 / 2020-04-11
+=======================
+
+**No changes since v1.9.0-RC1**
+
+v1.9.0-RC1 / 2020-04-07
+========================
+
+* feat(build): enable auto build for arm64 binaries([#310](https://github.com/openebs/istgt/pull/310),
+  [@shubham](https://github.com/shubham14bajpai))
+
 v1.8.0 / 2020-03-14
 ===================
 
@@ -7,7 +24,7 @@ v1.8.0 / 2020-03-14
 v1.8.0-RC2 / 2020-03-12
 =======================
 
-**No changes since v1.8.0-RC2**
+**No changes since v1.8.0-RC1**
 
 v1.8.0-RC1 / 2020-03-05
 =======================
