@@ -76,9 +76,9 @@ service rsyslog start
 
 if [ -z $test_env ]
 then
-	/usr/local/bin/istgt -R 20
+	IO_MAX_WAIT_TIME=120 /usr/local/bin/istgt -R 20
 else
-	QueueDepth=5 Luworkers=9 /usr/local/bin/istgt -R 20
+	IO_MAX_WAIT_TIME=120 QueueDepth=5 Luworkers=9 /usr/local/bin/istgt -R 20
 fi
 
 child=$!
