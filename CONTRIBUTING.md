@@ -19,7 +19,7 @@ When filing an issue, make sure to answer the following questions:
 2. What did you expect to see?
 3. What did you see instead?
 4. How to reproduce it?
-5. Logs of cstor-istgt and cstor-volume-mgmt containerss of cstor target pod.
+5. Logs of cstor-istgt and cstor-volume-mgmt containers of cstor target pod.
 
 ## Steps to Contribute
 
@@ -29,11 +29,11 @@ istgt is an Apache 2.0 Licensed project and all your commits should be signed wi
 * Find an issue to work on or create a new issue. The issues are maintained at [openebs/istgt](https://github.com/openebs/istgt/issues). You can pick up from a list of [good-first-issues](https://github.com/openebs/openebs/labels/good%20first%20issue).
 * Claim your issue by commenting your intent to work on it to avoid duplication of efforts.
 * Fork the repository on GitHub.
-* Create a branch from where you want to base your work from replication branch.
+* Create a branch from where you want to base your work (usually from replication branch).
 * Make your changes. If you are working on code contributions, please see [Setting up the Development Environment](#setting-up-your-development-environment).
 * Commit your changes by making sure the commit messages convey the need and notes about the commit.
 * Please make sure than your code is aligned with the standard mentioned at [code-standard](code-standard.md).
-* Verify that your changes passes `sudo bash test_istgt.sh`
+* Verify that your changes passes `./cstyle.pl <modified_file_name>` and `sudo bash test_istgt.sh`
 * Push your changes to the branch in your fork of the repository.
 * Submit a pull request to the original repository. See [Pull Request checklist](#pull-request-checklist).
 
@@ -88,7 +88,6 @@ All submissions, including submissions by project members, require review. We us
 * We are using following label for PR work-flow:
    - **Hold-Merge** - if PR needs to complete few activities.
    - **Hold-Review** - if PR is under Work In Progress, not yet covered all the scenarios.
-   - **Release-note** - if PR required to mention in release note.
 
 * Maintainer needs to make sure that appropriate milestone and project tracker is assigned to the PR.
 
