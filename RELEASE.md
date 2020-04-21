@@ -32,7 +32,7 @@ Images are published at following location:
 https://quay.io/repository/openebs/cstor-istgt?tab=tags
 https://hub.docker.com/r/openebs/cstor-istgt/tags
 
-Once a release is created, update the release description with the change log mentioned in `changelog/v1.9.x`. Once the change logs are updated in release, repo owner needs to create a PR to `master` with the following details:
+Once a release is created, update the release description with the change log mentioned in `changelog/v1.9.x`. Once the change logs are updated in release, repo owner needs to create a PR to `replication` with the following details:
 1. update the changelog from `changelog/v1.9.x` to `istgt/CHANGELOG.md`
 2. If release is not a RC tag then PR should include the changes to remove `changelog/v1.9.x` folder.
 3. If release is a RC tag then PR should include the changes to remove the changelog from `changelog/v1.9.x` which are already mentioned in `istgt/CHANGELOG.md` as part of step number 1.

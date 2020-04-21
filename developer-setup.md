@@ -3,8 +3,18 @@
 
 ## Prerequisites
 
-* You have c and c++ compliers of version >= 6.
-* Install following libraries libssl-dev, open-iscsi and libjson-c-dev to compile and run the test cases.
+* Since istgt works with Linux only, you need to have a working Linux machine
+* Make sure that GCC, with version >6 is installed in your system.
+  To install GCC, run
+  ```sh
+  sudo apt-get install --yes -qq gcc-6 g++-6
+  ```
+* Make sure that you have installed following packages in your system:
+    - libssl-dev, open-iscsi, libjson-c-dev, ioping, jq and net-tools
+  To install the above packages, run
+  ```sh
+  sudo apt-get install libssl-dev open-iscsi libjson-c-dev ioping jq net-tools
+  ```
 
 ## Initial Setup
 
@@ -18,12 +28,17 @@
 Create your clone:
 
 ```sh
+# Note: Here user= your github profile name
 git clone https://github.com/$user/istgt.git
+
 # Configure remote upstream
+cd istgt
 git remote add upstream https://github.com/openebs/istgt.git
-# Never push to upstream master
+
+# Never push to upstream replication
 git remote set-url --push upstream no_push
-# Confirm that your remotes make sense:
+
+# Confirm that your remotes make sense
 git remote -v
 ```
 
@@ -37,9 +52,6 @@ Do ./cstyle.pl <filename with path>
 
 * To build the istgt binary
 ```sh
-
-sudo apt-get install libssl-dev docker.io
-sudo apt-get install autoconf
 ./autogen.sh
 ./configure --enable-replication
 make cstyle
@@ -48,7 +60,6 @@ make
 ```
 
 * To build the docker image
-
 ```sh
 ./build_image.sh
 ```

@@ -21,10 +21,28 @@ When filing an issue, make sure to answer the following questions:
 4. How to reproduce it?
 5. Logs of cstor-istgt and cstor-volume-mgmt containers of cstor target pod.
 
+#### For maintainers
+* We are using labeling for the issue to track it more effectively. The following are valid labels for the issue.
+   - **Bug** - If the issue is a **bug to existing feature**
+   - **Enhancement** - If the issue is a **feature request**
+   - **Maintenance**  - If the issue is not related to production code. **build, document or test related issues fall into this category**
+   - **Question** - If the issue is about **querying information about how the product or build works, or internal of product**.
+   - **Documentation** - If the issue is about **tracking the documentation work for the feature**. This label should not be applied to the issue of a bug in documentations.
+   - **Good First Issue** - If the issue is easy to get started with. Please make sure that the issue should be ideal for beginners to dive into the codebase.
+   - **Design** - if the issue **needs a design decision prior to code implementation**
+   - **Duplicate** - if the issue is **duplicate of another issue**
+
+* We are using the following labels for issue work-flow:
+   - **Backlog** - if the issue has **not been planned for current release cycle**
+   - **Release blocker** - if the issue is **blocking the release**
+   - **Priority: high** - issue with this label **should be resolved as quickly as possible**
+   - **Priority: low** - issue with this label **won’t have the immediate focus of the core team**
+
+**If you want to introduce a new label then you need to raise a PR to update this document with the new label details.**
+
 ## Steps to Contribute
 
 istgt is an Apache 2.0 Licensed project and all your commits should be signed with Developer Certificate of Origin. See [Sign your work](./code-standard.md).
-
 
 * Find an issue to work on or create a new issue. The issues are maintained at [openebs/istgt](https://github.com/openebs/istgt/issues). You can pick up from a list of [good-first-issues](https://github.com/openebs/openebs/labels/good%20first%20issue).
 * Claim your issue by commenting your intent to work on it to avoid duplication of efforts.
@@ -88,6 +106,9 @@ All submissions, including submissions by project members, require review. We us
 * We are using following label for PR work-flow:
    - **Hold-Merge** - if PR needs to complete few activities.
    - **Hold-Review** - if PR is under Work In Progress, not yet covered all the scenarios.
+   - **Release blocker** - if PR is created for the issue having label **Release blocker**
+   - **Priority: high** - if PR is created for the issue having label **Priority: high**
+   - **Priority: low** - if PR is created for the issue having label **Priority: low**
 
 * Maintainer needs to make sure that appropriate milestone and project tracker is assigned to the PR.
 

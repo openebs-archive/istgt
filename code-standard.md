@@ -15,7 +15,8 @@ You can also use git [aliases](https://git-scm.com/book/tr/v2/Git-Basics-Git-Ali
 
 ## Verifying code style
 
-Verify the lint errors by running `make cstyle` or `./cstyle.pl <filename_with_path>`.
+All the new changes to this repository need to follow coding style as per `./cstyle.pl` script. But, due to many legacy files which are not having coding style as per ./cstyle.pl script, make cstyle fails.
+So, verify the lint errors by running `./cstyle.pl <filename_with_path>` on the modified files to make sure that new modifications meets the coding style.
 
 ## Adding a changelog
 If PR is about adding a new feature or bug fixes then Authors of the PR are expected to add a changelog file with their pull request. This changelog file should be a new file created under `changelogs/unreleased` folder. Name of this file must be in in `pr_number-username` format and contents of the file should be the one liner text which explain the feature or bug fix.
