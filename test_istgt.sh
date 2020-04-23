@@ -2006,6 +2006,18 @@ run_io_timeout_test()
 		# Test to verify disconnection of replica if delay from replica is more than maxiowait
 		$ISTGTCONTROL maxiowait 5
 		$IOPING  -c 3 -B -WWW /dev/$device_name > $iopinglog
+		cmd="grep -ch 'changing IO max wait time from 60 to 120' $LOGFILE"
+		val=$(eval $cmd)
+		if [ $val -eq 0 ]; then
+			echo "IO timeout not set as per IO_MAX_WAIT_TIME env setting"
+			exit 1
+		fi
+		cmd="grep -ch 'Max IO wait time updated to 5 seconds from 120 seconds' $LOGFILE"
+		val=$(eval $cmd)
+		if [ $val -eq 0 ]; then
+			echo "IO timeout not set as per istgtcontrol maxiowait setting"
+			exit 1
+		fi
 		wait $replica1_pid
 		if [ $? -eq 0 ]; then
 			echo "IO timeout test failed"

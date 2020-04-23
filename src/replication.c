@@ -2009,6 +2009,7 @@ int istgt_lu_destroy_snapshot(spec_t *spec, char *snapname)
 		send_replica_snapshot(spec, replica, 0, snapname, ZVOL_OPCODE_SNAP_DESTROY, NULL);
 	TAILQ_FOREACH(replica, &spec->non_quorum_rq, r_non_quorum_next)
 		send_replica_snapshot(spec, replica, 0, snapname, ZVOL_OPCODE_SNAP_DESTROY, NULL);
+	REPLICA_LOG("snap %s destroy\n", snapname);
 	return true;
 }
 
@@ -2149,8 +2150,8 @@ int istgt_lu_create_snapshot(spec_t *spec, char *snapname, int io_wait_time, int
 	spec->quiesce = 0;
 	MTX_UNLOCK(&spec->rq_mtx);
 
-	REPLICA_LOG("snap create ioseq: %lu resp: %s\n", io_seq,
-	    (r == true) ? "success" : "failed");
+	REPLICA_LOG("snap %s create ioseq: %lu resp: %s successcnt: %d\n", snapname, io_seq,
+	    (r == true) ? "success" : "failed/timedout", success);
 	return (ret);
 }
 
@@ -4348,6 +4349,17 @@ initialize_replication()
 		return -1;
 	}
 	clock_gettime(CLOCK_MONOTONIC_COARSE, &istgt_start_time);
+	const char *s_max_wait_time = getenv("IO_MAX_WAIT_TIME");
+	int max_wait_time= 0;
+	if (s_max_wait_time != NULL)
+		max_wait_time = (int)strtol(s_max_wait_time,
+		    NULL, 10);
+	if (max_wait_time > 30) {
+		ISTGT_NOTICELOG("changing IO max wait time "
+		    "from %ld to %d", io_max_wait_time,
+		    max_wait_time);
+		io_max_wait_time = max_wait_time;
+	}
 	return 0;
 }
 
