@@ -45,7 +45,7 @@ fi
 # set the tag CI (fixed) and build tags.
 BUILD_TAG="${CURRENT_BRANCH}-${BUILD_ID}"
 CI_TAG="${CURRENT_BRANCH}-ci"
-if [ ${CURRENT_BRANCH} = "replication" ]; then
+if [ "${CURRENT_BRANCH}" = "replication" ]; then
   CI_TAG="ci"
 fi
 
@@ -60,9 +60,9 @@ function TagAndPushImage() {
   #via environment variable. Default is no tag.
   #Example suffix could be "-debug" of "-dev"
   IMAGE_URI="${REPO}:${TAG}${TAG_SUFFIX}";
-  sudo docker tag ${IMAGEID} ${IMAGE_URI};
+  sudo docker tag "${IMAGEID}" "${IMAGE_URI}";
   echo " push ${IMAGE_URI}";
-  sudo docker push ${IMAGE_URI};
+  sudo docker push "${IMAGE_URI}";
 }
 
 if [ ! -z "${DNAME}" ] && [ ! -z "${DPASS}" ];
@@ -82,7 +82,11 @@ then
     # Push with different tags if tagged as a release
     # When github is tagged with a release, then Travis will
     # set the release tag in env TRAVIS_TAG
-    TagAndPushImage "${IMAGE_REPO}" "${TRAVIS_TAG}"
+    # Trim the `v` from the TRAVIS_TAG if it exists
+    # Example: v1.10.0 maps to 1.10.0
+    # Example: 1.10.0 maps to 1.10.0
+    # Example: v1.10.0-custom maps to 1.10.0-custom
+    TagAndPushImage "${IMAGE_REPO}" "${TRAVIS_TAG#v}"
     TagAndPushImage "${IMAGE_REPO}" "latest"
   fi;
 else
@@ -102,7 +106,8 @@ then
     # Push with different tags if tagged as a release
     # When github is tagged with a release, then Travis will
     # set the release tag in env TRAVIS_TAG
-    TagAndPushImage "quay.io/${IMAGE_REPO}" "${TRAVIS_TAG}"
+    # Trim the `v` from the TRAVIS_TAG if it exists
+    TagAndPushImage "quay.io/${IMAGE_REPO}" "${TRAVIS_TAG#v}"
     TagAndPushImage "quay.io/${IMAGE_REPO}" "latest"
   fi;
 else
