@@ -94,7 +94,7 @@ rc_code=0
 #Github returns 201 Created on successfully creating a new release
 #201 means the request has been fulfilled and has resulted in one 
 #or more new resources being created.
-if [ $response_code != "201" && [[ $(is_release_already_exist $TEMP_RESP_FILE) -ne 0 ]]; then
+if [ $response_code != "201" ] && [[ $(is_release_already_exist $TEMP_RESP_FILE) -ne 0 ]]; then
     echo "Error: Unable to create release. See below response for more details"
     #The GitHub error response is pretty well formatted.
     #Printing the body gives all the details to fix the errors
