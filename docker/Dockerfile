@@ -3,11 +3,22 @@
 #
 
 FROM openebs/cstor-ubuntu:bionic-20200219
-RUN apt-get update; exit 0
-RUN apt-get -y install rsyslog
-RUN apt-get -y install curl tcpdump dnsutils net-tools iputils-ping gdb
-RUN apt-get -y install apt-utils libssl-dev libjson-c-dev libjemalloc-dev
-RUN apt-get -y install apt-file && apt-file update
+
+RUN apt-get clean && \
+    apt-get update && \
+    apt-get install -y \
+    rsyslog \
+    curl \
+    tcpdump \
+    dnsutils \
+    net-tools \
+    iputils-ping \
+    gdb \
+    apt-utils \
+    libssl-dev \
+    libjson-c-dev \
+    libjemalloc-dev \
+    apt-file && apt-file update
 
 RUN mkdir -p /usr/local/etc/bkpistgt
 RUN mkdir -p /usr/local/etc/istgt
