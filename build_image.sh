@@ -20,19 +20,19 @@ pwd
 # Determine the arch/os we're building for
 ARCH=$(uname -m)
 
- ###make clean
- ###bash autogen.sh
- ###
- ###if [ "${ARCH}" = "x86_64" ]; then
- ###	./configure --enable-replication
- ###elif [ "${ARCH}" = "aarch64" ]; then
- ###	./configure --enable-replication --build=arm-linux
- ###else
- ###	echo "Unsupported architecture: ${ARCH}"
- ###	exit 1
- ###fi
- ###make clean
- ###make -j4
+make clean
+bash autogen.sh
+
+if [ "${ARCH}" = "x86_64" ]; then
+	./configure --enable-replication
+elif [ "${ARCH}" = "aarch64" ]; then
+	./configure --enable-replication --build=arm-linux
+else
+	echo "Unsupported architecture: ${ARCH}"
+	exit 1
+fi
+make clean
+make -j4
 
 # The images can be pushed to any docker/image registeries
 # like docker hub, quay. The registries are specified in 
