@@ -1,3 +1,20 @@
+v1.10.0 / 2020-05-15
+======================
+
+* feat(env): IO_MAX_WAIT_TIME env setting for replica timeout([#324](https://github.com/openebs/istgt/pull/324),
+  [@vishnuitta](https://github.com/vishnuitta))
+
+v1.10.0-RC2 / 2020-05-13
+==========================
+
+**No changes since v1.10.0-RC1**
+
+v1.10.0-RC1 / 2020-05-08
+==========================
+
+* feat(env): IO_MAX_WAIT_TIME env setting for replica timeout([#324](https://github.com/openebs/istgt/pull/324),
+  [@vishnuitta](https://github.com/vishnuitta))
+
 v1.9.0 / 2020-04-14
 ======================
 
