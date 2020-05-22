@@ -32,7 +32,7 @@ else
 	exit 1
 fi
 make clean
-make
+make -j$(nproc)
 
 # The images can be pushed to any docker/image registeries
 # like docker hub, quay. The registries are specified in 
