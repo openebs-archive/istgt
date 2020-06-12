@@ -1,3 +1,20 @@
+v1.11.0 / 2020-06-13
+=========================
+
+* chore(build): optimize container image size([#333](https://github.com/openebs/istgt/pull/333),
+  [@mittachaitu](https://github.com/mittachaitu))
+
+v1.11.0-RC2 / 2020-06-12
+==========================
+
+**No changes since v1.11.0-RC1**
+
+v1.11.0-RC1 / 2020-06-09
+==========================
+
+* chore(build): optimize container image size([#333](https://github.com/openebs/istgt/pull/333),
+  [@mittachaitu](https://github.com/mittachaitu))
+
 v1.10.0 / 2020-05-15
 ======================
 
