@@ -48,7 +48,7 @@ script:
       sudo bash ./print_debug_info.sh &
       ## If test takes more than 45 minutes then print tail logs in /tmp/istgt.log and terminate travis
       ## Having 60minutes is causing travis timeout and not able to know easily which test is failed
-      travis_wait 45 sudo bash ./test_istgt.sh || sudo tail -500 /tmp/istgt.log || travis_terminate 1;
+      travis_wait 45 sudo bash ./test_istgt.sh || ( sudo tail -500 /tmp/istgt.log && travis_terminate 1 );
       fi
     - pwd
     - ./build_image.sh
