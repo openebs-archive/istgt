@@ -91,7 +91,7 @@ cp src/istgtcontrol.conf ./docker
 sudo docker version
 sudo docker build --help
 
-curl https://raw.githubusercontent.com/openebs/charts/gh-pages/scripts/release/buildscripts/push > ./docker/push
+curl --fail https://raw.githubusercontent.com/openebs/charts/gh-pages/scripts/release/buildscripts/push > ./docker/push
 chmod +x ./docker/push
 
 cd docker && \
