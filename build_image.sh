@@ -96,7 +96,7 @@ chmod +x ./docker/push
 
 cd docker && \
  sudo docker build -f ${DOCKERFILE} -t ${REPO_NAME}:ci ${DBUILD_ARGS} . && \
- IMAGE_REPO=${REPO_NAME} ./push && \
+ DIMAGE=${REPO_NAME} ./push && \
  cd ..
 
 rm -rf ./docker/istgt*
