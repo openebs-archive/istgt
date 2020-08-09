@@ -96,8 +96,12 @@ chmod +x ./docker/push
 
 cd docker && \
  sudo docker build -f ${DOCKERFILE} -t ${REPO_NAME}:ci ${DBUILD_ARGS} . && \
- IMAGE_REPO=${REPO_NAME} ./push && \
+ DIMAGE=${REPO_NAME} ./push && \
  cd ..
+if [ $? -ne 0 ]; then
+ echo "Failed to run push script"
+ exit 1
+fi
 
 rm -rf ./docker/istgt*
 
