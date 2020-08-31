@@ -40,7 +40,7 @@
 #include "istgt_misc.h"
 #include "ring_mempool.h"
 #include "istgt_scsi.h"
-#include "assert.h"
+#include "assertion.h"
 
 uint64_t io_max_wait_time = 60;
 struct timespec io_queue_time[ISTGT_MAX_NUM_LUWORKERS];
@@ -4431,8 +4431,8 @@ initialize_volume(spec_t *spec, int replication_factor, int consistency_factor, 
 	TAILQ_INIT(&spec->rwaitq);
 	TAILQ_INIT(&spec->identified_replica);
 
-	VERIFY(replication_factor > 0);
-	VERIFY(consistency_factor > 0);
+	VERIFY_COND(replication_factor > 0);
+	VERIFY_COND(consistency_factor > 0);
 
 	init_mempool(&spec->rcommon_deadlist, rcmd_mempool_count, 0, 0,
 	    "rcmd_mempool", NULL, NULL, NULL, false);

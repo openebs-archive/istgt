@@ -30,7 +30,7 @@
 #include "istgt_misc.h"
 #include "istgt_proto.h"
 #include "replication_misc.h"
-#include "assert.h"
+#include "assertion.h"
 
 typedef struct cargs_s {
 	spec_t *spec;
@@ -297,7 +297,7 @@ snapshot_thread(void *args)
 		    wait_time);
 		timesdiff(CLOCK_MONOTONIC_RAW, cmd_start, now, cmd_time);
 
-		VERIFY(cmd_time.tv_sec <= (wait_time + 1));
+		VERIFY_COND(cmd_time.tv_sec <= (wait_time + 1));
 
 		verify_snap_response(ret);
 

@@ -24,7 +24,7 @@
 #endif
 
 #include "ring_mempool.h"
-#include "assert.h"
+#include "assertion.h"
 
 int
 init_mempool(rte_smempool_t *obj, size_t count, size_t mem_size,

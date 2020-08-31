@@ -30,6 +30,7 @@ install:
     # without replication code is to make sure that replication feature
     # related code doesn't break the existing target code.
     - ./configure
+    - make check_license
     - make
     - make clean
     - ARCH=$(uname -m)

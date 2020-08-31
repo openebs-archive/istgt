@@ -25,7 +25,7 @@
 #include "replication.h"
 #include "replication_misc.h"
 #include "ring_mempool.h"
-#include "assert.h"
+#include "assertion.h"
 
 #define	READ_PARTIAL	1
 #define	READ_COMPLETED	2
