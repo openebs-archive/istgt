@@ -28,7 +28,7 @@
 #include <replication_misc.h>
 #include <istgt_integration.h>
 #include <zrepl_prot.h>
-#include <assert.h>
+#include "assertion.h"
 
 #define	REPL_TEST_ERROR		-1
 #define	REPL_TEST_RESTART	-2
