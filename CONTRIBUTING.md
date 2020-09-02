@@ -51,7 +51,7 @@ istgt is an Apache 2.0 Licensed project and all your commits should be signed wi
 * Make your changes. If you are working on code contributions, please see [Setting up the Development Environment](#setting-up-your-development-environment).
 * Commit your changes by making sure the commit messages convey the need and notes about the commit.
 * Please make sure than your code is aligned with the standard mentioned at [code-standard](code-standard.md).
-* Verify that your changes passes `./cstyle.pl <modified_file_name>` and `sudo bash test_istgt.sh`
+* Verify that your changes passes `make check_license`, `./cstyle.pl <modified_file_name>` and `sudo bash test_istgt.sh`
 * Push your changes to the branch in your fork of the repository.
 * Submit a pull request to the original repository. See [Pull Request checklist](#pull-request-checklist).
 
