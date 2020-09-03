@@ -32,7 +32,7 @@
 #include "replication.h"
 #include "istgt_integration.h"
 #include "replication_misc.h"
-#include "assert.h"
+#include "assertion.h"
 
 __thread char tinfo[50] = {0};
 int g_trace_flag = 0;
@@ -296,11 +296,11 @@ verify_snap_response(int res)
 {
 	MTX_LOCK(&snap_resp.snap_resp_mtx);
 	if (!res) {
-		VERIFY(snap_resp.success_cnt < snap_resp.required_resp);
+		VERIFY_COND(snap_resp.success_cnt < snap_resp.required_resp);
 	} else {
-		VERIFY(snap_resp.success_cnt >= snap_resp.required_resp);
+		VERIFY_COND(snap_resp.success_cnt >= snap_resp.required_resp);
 		if (res == 2) {
-			VERIFY(snap_resp.prep_success_cnt);
+			VERIFY_COND(snap_resp.prep_success_cnt);
 		}
 	}
 	snap_resp.required_resp = 0;
