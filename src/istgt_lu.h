@@ -58,9 +58,11 @@
 #endif
 
 #ifdef __linux__
-#if defined(__aarch64__)
+#if defined(__aarch64__) || defined(__arm__)
 #include <aarch64-linux-gnu/sys/queue.h>
-#else
+#elif defined(__ppc64__) || defined(__powerpc64__)
+#include <powerpc64le-linux-gnu/sys/queue.h>
+#elif defined(__x86_64__) || defined(__i686__)
 #include <x86_64-linux-gnu/sys/queue.h>
 #endif
 #endif

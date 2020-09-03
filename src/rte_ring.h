@@ -104,6 +104,9 @@ extern "C" {
 #elif defined(__aarch64__) || defined(__arm__)
 #include "arch/arm/rte_pause.h"
 #include "arch/arm/rte_atomic.h"
+#elif defined(__ppc64__) || defined(__powerpc64__)
+#include "arch/ppc/rte_pause.h"
+#include "arch/ppc/rte_atomic.h"
 #endif
 
 #define RTE_TAILQ_RING_NAME "RTE_RING"

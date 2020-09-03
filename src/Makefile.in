@@ -51,6 +51,7 @@ replication_header = replication.h  istgt_integration.h zrepl_prot.h 	\
 			arch/x86/rte_atomic_64.h arch/x86/rte_atomic_32.h arch/x86/rte_atomic.h arch/x86/rte_pause.h	\
 			arch/arm/rte_pause.h arch/arm/rte_pause_32.h arch/arm/rte_pause_64.h arch/arm/rte_atomic.h arch/arm/rte_atomic_32.h arch/arm/rte_atomic_64.h	\
 			generic/rte_atomic.h generic/rte_pause.h	\
+			arch/ppc/rte_pause.h arch/ppc/rte_atomic.h \
 			rte_common.h rte_memory.h  rte_pause.h  rte_ring.h rte_mempool.h
 
 target_source = @target_source_files@
