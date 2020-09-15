@@ -26,7 +26,7 @@ DBUILD_DATE=$(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
 
 # Specify the docker arg for repository url
 ifeq (${DBUILD_REPO_URL}, )
-  DBUILD_REPO_URL="https://github.com/openebs/upgrade"
+  DBUILD_REPO_URL="https://github.com/openebs/istgt"
   export DBUILD_REPO_URL
 endif
 
