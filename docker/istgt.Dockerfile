@@ -15,9 +15,10 @@
 FROM ubuntu:18.04 as build
 
 RUN mkdir -p istgt
+
 COPY . istgt/
 
-RUN ./istgt/docker/build
+RUN ./istgt/docker/build.sh
 
 #Final
 FROM openebs/cstor-ubuntu:bionic-20200219
