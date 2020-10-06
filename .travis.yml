@@ -99,4 +99,8 @@ script:
 notifications:
   email:
     recipients:
+    - ashutosh.kumar@mayadata.io
+    - kiran.mova@mayadata.io
+    - prateek.pandey@mayadata.io
     - sai.chaithanya@mayadata.io
+    - shubham.bajpai@mayadata.io
