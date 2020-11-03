@@ -14,15 +14,6 @@
 
 set -ex
 
-apt-get update -qq
-apt-get install --yes -qq gcc-6 g++-6 gdb wget dh-autoreconf
-apt-get install --yes libssl-dev open-iscsi libjson-c-dev ioping jq net-tools
-# use gcc-6 by default
-unlink /usr/bin/gcc && ln -s /usr/bin/gcc-6 /usr/bin/gcc
-unlink /usr/bin/g++ && ln -s /usr/bin/g++-6 /usr/bin/g++
-
-cd istgt
-
 # Determine the arch/os we're building for
 ARCH=$(uname -m)
 

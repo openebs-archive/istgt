@@ -68,7 +68,7 @@ else
 endif
 
 # Name of the multiarch image for istgt
-DOCKERX_IMAGE_ISTGT:=${IMAGE_ORG}/istgt:${TAG}
+DOCKERX_IMAGE_ISTGT:=${IMAGE_ORG}/cstor-istgt:${TAG}
 
 # COMPONENT names for image builds
 ISTGT:=istgt
@@ -92,4 +92,4 @@ docker.buildx.istgt: docker.buildx
 
 .PHONY: buildx.push.istgt
 buildx.push.istgt:
-	BUILDX=true DIMAGE=${IMAGE_ORG}/istgt ./build/push
+	BUILDX=true DIMAGE=${IMAGE_ORG}/istgt ./docker/buildxpush.sh

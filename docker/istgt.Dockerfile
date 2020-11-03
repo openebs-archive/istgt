@@ -14,14 +14,20 @@
 
 FROM ubuntu:18.04 as build
 
-RUN mkdir -p istgt
+WORKDIR istgt
+COPY . .
 
-COPY . istgt/
+RUN apt-get update -qq && \
+    apt-get install --yes -qq gcc-6 g++-6 gdb wget dh-autoreconf libssl-dev open-iscsi libjson-c-dev ioping jq net-tools && \
+    unlink /usr/bin/gcc && ln -s /usr/bin/gcc-6 /usr/bin/gcc && \
+    unlink /usr/bin/g++ && ln -s /usr/bin/g++-6 /usr/bin/g++
 
-RUN ./istgt/docker/build.sh
+RUN ./docker/build.sh
+
+RUN chmod +x docker/entrypoint-istgtimage.sh
 
 #Final
-FROM openebs/cstor-ubuntu:bionic-20200219
+FROM ubuntu:bionic-20200219
 
 RUN apt-get update && \
     apt-get install -y \
@@ -40,17 +46,6 @@ RUN apt-get update && \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-RUN mkdir -p /usr/local/etc/bkpistgt
-RUN mkdir -p /usr/local/etc/istgt
-COPY --from=build istgt/docker/istgt istgt/docker/istgtcontrol /usr/local/bin/
-COPY --from=build istgt/docker/istgt.conf istgt/docker/istgtcontrol.conf /usr/local/etc/bkpistgt/
-RUN touch /usr/local/etc/bkpistgt/auth.conf
-RUN touch /usr/local/etc/bkpistgt/logfile
-
-COPY --from=build istgt/docker/entrypoint-istgtimage.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/entrypoint-istgtimage.sh
-
-ARG ARCH
 ARG DBUILD_DATE
 ARG DBUILD_REPO_URL
 ARG DBUILD_SITE_URL
@@ -61,6 +56,17 @@ LABEL org.label-schema.schema-version="1.0"
 LABEL org.label-schema.build-date=$DBUILD_DATE
 LABEL org.label-schema.vcs-url=$DBUILD_REPO_URL
 LABEL org.label-schema.url=$DBUILD_SITE_URL
+
+RUN mkdir -p /usr/local/etc/bkpistgt
+RUN mkdir -p /usr/local/etc/istgt
+
+COPY --from=build istgt/docker/istgt istgt/docker/istgtcontrol /usr/local/bin/
+COPY --from=build istgt/docker/istgt.conf istgt/docker/istgtcontrol.conf /usr/local/etc/bkpistgt/
+
+RUN touch /usr/local/etc/bkpistgt/auth.conf
+RUN touch /usr/local/etc/bkpistgt/logfile
+
+COPY --from=build istgt/docker/entrypoint-istgtimage.sh /usr/local/bin/
 
 ENTRYPOINT entrypoint-istgtimage.sh
 EXPOSE 3260 6060
