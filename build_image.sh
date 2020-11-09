@@ -71,7 +71,7 @@ fi
 DBUILD_ARGS="--build-arg DBUILD_DATE=${DBUILD_DATE} --build-arg DBUILD_REPO_URL=${DBUILD_REPO_URL} --build-arg DBUILD_SITE_URL=${DBUILD_SITE_URL} --build-arg ARCH=${ARCH}"
 
 if [ "${ARCH}" = "x86_64" ]; then
-	REPO_NAME="$IMAGE_ORG/cstor-istgt"
+	REPO_NAME="$IMAGE_ORG/cstor-istgt-amd64"
 	DOCKERFILE="Dockerfile"
 elif [ "${ARCH}" = "aarch64" ]; then
 	REPO_NAME="$IMAGE_ORG/cstor-istgt-arm64"
