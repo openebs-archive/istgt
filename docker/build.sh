@@ -30,7 +30,7 @@ else
 	exit 1
 fi
 make clean
-make -j4;
+make -j$(nproc);
 
 cp src/istgt ./docker
 cp src/istgtcontrol ./docker
