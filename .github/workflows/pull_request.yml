@@ -18,7 +18,7 @@ on:
   pull_request:
     branches:
       # on pull requests to master and release branches
-      - master
+      - replication
       - 'v*'
 
 jobs:
