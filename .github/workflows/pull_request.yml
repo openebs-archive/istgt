@@ -16,6 +16,10 @@ name: ci
 
 on:
   pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - 'changelogs/**'
+      - '*.md'
     branches:
       # on pull requests to master and release branches
       - replication
@@ -36,9 +40,23 @@ jobs:
           path: '.'
           pattern: '*.sh'
 
+  tests:
+    needs: ['lint']
+    runs-on: ubuntu-18.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      
+      - name: Build
+        run: ./ci/build.sh
+
+      - name: Running tests
+        run: ./ci/test.sh
+
   istgt:
     runs-on: ubuntu-latest
-    needs: ['lint']
+    needs: ['tests']
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -54,7 +72,12 @@ jobs:
         with:
           version: v0.5.1
 
-      - name: Build Image
-        env:
-          IMG_RESULT: cache
-        run: make -f Makefile.buildx.mk docker.buildx.istgt
+      - name: Build & Push Image
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          file: ./docker/istgt.Dockerfile
+          push: false
+          platforms: linux/amd64, linux/arm64
+          tags: |
+            openebs/cstor-istgt:ci
