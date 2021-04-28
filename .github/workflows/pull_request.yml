@@ -72,7 +72,7 @@ jobs:
         with:
           version: v0.5.1
 
-      - name: Build & Push Image
+      - name: Build
         uses: docker/build-push-action@v2
         with:
           context: .

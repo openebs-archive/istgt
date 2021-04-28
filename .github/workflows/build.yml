@@ -41,7 +41,6 @@ jobs:
           pattern: '*.sh'
 
   tests:
-    if: ${{ (github.event.ref_type != 'tag') }}
     needs: ['lint']
     runs-on: ubuntu-18.04
     timeout-minutes: 120
