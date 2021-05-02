@@ -98,3 +98,17 @@ jobs:
             DBUILD_DATE=${{ steps.date.outputs.DATE }}
             DBUILD_REPO_URL=https://github.com/openebs/istgt
             DBUILD_SITE_URL=https://openebs.io
+
+  downstream-tagging:
+    runs-on: ubuntu-latest
+    needs: ['istgt']
+    steps:
+      - name: Downstream tagging
+        uses: akhilerm/openebs-release-mgmt@v1.1.0
+        with:
+          tag-name: ${{ github.ref }}
+          body: 'Release created from istgt'
+          repo: |
+            cstor-operators
+          # GR_TOKEN secret is the access token to perform github releases
+          github-token: ${{ secrets.GR_TOKEN }}
