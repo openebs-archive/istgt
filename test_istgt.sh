@@ -454,8 +454,9 @@ run_read_consistency_test ()
 		return
 	fi
 
-	write_data 0 41943040 512 "/dev/$device_name" $file_name
+	write_data 0 41943040 4096 "/dev/$device_name" $file_name
 	sync
+	$ISCSIADM -m session -P 3
 
 	write_data 0 10485760 4096 "/dev/$device_name" $file_name &
 	w_pid=$!
@@ -463,6 +464,7 @@ run_read_consistency_test ()
 	pkill -9 -P $replica1_pid
 	wait $w_pid
 	sync
+	$ISCSIADM -m session -P 3
 
 	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica1_ip" -P "$replica1_port" -V $replica1_vdev -u "$replica1_id" -q -d &
 	replica1_pid=$!
@@ -473,6 +475,7 @@ run_read_consistency_test ()
 	pkill -9 -P $replica2_pid
 	wait $w_pid
 	sync
+	$ISCSIADM -m session -P 3
 
 	start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica2_ip" -P "$replica2_port" -V $replica2_vdev -u "$replica2_id" -q -d &
 	replica2_pid=$!
