@@ -166,6 +166,7 @@ static int istgt_append_sess(CONN_Ptr conn, uint64_t isid, uint16_t tsih, uint16
 static void istgt_remove_conn(CONN_Ptr conn);
 static int istgt_iscsi_drop_all_conns(CONN_Ptr conn);
 static int istgt_iscsi_drop_old_conns(CONN_Ptr conn);
+static int istgt_iscsi_is_existing_conn_alive(CONN_Ptr conn);
 static void ioctl_call(CONN_Ptr, enum iscsi_log);
 
 // _verb_stat SCSIstat_0min[SCSI_ARYSZ]
@@ -1964,6 +1965,28 @@ istgt_iscsi_op_login(CONN_Ptr conn, ISCSI_PDU_Ptr pdu)
 				goto response;
 			}
 			MTX_UNLOCK(&conn->istgt->mutex);
+
+			/* check existing live connections other than current
+			 * initiator. If any of existing connection found live then
+			 * reject the current connection request
+			 */
+			ISTGT_TRACELOG(ISTGT_TRACE_ISCSI,
+				"checking existing live connections "
+				"other than from initiator=%s isid=%"PRIx64", tsih=%u, cid=%u\n",
+				conn->initiator_name, isid, tsih, cid);
+			rc = istgt_iscsi_is_existing_conn_alive(conn);
+			if (rc == 1) {
+				ISTGT_ERRLOG("existing connection already alive "
+					"rejecting current connection initiator=%s isid=%"PRIx64" tsih=%u, cid=%u: ",
+					conn->initiator_name, isid, tsih, cid);
+				/* Can't include in session */
+				StatusClass = 0x02;	/* Initiator Error */
+				StatusDetail = 0x08;
+				goto response;
+			}
+			ISTGT_TRACELOG(ISTGT_TRACE_ISCSI,
+				"No active connections found from different initiators\n");
+
 
 			/* check existing session */
 			ISTGT_TRACELOG(ISTGT_TRACE_ISCSI,
@@ -7176,6 +7199,42 @@ istgt_iscsi_drop_all_conns(CONN_Ptr conn)
 			}
 		}
 	}
+	MTX_UNLOCK(&g_conns_mutex);
+	return (0);
+}
+
+// istgt_iscsi_is_existing_conn_alive returns 1 if
+// there are any existing connections that are alive
+// else return 0
+static int
+istgt_iscsi_is_existing_conn_alive(CONN_Ptr conn)
+{
+	CONN_Ptr existing_conn = NULL;
+	int i;
+
+	MTX_LOCK(&g_conns_mutex);
+	for (i = 0; i <= g_max_connidx; i++) {
+		existing_conn = g_conns[i];
+		if (existing_conn == NULL)
+			continue;
+		if (existing_conn == conn)
+			continue;
+		// If new connection is totaly different from existing connection
+		// then check the status of existing connection if it is active
+		// return true
+		if (strcasecmp(conn->initiator_port, existing_conn->initiator_port) != 0
+			&& strcasecmp(conn->target_name, existing_conn->target_name) == 0
+			&& strcasecmp(conn->initiator_name, existing_conn->initiator_name) != 0) {
+			if (existing_conn->state == CONN_STATE_RUNNING) {
+				ISTGT_ERRLOG("connection is already alive from existing initiator=%s (%s) "
+					"on Target(%s)", existing_conn->initiator_name,
+					existing_conn->initiator_addr, existing_conn->target_name);
+				MTX_UNLOCK(&g_conns_mutex);
+				return (1);
+			}
+		}
+	}
+
 	MTX_UNLOCK(&g_conns_mutex);
 	return (0);
 }
