@@ -5956,7 +5956,7 @@ worker(void *arg)
 // #endif
 
 	events.data.fd = conn->sock;
-	events.events = EPOLLIN;
+	events.events = EPOLLIN | EPOLLHUP | EPOLLRDHUP | EPOLLERR;;
 	rc = epoll_ctl(epfd, EPOLL_CTL_ADD, conn->sock, &events);
 	if (rc == -1) {
 		ISTGT_ERRLOG("epoll_ctl() failed\n");
@@ -6505,6 +6505,12 @@ istgt_create_conn(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock, struct sockaddr 
 	rc = istgt_set_sendtimeout(conn->sock, conn->timeout * 1000);
 	if (rc != 0) {
 		ISTGT_ERRLOG("istgt_set_sendtimeo() failed\n");
+		goto error_return;
+	}
+
+	rc = set_socket_keepalive(conn->sock);
+	if (rc) {
+		ISTGT_ERRLOG("set_socket_keepalive() failed for fd(%d) error: %d\n", conn->sock, rc);
 		goto error_return;
 	}
 

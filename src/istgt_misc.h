@@ -48,6 +48,8 @@
 #include <stddef.h>
 #include <stdio.h>
 
+#include "replication_misc.h"
+
 #define ISTGT_USE_MACRO_EXPAND
 
 #ifdef ISTGT_USE_MACRO_EXPAND
