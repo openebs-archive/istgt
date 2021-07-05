@@ -48,7 +48,9 @@
 #include <stddef.h>
 #include <stdio.h>
 
+#ifdef REPLICATION
 #include "replication_misc.h"
+#endif
 
 #define ISTGT_USE_MACRO_EXPAND
 

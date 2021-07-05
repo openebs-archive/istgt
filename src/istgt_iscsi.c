@@ -6508,11 +6508,13 @@ istgt_create_conn(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock, struct sockaddr 
 		goto error_return;
 	}
 
+#ifdef REPLICATION
 	rc = set_socket_keepalive(conn->sock);
 	if (rc) {
 		ISTGT_ERRLOG("set_socket_keepalive() failed for fd(%d) error: %d\n", conn->sock, rc);
 		goto error_return;
 	}
+#endif
 
 	rc = pipe(conn->task_pipe);
 	if (rc != 0) {
@@ -7206,6 +7208,7 @@ istgt_iscsi_drop_all_conns(CONN_Ptr conn)
 	return (0);
 }
 
+#ifdef REPLICATION
 // istgt_iscsi_get_existing_live_conn returns existing live
 // connection other than current connection
 // Note: This function should be called by taking lock on g_conns_mutex
@@ -7238,6 +7241,7 @@ istgt_iscsi_get_existing_live_conn(CONN_Ptr conn)
 	}
 	return NULL;
 }
+#endif
 
 static int
 istgt_iscsi_drop_old_conns(CONN_Ptr conn)
