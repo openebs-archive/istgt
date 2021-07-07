@@ -62,4 +62,8 @@ ssize_t istgt_readline_socket(int sock, char *buf, size_t size, char *tmp,
     size_t tmpsize, int *tmpidx, int *tmpcnt, int timeout);
 ssize_t istgt_writeline_socket(int sock, const char *buf, int timeout);
 
+#ifdef REPLICATION
+int istgt_set_usertimeout(int s, int msec);
+#endif
+
 #endif /* ISTGT_SOCK_H */

@@ -383,6 +383,22 @@ istgt_set_sendtimeout(int s, int msec)
 	return (0);
 }
 
+#ifdef REPLICATION
+int
+istgt_set_usertimeout(int s, int msec)
+{
+	struct timeval tv;
+	int rc;
+
+	tv.tv_sec = msec / 1000;
+	tv.tv_usec = (msec % 1000) * 1000;
+	rc = setsockopt(s, SOL_TCP, TCP_USER_TIMEOUT, &tv, sizeof (tv));
+	if (rc != 0)
+		return (-1);
+	return (0);
+}
+#endif
+
 int
 istgt_set_recvlowat(int s, int nbytes)
 {

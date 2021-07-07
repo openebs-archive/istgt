@@ -5956,7 +5956,7 @@ worker(void *arg)
 // #endif
 
 	events.data.fd = conn->sock;
-	events.events = EPOLLIN | EPOLLHUP | EPOLLRDHUP | EPOLLERR;;
+	events.events = EPOLLIN | EPOLLHUP | EPOLLRDHUP | EPOLLERR;
 	rc = epoll_ctl(epfd, EPOLL_CTL_ADD, conn->sock, &events);
 	if (rc == -1) {
 		ISTGT_ERRLOG("epoll_ctl() failed\n");
@@ -6366,7 +6366,7 @@ int
 istgt_create_conn(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock, struct sockaddr *sa, socklen_t salen __attribute__((__unused__)))
 {
 	char buf[MAX_TMPBUF];
-	CONN_Ptr conn, existing_conn;
+	CONN_Ptr conn;
 	int rc;
 	int i;
 
@@ -6390,6 +6390,10 @@ istgt_create_conn(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock, struct sockaddr 
 	conn->MaxOutstandingR2T = 1;
 	conn->FirstBurstLength = DEFAULT_FIRSTBURSTLENGTH;
 	conn->MaxBurstLength = DEFAULT_MAXBURSTLENGTH;
+
+#ifdef REPLICATION
+	conn->tcpUserTimeout = istgt->tcpUserTimeout;
+#endif
 
 	conn->diskIoPending = 0;
 	conn->flagDelayedFree = 0;
@@ -6509,11 +6513,17 @@ istgt_create_conn(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock, struct sockaddr 
 	}
 
 #ifdef REPLICATION
-	rc = set_socket_keepalive(conn->sock);
+	// TCP_USER_TIMEOUT specifies the maximum amount of time in
+	// milliseconds that transmitted data may remain unacknowledged,
+	// or bufferred data may remain untransmitted (due to zero window size)
+	// before TCP will forcibly close the corresponding connection and return
+	// ETIMEDOUT to the application.
+	rc = istgt_set_usertimeout(conn->sock, conn->tcpUserTimeout * 1000);
 	if (rc) {
-		ISTGT_ERRLOG("set_socket_keepalive() failed for fd(%d) error: %d\n", conn->sock, rc);
+		ISTGT_ERRLOG("istgt_set_usertimeout() failed for fd(%d) error: %d\n", conn->sock, rc);
 		goto error_return;
 	}
+	ISTGT_TRACELOG(ISTGT_TRACE_ISCSI, "TCP_USER_TIMEOUT set to %d seconds on fd(%d)\n", conn->tcpUserTimeout, conn->sock);
 #endif
 
 	rc = pipe(conn->task_pipe);
@@ -6606,6 +6616,8 @@ istgt_create_conn(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock, struct sockaddr 
 	MTX_LOCK(&g_conns_mutex);
 
 #ifdef REPLICATION
+	CONN_Ptr existing_conn;
+
 	/* check existing live connections other than current
 	 * initiator. If any of existing connection found live then
 	 * reject the current request
