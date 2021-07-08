@@ -387,12 +387,9 @@ istgt_set_sendtimeout(int s, int msec)
 int
 istgt_set_usertimeout(int s, int msec)
 {
-	struct timeval tv;
 	int rc;
 
-	tv.tv_sec = msec / 1000;
-	tv.tv_usec = (msec % 1000) * 1000;
-	rc = setsockopt(s, SOL_TCP, TCP_USER_TIMEOUT, &tv, sizeof (tv));
+	rc = setsockopt(s, IPPROTO_TCP, TCP_USER_TIMEOUT, &msec, sizeof (msec));
 	if (rc != 0)
 		return (-1);
 	return (0);
