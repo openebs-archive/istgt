@@ -1630,7 +1630,7 @@ istgt_init(ISTGT_Ptr istgt)
 #ifdef REPLICATION
 	int tcpUserTimeoutVal;
 	tcpUserTimeoutVal = istgt_get_intval(sp, "TCPUserTimeout");
-	if (tcpUserTimeoutVal < 0) {
+	if (tcpUserTimeoutVal <= 0) {
 		tcpUserTimeoutVal = DEFAULT_TCP_USER_TIMEOUT;
 	}
 	istgt->tcpUserTimeout = tcpUserTimeoutVal;
