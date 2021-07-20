@@ -1627,6 +1627,17 @@ istgt_init(ISTGT_Ptr istgt)
 	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "NopInInterval %d\n",
 	    istgt->nopininterval);
 
+#ifdef REPLICATION
+	int tcpUserTimeoutVal;
+	tcpUserTimeoutVal = istgt_get_intval(sp, "TCPUserTimeout");
+	if (tcpUserTimeoutVal <= 0) {
+		tcpUserTimeoutVal = DEFAULT_TCP_USER_TIMEOUT;
+	}
+	istgt->tcpUserTimeout = tcpUserTimeoutVal;
+	ISTGT_TRACELOG(ISTGT_TRACE_DEBUG, "TCP_USER_TIMEOUT %d\n",
+	    istgt->tcpUserTimeout);
+#endif
+
 	maxr2t = istgt_get_intval(sp, "MaxR2T");
 	if (maxr2t < 0) {
 		maxr2t = DEFAULT_MAXR2T;

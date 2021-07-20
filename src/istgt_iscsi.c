@@ -96,6 +96,7 @@
 #include "istgt_proto.h"
 #include "istgt_scsi.h"
 #include "istgt_queue.h"
+#include "assertion.h"
 
 #include <netinet/in.h>
 
@@ -166,6 +167,7 @@ static int istgt_append_sess(CONN_Ptr conn, uint64_t isid, uint16_t tsih, uint16
 static void istgt_remove_conn(CONN_Ptr conn);
 static int istgt_iscsi_drop_all_conns(CONN_Ptr conn);
 static int istgt_iscsi_drop_old_conns(CONN_Ptr conn);
+static CONN_Ptr istgt_iscsi_get_existing_live_conn(CONN_Ptr conn);
 static void ioctl_call(CONN_Ptr, enum iscsi_log);
 
 // _verb_stat SCSIstat_0min[SCSI_ARYSZ]
@@ -5954,7 +5956,7 @@ worker(void *arg)
 // #endif
 
 	events.data.fd = conn->sock;
-	events.events = EPOLLIN;
+	events.events = EPOLLIN | EPOLLHUP | EPOLLRDHUP | EPOLLERR;
 	rc = epoll_ctl(epfd, EPOLL_CTL_ADD, conn->sock, &events);
 	if (rc == -1) {
 		ISTGT_ERRLOG("epoll_ctl() failed\n");
@@ -6389,6 +6391,10 @@ istgt_create_conn(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock, struct sockaddr 
 	conn->FirstBurstLength = DEFAULT_FIRSTBURSTLENGTH;
 	conn->MaxBurstLength = DEFAULT_MAXBURSTLENGTH;
 
+#ifdef REPLICATION
+	conn->tcpUserTimeout = istgt->tcpUserTimeout;
+#endif
+
 	conn->diskIoPending = 0;
 	conn->flagDelayedFree = 0;
 
@@ -6506,6 +6512,20 @@ istgt_create_conn(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock, struct sockaddr 
 		goto error_return;
 	}
 
+#ifdef REPLICATION
+	// TCP_USER_TIMEOUT specifies the maximum amount of time in
+	// milliseconds that transmitted data may remain unacknowledged,
+	// or bufferred data may remain untransmitted (due to zero window size)
+	// before TCP will forcibly close the corresponding connection and return
+	// ETIMEDOUT to the application.
+	rc = istgt_set_usertimeout(conn->sock, conn->tcpUserTimeout * 1000);
+	if (rc) {
+		ISTGT_ERRLOG("istgt_set_usertimeout() failed for fd(%d) error: %d\n", conn->sock, rc);
+		goto error_return;
+	}
+	ISTGT_TRACELOG(ISTGT_TRACE_ISCSI, "TCP_USER_TIMEOUT set to %d seconds on fd(%d)\n", conn->tcpUserTimeout, conn->sock);
+#endif
+
 	rc = pipe(conn->task_pipe);
 	if (rc != 0) {
 		ISTGT_ERRLOG("pipe() failed\n");
@@ -6594,6 +6614,26 @@ istgt_create_conn(ISTGT_Ptr istgt, PORTAL_Ptr portal, int sock, struct sockaddr 
 	/* register global */
 	rc = -1;
 	MTX_LOCK(&g_conns_mutex);
+
+#ifdef REPLICATION
+	CONN_Ptr existing_conn;
+
+	/* check existing live connections other than current
+	 * initiator. If any of existing connection found live then
+	 * reject the current request
+	 */
+	ISTGT_TRACELOG(ISTGT_TRACE_ISCSI, "checking availability of existing live connections\n");
+	existing_conn = istgt_iscsi_get_existing_live_conn(conn);
+	if (existing_conn != NULL) {
+		ISTGT_ERRLOG("connection is already alive from another initiator(%s) "
+			"on Target(%s) rejecting request from initiator(%s)\n", existing_conn->initiator_addr,
+			existing_conn->target_name, conn->initiator_addr);
+		MTX_UNLOCK(&g_conns_mutex);
+		goto error_return;
+	}
+	ISTGT_TRACELOG(ISTGT_TRACE_ISCSI, "no active connections found from different initiators\n");
+#endif
+
 	for (i = 0; i < g_nconns; i++) {
 		if (g_conns[i] == NULL) {
 			g_conns[i] = conn;
@@ -7179,6 +7219,41 @@ istgt_iscsi_drop_all_conns(CONN_Ptr conn)
 	MTX_UNLOCK(&g_conns_mutex);
 	return (0);
 }
+
+#ifdef REPLICATION
+// istgt_iscsi_get_existing_live_conn returns existing live
+// connection other than current connection
+// Note: This function should be called by taking lock on g_conns_mutex
+CONN_Ptr
+istgt_iscsi_get_existing_live_conn(CONN_Ptr conn)
+{
+	CONN_Ptr existing_conn = NULL;
+	int i;
+
+	ASSERT(MTX_LOCKED(&g_conns_mutex));
+	for (i = 0; i <= g_max_connidx; i++) {
+		existing_conn = g_conns[i];
+		if (existing_conn == NULL)
+			continue;
+		if (existing_conn == conn)
+			continue;
+		// If new connection is totally different from existing connection
+		// then check the status of existing connection if it is active
+		// return true
+		// Note:
+		//	- Here we are assuming initiator will always use same address for
+		// 	  to interact with iSCSI target
+		//	- Initiator name will get populated only after login request so we
+		//	  are depending on IP address
+		if (strcasecmp(conn->initiator_addr,
+			existing_conn->initiator_addr) != 0 &&
+			existing_conn->state == CONN_STATE_RUNNING)  {
+			return existing_conn;
+		}
+	}
+	return NULL;
+}
+#endif
 
 static int
 istgt_iscsi_drop_old_conns(CONN_Ptr conn)

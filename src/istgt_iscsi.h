@@ -338,6 +338,10 @@ typedef struct istgt_conn_t {
 	time_t closetime;
 	int inflight;
 	int sender_waiting;
+
+#ifdef REPLICATION
+	int tcpUserTimeout;
+#endif
 } CONN;
 typedef CONN *CONN_Ptr;
 
