@@ -729,6 +729,47 @@ get_connected_replica_count ()
 	echo "$cnt"
 }
 
+run_login_multiple_times_test ()
+{
+	local replica1_port="6161"
+	local replica1_id="6161"
+	local replica_ip="127.0.0.1"
+	local replica1_vdev="/tmp/test_vol1"
+
+	DESIRED_REPLICATION_FACTOR=1
+	REPLICATION_FACTOR=1
+	CONSISTENCY_FACTOR=1
+	KNOWN_REPLICA1_DETAILS=""
+
+	setup_test_env
+
+    start_replica -i "$CONTROLLER_IP" -p "$CONTROLLER_PORT" -I "$replica_ip" -P "$replica1_port" -V $replica1_vdev -u "$replica1_id" -q &
+	replica2_pid=$!
+	sleep 3
+
+	login_to_volume "$CONTROLLER_IP:3260"
+	sleep 10
+	device_name=$(get_scsi_disk)
+
+	if [ -z "$device_name" ]; then
+		echo "After logging in Device name shouldn't be empty"
+		exit 1
+	fi
+
+	## Logging second time shouldn't cause any harmfull error
+	$ISCSIADM -m discovery -t st -p "$CONTROLLER_IP:3260"
+	$ISCSIADM -m node -l
+	rc=$?
+	if [ $rc -ne 15 ]; then
+		echo "Trying to logging in second time exit code should be 15 but got $rc"
+		exit 1
+	fi
+
+	pkill -9 -P $replica1_pid
+	rm -rf ${replica1_vdev::-1}*
+	stop_istgt
+}
+
 run_scaleup_scaledown_test ()
 {
 	local replica1_port="6161"
@@ -2074,6 +2115,7 @@ run_io_timeout_test()
 }
 
 run_lu_rf_test
+run_login_multiple_times_test
 run_replica_connection_test
 run_scaleup_scaledown_test
 run_quorum_test

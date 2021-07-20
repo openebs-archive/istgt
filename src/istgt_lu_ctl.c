@@ -2444,7 +2444,7 @@ istgt_uctl_cmd_info(UCTL_Ptr uctl)
 					    " MaxBurstLength=%u,"
 					    " MaxRecvDataSegmentLength=%u,"
 					    " InitialR2T=%s, ImmediateData=%s,"
-					    " PendingPDUs=%d\n",
+					    " PendingPDUs=%d, State=%d\n",
 					    uctl->cmd,
 					    conn->id,
 					    conn->initiator_name,
@@ -2467,7 +2467,8 @@ istgt_uctl_cmd_info(UCTL_Ptr uctl)
 							    "Yes" : "No"),
 					    (conn->sess->immediate_data ?
 							    "Yes" : "No"),
-					    conn->pending_pdus.num);
+					    conn->pending_pdus.num,
+					    conn->state);
 					rc = istgt_uctl_writeline(uctl);
 					if (rc != UCTL_CMD_OK) {
 						MTX_UNLOCK(&sess->mutex);
