@@ -125,7 +125,11 @@
 #define DEFAULT_TIMEOUT 60
 #define DEFAULT_NOPININTERVAL 20
 #define DEFAULT_MAXR2T 16
-#define TMF_TIMEOUT 2 
+#define TMF_TIMEOUT 2
+
+#ifdef REPLICATION
+#define DEFAULT_TCP_USER_TIMEOUT 120
+#endif
 
 #define	SEC_IN_NS	(1000000000L)
 #define ISTGT_PG_TAG_MAX 0x0000ffff
@@ -317,6 +321,10 @@ typedef struct istgt_t {
 	int DataSequenceInOrder;
 	int ErrorRecoveryLevel;
 	int OperationalMode;
+
+#ifdef REPLICATION
+	int tcpUserTimeout;
+#endif
 } ISTGT;
 typedef ISTGT *ISTGT_Ptr;
 
