@@ -47,7 +47,7 @@ istgt is an Apache 2.0 Licensed project and all your commits should be signed wi
 * Find an issue to work on or create a new issue. The issues are maintained at [openebs/istgt](https://github.com/openebs/istgt/issues). You can pick up from a list of [good-first-issues](https://github.com/openebs/openebs/labels/good%20first%20issue).
 * Claim your issue by commenting your intent to work on it to avoid duplication of efforts.
 * Fork the repository on GitHub.
-* Create a branch from where you want to base your work (usually from replication branch).
+* Create a branch from where you want to base your work (usually from develop branch).
 * Make your changes. If you are working on code contributions, please see [Setting up the Development Environment](#setting-up-your-development-environment).
 * Commit your changes by making sure the commit messages convey the need and notes about the commit.
 * Please make sure than your code is aligned with the standard mentioned at [code-standard](code-standard.md).
@@ -56,7 +56,7 @@ istgt is an Apache 2.0 Licensed project and all your commits should be signed wi
 * Submit a pull request to the original repository. See [Pull Request checklist](#pull-request-checklist).
 
 ## Pull Request Checklist
-* Rebase to the current replication branch before submitting your pull request.
+* Rebase to the current develop branch before submitting your pull request.
 * Commits should be as small as possible. Each commit should follow the checklist below:
   - For code changes, add tests relevant to the fixed bug or new feature.
   - Pass the compile and tests - includes spell checks, formatting, etc.

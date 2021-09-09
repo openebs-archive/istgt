@@ -37,8 +37,8 @@ set -e
 #For the moment, we will go with making sure the correct
 # branch name is provided as part of the release process.
 if [ -z ${TRAVIS_BRANCH} ] ||
-    [ ${TRAVIS_BRANCH} == "replication" ]; then
-    LIBCSTOR_BUILD_BRANCH="master"
+    [ ${TRAVIS_BRANCH} == "develop" ]; then
+    LIBCSTOR_BUILD_BRANCH="develop"
 else
     LIBCSTOR_BUILD_BRANCH=${TRAVIS_BRANCH}
 fi
