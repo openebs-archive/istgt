@@ -1,16 +1,16 @@
-[![Build Status](https://travis-ci.org/openebs/istgt.svg?branch=replication)](https://travis-ci.org/openebs/istgt)
+[![Build Status](https://github.com/openebs/istgt/actions/workflows/build.yml/badge.svg)](https://github.com/openebs/istgt/actions/workflows/build.yml)
 [![FOSSA Status](https://app.fossa.io/api/projects/git%2Bgithub.com%2Fopenebs%2Fistgt.svg?type=shield)](https://app.fossa.io/projects/git%2Bgithub.com%2Fopenebs%2Fistgt?ref=badge_shield)
 [![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/2738/badge)](https://bestpractices.coreinfrastructure.org/projects/2738)
 [![Slack](https://img.shields.io/badge/chat!!!-slack-ff1493.svg?style=flat-square)](https://kubernetes.slack.com/messages/openebs)
 
 ### Instructions to check cstyle
 ```sh
-Checkout replication branch
+Checkout develop branch
 Do ./cstyle.pl <filename with path>
 ```
 ### Building
 ```bash
-git checkout replication
+git checkout develop
 sudo apt-get install libssl-dev docker.io
 sudo apt-get install autoconf
 ./autogen.sh
