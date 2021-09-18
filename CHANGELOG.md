@@ -1,3 +1,37 @@
+v3.0.0 / 2021-09-17
+===================
+
+* chore(build): update default/build branch from replication to develop ([#359](https://github.com/openebs/istgt/pull/359),[@mittachaitu](https://github.com/mittachaitu))
+
+v3.0.0-RC1 / 2021-09-16
+========================
+
+* chore(build): update default/build branch from replication to develop ([#359](https://github.com/openebs/istgt/pull/359),[@mittachaitu](https://github.com/mittachaitu))
+
+
+v2.12.1 / 2021-09-3
+=======================
+
+* chore(build): update default/build branch from replication to develop ([#359](https://github.com/openebs/istgt/pull/359),[@mittachaitu](https://github.com/mittachaitu))
+
+v2.12.1 / 2021-09-3
+=======================
+
+v2.12.0 / 2021-08-16
+========================
+
+* fix(login): reject current login request if existing one is alive ([#356](https://github.com/openebs/istgt/pull/356),[@mittachaitu](https://github.com/mittachaitu))
+
+v2.12.0-RC2 / 2021-08-13
+========================
+
+**No Changes since v2.12.0-RC2**
+
+v2.12.0-RC1 / 2021-08-10
+========================
+
+* fix(login): reject current login request if existing one is alive ([#356](https://github.com/openebs/istgt/pull/356),[@mittachaitu](https://github.com/mittachaitu))
+
 v2.11.0 / 2021-07-14
 ========================
 
